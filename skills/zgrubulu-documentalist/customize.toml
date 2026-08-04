@@ -1,0 +1,20 @@
+# Métadonnées de l'agent zgrubulu-documentalist.
+#
+# Cet agent est une skill personnelle et portable — pas un agent de module
+# BMad. Il ne dépend d'aucun installeur ni module.yaml ; ce bloc [agent] est
+# conservé par convention (structure standard d'un agent construit avec
+# bmad-agent-builder) mais n'est consommé par aucun installeur ici.
+#
+# Source de vérité : https://github.com/prenouil/agents
+
+[agent]
+code = "zgrubulu-documentalist"
+name = "Documentaliste"
+title = "Documentaliste de Jeu"
+icon = "📜"
+description = "Maintient tous les documents de conception d'un jeu — GDD, brief, narration, UX, PRD, glossaire — écrits, à jour et cohérents entre eux."
+agent_type = "autonomous"
+
+# Pas de surface de personnalisation exposée (activation_steps_*, persistent_facts) :
+# décision prise à la construction, le sanctuaire (memory/) est la seule surface de
+# personnalisation de cet agent. Voir .memlog.md pour la décision.

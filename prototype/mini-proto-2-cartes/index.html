@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Hero Card Game — Mini Proto (2 cartes)</title>
+<style>
+  :root {
+    --bg: #1b1420;
+    --panel: #2a1f33;
+    --accent: #e8b93f;
+    --hp: #d9455f;
+    --energy: #3fb6e8;
+    --ok: #4caf7d;
+    --text: #f1e9f7;
+    --muted: #a996b3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at top, #2e2138, var(--bg));
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px 60px;
+  }
+  h1 { font-size: 1.3rem; margin: 0 0 4px; letter-spacing: .03em; }
+  .subtitle { color: var(--muted); font-size: .85rem; margin-bottom: 20px; text-align: center; }
+
+  .arena {
+    width: min(720px, 100%);
+    background: var(--panel);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 12px 30px rgba(0,0,0,.4);
+  }
+
+  .combatants { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+  .combatant {
+    flex: 1;
+    background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 12px;
+    padding: 14px;
+    text-align: center;
+    position: relative;
+    transition: box-shadow .15s, transform .1s;
+  }
+  .combatant.drop-hover { box-shadow: 0 0 0 3px var(--accent); transform: scale(1.02); }
+  .portrait { font-size: 2.6rem; line-height: 1; margin-bottom: 6px; }
+  .name { font-weight: 600; margin-bottom: 8px; }
+
+  .bar { height: 10px; border-radius: 6px; background: rgba(0,0,0,.35); overflow: hidden; margin-bottom: 4px; }
+  .bar > div { height: 100%; transition: width .3s ease; }
+  .hp-bar > div { background: var(--hp); }
+  .bar-label { font-size: .7rem; color: var(--muted); }
+
+  .energy-pips { display: flex; justify-content: center; gap: 5px; margin-top: 8px; }
+  .pip { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--energy); }
+  .pip.filled { background: var(--energy); }
+
+  .telegraph {
+    margin-top: 10px;
+    font-size: .8rem;
+    background: rgba(232,185,63,.12);
+    border: 1px dashed var(--accent);
+    border-radius: 8px;
+    padding: 6px 8px;
+    color: var(--accent);
+  }
+
+  .dodge-badge {
+    position: absolute;
+    top: -10px;
+    right: -6px;
+    background: var(--ok);
+    color: #08160f;
+    font-size: .65rem;
+    font-weight: 700;
+    padding: 3px 6px;
+    border-radius: 999px;
+    display: none;
+  }
+  .dodge-badge.show { display: block; }
+
+  .log {
+    background: rgba(0,0,0,.25);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: .8rem;
+    color: var(--muted);
+    height: 74px;
+    overflow-y: auto;
+    margin-bottom: 18px;
+  }
+  .log p { margin: 2px 0; }
+  .log p.you { color: var(--energy); }
+  .log p.foe { color: var(--hp); }
+  .log p.sys { color: var(--accent); }
+
+  .hand { display: flex; justify-content: center; gap: 16px; }
+  .card {
+    width: 130px;
+    min-height: 150px;
+    background: linear-gradient(160deg, #3a2a48, #241a2c);
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 12px;
+    padding: 10px;
+    cursor: grab;
+    user-select: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    transition: transform .12s, opacity .15s, box-shadow .12s;
+  }
+  .card:active { cursor: grabbing; }
+  .card:hover:not(.disabled) { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(0,0,0,.35); }
+  .card.disabled { opacity: .35; cursor: not-allowed; }
+  .card.dragging { opacity: .3; }
+  .card .cost {
+    align-self: flex-start;
+    background: var(--energy);
+    color: #04202b;
+    font-weight: 700;
+    font-size: .75rem;
+    border-radius: 50%;
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 6px;
+  }
+  .card .icon { font-size: 1.8rem; margin: 4px 0; }
+  .card .cname { font-weight: 700; font-size: .85rem; margin-bottom: 4px; }
+  .card .cdesc { font-size: .7rem; color: var(--muted); }
+
+  .controls { display: flex; justify-content: center; gap: 10px; margin-top: 18px; }
+  button {
+    background: var(--accent);
+    color: #2b1e08;
+    border: none;
+    font-weight: 700;
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: .85rem;
+  }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.secondary { background: transparent; border: 1px solid var(--muted); color: var(--text); }
+
+  .hint { text-align: center; font-size: .72rem; color: var(--muted); margin-top: 10px; }
+
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.75);
+    display: none; align-items: center; justify-content: center; flex-direction: column;
+  }
+  .overlay.show { display: flex; }
+  .overlay h2 { font-size: 1.6rem; margin-bottom: 6px; }
+  .overlay p { color: var(--muted); margin-bottom: 18px; }
+</style>
+</head>
+<body>
+
+<h1>⚔️ Mini Proto — 2 cartes</h1>
+<p class="subtitle">Teste des trois piliers du brief : énergie individuelle, ennemi qui télégraphie, glisser-déposer.<br>Glisse une carte sur une cible (ou touche l'écran) pour la jouer.</p>
+
+<div class="arena">
+  <div class="combatants">
+    <div class="combatant" id="player-zone">
+      <span class="dodge-badge" id="dodge-badge">ESQUIVE PRÊTE</span>
+      <div class="portrait">🛡️</div>
+      <div class="name">Guerrier</div>
+      <div class="bar hp-bar"><div id="player-hp-bar" style="width:100%"></div></div>
+      <div class="bar-label" id="player-hp-label">20 / 20 PV</div>
+      <div class="energy-pips" id="player-energy"></div>
+    </div>
+
+    <div class="combatant" id="enemy-zone">
+      <div class="portrait">👹</div>
+      <div class="name">Gobelin Maraudeur</div>
+      <div class="bar hp-bar"><div id="enemy-hp-bar" style="width:100%"></div></div>
+      <div class="bar-label" id="enemy-hp-label">15 / 15 PV</div>
+      <div class="telegraph" id="telegraph">Réfléchit à son prochain coup…</div>
+    </div>
+  </div>
+
+  <div class="log" id="log"></div>
+
+  <div class="hand" id="hand">
+    <div class="card" id="card-coup" draggable="true" data-card="coup">
+      <div class="cost">1</div>
+      <div class="icon">⚔️</div>
+      <div class="cname">Coup direct</div>
+      <div class="cdesc">Inflige 4 dégâts à l'ennemi.</div>
+    </div>
+    <div class="card" id="card-esquive" draggable="true" data-card="esquive">
+      <div class="cost">1</div>
+      <div class="icon">💨</div>
+      <div class="cname">Esquive</div>
+      <div class="cdesc">Annule complètement le prochain coup ennemi.</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="end-turn">Fin de tour</button>
+    <button id="restart" class="secondary">Recommencer</button>
+  </div>
+  <p class="hint">Astuce : regarde le coup annoncé par l'ennemi avant de décider — attaquer plus fort ou esquiver ?</p>
+</div>
+
+<div class="overlay" id="overlay">
+  <h2 id="overlay-title">Victoire !</h2>
+  <p id="overlay-text">Le Gobelin Maraudeur est vaincu.</p>
+  <button id="overlay-restart">Rejouer</button>
+</div>
+
+<script>
+(function () {
+  const MAX_ENERGY = 3;
+
+  const ENEMY_MOVES = [
+    { name: 'Griffure', icon: '🩸', dmg: 4 },
+    { name: 'Griffure', icon: '🩸', dmg: 4 },
+    { name: 'Charge Brutale', icon: '💥', dmg: 7 },
+  ];
+
+  const state = {
+    player: { hp: 20, maxHp: 20, energy: 0, dodgeQueued: false },
+    enemy: { hp: 15, maxHp: 15, nextMove: null },
+    turn: 1,
+    over: false,
+  };
+
+  const el = {
+    playerHpBar: document.getElementById('player-hp-bar'),
+    playerHpLabel: document.getElementById('player-hp-label'),
+    playerEnergy: document.getElementById('player-energy'),
+    enemyHpBar: document.getElementById('enemy-hp-bar'),
+    enemyHpLabel: document.getElementById('enemy-hp-label'),
+    telegraph: document.getElementById('telegraph'),
+    dodgeBadge: document.getElementById('dodge-badge'),
+    log: document.getElementById('log'),
+    playerZone: document.getElementById('player-zone'),
+    enemyZone: document.getElementById('enemy-zone'),
+    cardCoup: document.getElementById('card-coup'),
+    cardEsquive: document.getElementById('card-esquive'),
+    endTurn: document.getElementById('end-turn'),
+    restart: document.getElementById('restart'),
+    overlay: document.getElementById('overlay'),
+    overlayTitle: document.getElementById('overlay-title'),
+    overlayText: document.getElementById('overlay-text'),
+    overlayRestart: document.getElementById('overlay-restart'),
+  };
+
+  function log(msg, cls) {
+    const p = document.createElement('p');
+    p.textContent = msg;
+    if (cls) p.className = cls;
+    el.log.appendChild(p);
+    el.log.scrollTop = el.log.scrollHeight;
+  }
+
+  function rollEnemyMove() {
+    state.enemy.nextMove = ENEMY_MOVES[Math.floor(Math.random() * ENEMY_MOVES.length)];
+    el.telegraph.textContent = `Annonce : ${state.enemy.nextMove.icon} ${state.enemy.nextMove.name} — ${state.enemy.nextMove.dmg} dégâts`;
+  }
+
+  function render() {
+    const p = state.player, e = state.enemy;
+    el.playerHpBar.style.width = Math.max(0, (p.hp / p.maxHp) * 100) + '%';
+    el.playerHpLabel.textContent = `${Math.max(0, p.hp)} / ${p.maxHp} PV`;
+    el.enemyHpBar.style.width = Math.max(0, (e.hp / e.maxHp) * 100) + '%';
+    el.enemyHpLabel.textContent = `${Math.max(0, e.hp)} / ${e.maxHp} PV`;
+
+    el.playerEnergy.innerHTML = '';
+    for (let i = 0; i < MAX_ENERGY; i++) {
+      const pip = document.createElement('div');
+      pip.className = 'pip' + (i < p.energy ? ' filled' : '');
+      el.playerEnergy.appendChild(pip);
+    }
+
+    el.dodgeBadge.classList.toggle('show', p.dodgeQueued);
+
+    const canAfford = p.energy >= 1;
+    el.cardCoup.classList.toggle('disabled', !canAfford || state.over);
+    el.cardEsquive.classList.toggle('disabled', !canAfford || p.dodgeQueued || state.over);
+    el.cardCoup.draggable = canAfford && !state.over;
+    el.cardEsquive.draggable = canAfford && !p.dodgeQueued && !state.over;
+  }
+
+  function startTurn() {
+    if (state.over) return;
+    state.player.energy = Math.min(MAX_ENERGY, state.player.energy + 1);
+    log(`— Tour ${state.turn} : +1 énergie —`, 'sys');
+    rollEnemyMove();
+    render();
+  }
+
+  function playCoup() {
+    if (state.player.energy < 1 || state.over) return;
+    state.player.energy -= 1;
+    state.enemy.hp -= 4;
+    log('Tu joues Coup direct : 4 dégâts.', 'you');
+    checkEnemyDown();
+    render();
+  }
+
+  function playEsquive() {
+    if (state.player.energy < 1 || state.player.dodgeQueued || state.over) return;
+    state.player.energy -= 1;
+    state.player.dodgeQueued = true;
+    log('Tu joues Esquive : le prochain coup ennemi sera annulé.', 'you');
+    render();
+  }
+
+  function checkEnemyDown() {
+    if (state.enemy.hp <= 0 && !state.over) {
+      endGame(true);
+    }
+  }
+
+  function resolveEnemyTurn() {
+    if (state.over) return;
+    const move = state.enemy.nextMove;
+    if (state.player.dodgeQueued) {
+      log(`L'ennemi utilise ${move.name}… esquivé !`, 'sys');
+    } else {
+      state.player.hp -= move.dmg;
+      log(`L'ennemi utilise ${move.name} : ${move.dmg} dégâts.`, 'foe');
+    }
+    state.player.dodgeQueued = false;
+
+    if (state.player.hp <= 0) {
+      endGame(false);
+      return;
+    }
+    state.turn += 1;
+    startTurn();
+  }
+
+  function endGame(won) {
+    state.over = true;
+    render();
+    el.overlayTitle.textContent = won ? 'Victoire !' : 'Défaite…';
+    el.overlayText.textContent = won
+      ? `Le Gobelin Maraudeur est vaincu en ${state.turn} tour(s).`
+      : 'Ton Guerrier tombe au combat.';
+    el.overlay.classList.add('show');
+  }
+
+  function resetGame() {
+    state.player = { hp: 20, maxHp: 20, energy: 0, dodgeQueued: false };
+    state.enemy = { hp: 15, maxHp: 15, nextMove: null };
+    state.turn = 1;
+    state.over = false;
+    el.log.innerHTML = '';
+    el.overlay.classList.remove('show');
+    log('Un Gobelin Maraudeur surgit !', 'sys');
+    startTurn();
+  }
+
+  // --- Drag & drop (desktop) ---
+  let draggedCard = null;
+
+  function setupDrag(cardEl, playFn) {
+    cardEl.addEventListener('dragstart', (ev) => {
+      if (cardEl.classList.contains('disabled')) { ev.preventDefault(); return; }
+      draggedCard = playFn;
+      cardEl.classList.add('dragging');
+    });
+    cardEl.addEventListener('dragend', () => cardEl.classList.remove('dragging'));
+
+    // Click-to-play fallback (touch / simplicity)
+    cardEl.addEventListener('click', () => {
+      if (cardEl.classList.contains('disabled')) return;
+      playFn();
+    });
+  }
+
+  function setupDropZone(zoneEl) {
+    zoneEl.addEventListener('dragover', (ev) => {
+      ev.preventDefault();
+      zoneEl.classList.add('drop-hover');
+    });
+    zoneEl.addEventListener('dragleave', () => zoneEl.classList.remove('drop-hover'));
+    zoneEl.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      zoneEl.classList.remove('drop-hover');
+      if (draggedCard) { draggedCard(); draggedCard = null; }
+    });
+  }
+
+  setupDrag(el.cardCoup, playCoup);
+  setupDrag(el.cardEsquive, playEsquive);
+  setupDropZone(el.enemyZone);
+  setupDropZone(el.playerZone);
+
+  el.endTurn.addEventListener('click', resolveEnemyTurn);
+  el.restart.addEventListener('click', resetGame);
+  el.overlayRestart.addEventListener('click', resetGame);
+
+  resetGame();
+})();
+</script>
+</body>
+</html>

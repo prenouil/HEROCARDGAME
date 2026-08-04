@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Hero Card Game — Proto Deck / Main / Défausse</title>
+<style>
+  :root {
+    --bg: #1b1420; --panel: #2a1f33; --accent: #e8b93f; --hp: #d9455f;
+    --heal: #4caf7d; --energy: #3fb6e8; --text: #f1e9f7; --muted: #a996b3;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #2e2138, var(--bg)); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px 14px 60px; }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: .8rem; margin-bottom: 16px; text-align: center; max-width: 660px; }
+  .arena { width: min(760px, 100%); background: var(--panel); border-radius: 16px; padding: 18px; box-shadow: 0 12px 30px rgba(0,0,0,.4); }
+  .row-label { font-size: .68rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 4px 2px 6px; display: flex; justify-content: space-between; }
+  .enemies, .heroes { display: flex; gap: 10px; }
+  .enemies { margin-bottom: 6px; }
+  .heroes { margin-bottom: 6px; flex-wrap: wrap; }
+  .unit { flex: 1; min-width: 120px; background: rgba(255,255,255,.04); border: 2px solid rgba(255,255,255,.08); border-radius: 12px; padding: 10px; text-align: center; position: relative; transition: box-shadow .15s, transform .1s, opacity .2s; }
+  .unit.selectable { cursor: pointer; }
+  .unit.dead { opacity: .35; filter: grayscale(1); }
+  .unit.target-eligible { box-shadow: 0 0 0 3px var(--heal); cursor: pointer; }
+  .unit.hero-eligible { box-shadow: 0 0 0 3px var(--energy); cursor: pointer; }
+  .portrait { font-size: 2rem; line-height: 1; }
+  .uname { font-weight: 700; font-size: .78rem; margin: 2px 0 6px; }
+  .bar { height: 8px; border-radius: 5px; background: rgba(0,0,0,.35); overflow: hidden; margin-bottom: 3px; }
+  .bar > div { height: 100%; transition: width .3s ease; background: var(--hp); }
+  .bar-label { font-size: .62rem; color: var(--muted); margin-bottom: 4px; }
+  .energy-pips { display: flex; justify-content: center; gap: 4px; margin-top: 4px; }
+  .pip { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--energy); }
+  .pip.filled { background: var(--energy); }
+  .telegraph { margin-top: 6px; font-size: .68rem; background: rgba(232,185,63,.12); border: 1px dashed var(--accent); border-radius: 8px; padding: 5px 6px; color: var(--accent); min-height: 34px; }
+  .telegraph .vise { color: var(--muted); display: block; margin-top: 2px; }
+  .dodge-badge { position: absolute; top: -8px; right: -4px; background: var(--heal); color: #08160f; font-size: .58rem; font-weight: 700; padding: 2px 5px; border-radius: 999px; display: none; }
+  .dodge-badge.show { display: block; }
+  .log { background: rgba(0,0,0,.25); border-radius: 10px; padding: 8px 10px; font-size: .75rem; color: var(--muted); height: 62px; overflow-y: auto; margin: 10px 0; }
+  .log p { margin: 2px 0; }
+  .log p.you { color: var(--energy); }
+  .log p.foe { color: var(--hp); }
+  .log p.sys { color: var(--accent); }
+  .log p.heal { color: var(--heal); }
+  .hand-label { text-align: center; font-size: .78rem; color: var(--accent); margin-bottom: 8px; min-height: 18px; font-weight: 600; }
+  .hand-row { display: flex; align-items: center; gap: 12px; }
+  .pile { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+  .pile-stack { position: relative; width: 46px; height: 62px; }
+  .pile-card { position: absolute; inset: 0; border-radius: 8px; background: linear-gradient(160deg, #3a2a48, #241a2c); border: 1px solid rgba(255,255,255,.15); box-shadow: 0 2px 6px rgba(0,0,0,.3); display: flex; align-items: center; justify-content: center; font-size: 1.1rem; color: rgba(255,255,255,.25); }
+  .pile-card:nth-child(1) { transform: translate(0, 0) rotate(0deg); z-index: 3; }
+  .pile-card:nth-child(2) { transform: translate(3px, -3px) rotate(3deg); z-index: 2; }
+  .pile-card:nth-child(3) { transform: translate(-3px, -6px) rotate(-3deg); z-index: 1; }
+  .pile-count { font-size: .64rem; color: var(--muted); white-space: nowrap; }
+  .hand { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; min-height: 150px; flex: 1; }
+  .ghost-card { position: fixed; z-index: 999; pointer-events: none; background: linear-gradient(160deg, #3a2a48, #241a2c); border: 1px solid rgba(255,255,255,.2); border-radius: 12px; padding: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 10px 20px rgba(0,0,0,.4); }
+  .ghost-card .icon { font-size: 1.4rem; }
+  .ghost-card .cname { font-weight: 700; font-size: .68rem; margin-top: 3px; text-align: center; }
+  .card { width: 108px; min-height: 140px; background: linear-gradient(160deg, #3a2a48, #241a2c); border: 1px solid rgba(255,255,255,.12); border-radius: 12px; padding: 8px; cursor: pointer; user-select: none; display: flex; flex-direction: column; align-items: center; text-align: center; transition: transform .12s, opacity .15s, box-shadow .12s; }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(0,0,0,.35); }
+  .card.pending { box-shadow: 0 0 0 3px var(--accent); transform: translateY(-4px); }
+  .card { position: relative; }
+  .card .cost { align-self: flex-start; background: var(--energy); color: #04202b; font-weight: 700; font-size: .68rem; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
+  .card .owner-badge { position: absolute; top: 6px; right: 6px; font-size: .9rem; }
+  .card .icon { font-size: 1.4rem; margin: 3px 0; }
+  .card .cname { font-weight: 700; font-size: .72rem; margin-bottom: 3px; }
+  .card .cdesc { font-size: .6rem; color: var(--muted); }
+  .controls { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
+  button { background: var(--accent); color: #2b1e08; border: none; font-weight: 700; padding: 9px 16px; border-radius: 8px; cursor: pointer; font-size: .8rem; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.secondary { background: transparent; border: 1px solid var(--muted); color: var(--text); }
+  .hint { text-align: center; font-size: .7rem; color: var(--muted); margin-top: 8px; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 20px; }
+  .overlay.show { display: flex; }
+  .overlay h2 { font-size: 1.5rem; margin-bottom: 6px; }
+  .overlay p { color: var(--muted); margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<h1>⚔️ Proto — Deck / Main / Défausse</h1>
+<p class="subtitle">Un deck commun aux 4 héros. 5 cartes en main à chaque tour. Séquence de jeu : clique une carte → clique l'aventurier qui la joue → clique la cible. Les cartes non jouées sont défaussées en fin de tour.</p>
+
+<div class="arena">
+  <div class="row-label"><span>Ennemis</span></div>
+  <div class="enemies" id="enemies"></div>
+
+  <div class="row-label"><span>Ta troupe</span></div>
+  <div class="heroes" id="heroes"></div>
+
+  <div class="log" id="log"></div>
+
+  <div class="hand-label" id="hand-label"></div>
+  <div class="hand-row">
+    <div class="pile" id="deck-pile">
+      <div class="pile-stack">
+        <div class="pile-card">🂠</div>
+        <div class="pile-card"></div>
+        <div class="pile-card"></div>
+      </div>
+      <div class="pile-count" id="deck-count">Pioche : 0</div>
+    </div>
+    <div class="hand" id="hand"></div>
+    <div class="pile" id="discard-pile">
+      <div class="pile-stack">
+        <div class="pile-card">🗑️</div>
+        <div class="pile-card"></div>
+        <div class="pile-card"></div>
+      </div>
+      <div class="pile-count" id="discard-count">Défausse : 0</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="end-turn">Fin de tour</button>
+    <button id="restart" class="secondary">Recommencer</button>
+  </div>
+  <p class="hint" id="hint"></p>
+</div>
+
+<div class="overlay" id="overlay">
+  <h2 id="overlay-title">Victoire !</h2>
+  <p id="overlay-text"></p>
+  <button id="overlay-restart">Rejouer</button>
+</div>
+
+<script>
+(function () {
+  const MAX_ENERGY = 3;
+  const HAND_SIZE = 5;
+
+  const HERO_DEFS = [
+    { id: 'guerrier', name: 'Guerrier', icon: '🛡️', maxHp: 18 },
+    { id: 'mage', name: 'Mage', icon: '🔮', maxHp: 10 },
+    { id: 'voleur', name: 'Voleur', icon: '🗡️', maxHp: 12 },
+    { id: 'clerc', name: 'Clerc', icon: '✨', maxHp: 14 },
+  ];
+
+  const ENEMY_DEFS = [
+    { id: 'gobelin', name: 'Gobelin Maraudeur', icon: '👺', maxHp: 15,
+      moves: [ { name: 'Griffure', icon: '🩸', dmg: 4, weight: 2 }, { name: 'Charge Brutale', icon: '💥', dmg: 7, weight: 1 } ] },
+    { id: 'troll', name: 'Troll des Marais', icon: '🧌', maxHp: 28,
+      moves: [ { name: 'Coup de Massue', icon: '🔨', dmg: 8, weight: 2 }, { name: 'Régénération', icon: '💚', heal: 6, weight: 1 } ] },
+  ];
+
+  const BASE_CARDS = [
+    { code: 'coup', name: 'Coup direct', cost: 1, icon: '⚔️', desc: 'Inflige 4 dégâts à un ennemi.', target: 'enemy',
+      effect: (hero, enemy) => { enemy.hp -= 4; } },
+    { code: 'esquive', name: 'Esquive', cost: 1, icon: '💨', desc: 'Annule le prochain coup visant le héros joueur.', target: 'self',
+      effect: (hero) => { hero.dodgeQueued = true; } },
+  ];
+
+  const SPECIALS = {
+    guerrier: { code: 'frappe', name: 'Frappe Puissante', cost: 2, icon: '💢', desc: 'Inflige 8 dégâts à un ennemi.', target: 'enemy', owner: 'guerrier',
+      effect: (hero, enemy) => { enemy.hp -= 8; } },
+    mage: { code: 'eclair', name: 'Éclair en Chaîne', cost: 2, icon: '⚡', desc: 'Inflige 3 dégâts à TOUS les ennemis.', target: 'all-enemies', owner: 'mage',
+      effect: (hero, _t, allEnemies) => { allEnemies.forEach(e => { if (e.hp > 0) e.hp -= 3; }); } },
+    voleur: { code: 'sournois', name: 'Coup Sournois', cost: 1, icon: '🗡️', desc: 'Inflige 2 dégâts et rend 1 énergie au joueur.', target: 'enemy', owner: 'voleur',
+      effect: (hero, enemy) => { enemy.hp -= 2; hero.energy = Math.min(MAX_ENERGY, hero.energy + 1); } },
+    clerc: { code: 'soin', name: 'Soin', cost: 1, icon: '✨', desc: 'Soigne un allié de 5 PV.', target: 'ally', owner: 'clerc',
+      effect: (hero, ally) => { ally.hp = Math.min(ally.maxHp, ally.hp + 5); } },
+  };
+
+  function heroIcon(id) { const h = HERO_DEFS.find(h => h.id === id); return h ? h.icon : ''; }
+
+  const state = { heroes: [], enemies: [], deck: [], hand: [], discard: [], pending: null, turn: 1, over: false };
+  let uidCounter = 0;
+
+  const el = {
+    enemies: document.getElementById('enemies'),
+    heroes: document.getElementById('heroes'),
+    log: document.getElementById('log'),
+    deckPile: document.getElementById('deck-pile'),
+    deckCount: document.getElementById('deck-count'),
+    discardPile: document.getElementById('discard-pile'),
+    discardCount: document.getElementById('discard-count'),
+    handLabel: document.getElementById('hand-label'),
+    hand: document.getElementById('hand'),
+    endTurn: document.getElementById('end-turn'),
+    restart: document.getElementById('restart'),
+    hint: document.getElementById('hint'),
+    overlay: document.getElementById('overlay'),
+    overlayTitle: document.getElementById('overlay-title'),
+    overlayText: document.getElementById('overlay-text'),
+    overlayRestart: document.getElementById('overlay-restart'),
+  };
+
+  function log(msg, cls) {
+    const p = document.createElement('p');
+    p.textContent = msg;
+    if (cls) p.className = cls;
+    el.log.appendChild(p);
+    el.log.scrollTop = el.log.scrollHeight;
+  }
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  // ---------- card-flight animation (deck <-> hand <-> discard) ----------
+
+  const FLIGHT_MS = 380;
+
+  function flyGhost(originRect, destRect, def, fadeIn) {
+    const ghost = document.createElement('div');
+    ghost.className = 'ghost-card';
+    ghost.style.left = originRect.left + 'px';
+    ghost.style.top = originRect.top + 'px';
+    ghost.style.width = originRect.width + 'px';
+    ghost.style.height = originRect.height + 'px';
+    ghost.style.opacity = fadeIn ? '0' : '1';
+    ghost.innerHTML = `<div class="icon">${def.icon}</div><div class="cname">${def.name}</div>`;
+    document.body.appendChild(ghost);
+
+    const dx = (destRect.left + destRect.width / 2) - (originRect.left + originRect.width / 2);
+    const dy = (destRect.top + destRect.height / 2) - (originRect.top + originRect.height / 2);
+    const scale = Math.max(0.3, Math.min(1.2, destRect.width / originRect.width));
+
+    requestAnimationFrame(() => {
+      ghost.style.transition = `transform ${FLIGHT_MS}ms cubic-bezier(.2,.7,.3,1), opacity ${FLIGHT_MS}ms ease`;
+      ghost.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+      ghost.style.opacity = fadeIn ? '1' : '0.2';
+    });
+    setTimeout(() => ghost.remove(), FLIGHT_MS + 60);
+  }
+
+  function animateDrawnCards(newUids) {
+    if (!newUids.length) return;
+    const deckRect = el.deckPile.getBoundingClientRect();
+    newUids.forEach((uid, i) => {
+      const cardEl = el.hand.querySelector(`[data-uid="${uid}"]`);
+      const card = state.hand.find(c => c.uid === uid);
+      if (!cardEl || !card) return;
+      const destRect = cardEl.getBoundingClientRect();
+      setTimeout(() => flyGhost(deckRect, destRect, card.def, true), i * 70);
+    });
+  }
+
+  function animateDiscardedCards(cardsWithRects) {
+    if (!cardsWithRects.length) return;
+    const discardRect = el.discardPile.getBoundingClientRect();
+    cardsWithRects.forEach(({ rect, def }, i) => {
+      setTimeout(() => flyGhost(rect, discardRect, def, false), i * 60);
+    });
+  }
+
+  function livingHeroes() { return state.heroes.filter(h => h.hp > 0); }
+  function livingEnemies() { return state.enemies.filter(e => e.hp > 0); }
+  function heroById(id) { return state.heroes.find(h => h.id === id); }
+
+  function buildDeck() {
+    const cards = [];
+    HERO_DEFS.forEach(h => {
+      BASE_CARDS.forEach(def => cards.push({ uid: uidCounter++, def }));
+      cards.push({ uid: uidCounter++, def: SPECIALS[h.id] });
+    });
+    return shuffle(cards);
+  }
+
+  function drawHand() {
+    const drawn = [];
+    while (state.hand.length < HAND_SIZE) {
+      if (state.deck.length === 0) {
+        if (state.discard.length === 0) break; // truly out of cards
+        state.deck = shuffle(state.discard);
+        state.discard = [];
+        log('Le deck est vide : la défausse est remélangée.', 'sys');
+      }
+      const card = state.deck.pop();
+      state.hand.push(card);
+      drawn.push(card.uid);
+    }
+    return drawn;
+  }
+
+  function pickWeighted(moves) {
+    const total = moves.reduce((s, m) => s + m.weight, 0);
+    let r = Math.random() * total;
+    for (const m of moves) { if ((r -= m.weight) <= 0) return m; }
+    return moves[moves.length - 1];
+  }
+
+  function rollEnemyTelegraphs() {
+    const alive = livingHeroes();
+    state.enemies.forEach(e => {
+      if (e.hp <= 0) { e.nextMove = null; e.targetHeroId = null; return; }
+      e.nextMove = pickWeighted(e.moves);
+      e.targetHeroId = e.nextMove.heal ? null : alive[Math.floor(Math.random() * alive.length)].id;
+    });
+  }
+
+  // ---------- rendering ----------
+
+  function renderEnemies() {
+    el.enemies.innerHTML = '';
+    const awaitingEnemyTarget = state.pending && state.pending.heroId && state.pending.def.target === 'enemy';
+    state.enemies.forEach(e => {
+      const dead = e.hp <= 0;
+      const div = document.createElement('div');
+      div.className = 'unit' + (dead ? ' dead' : '') + (awaitingEnemyTarget && !dead ? ' target-eligible' : '');
+      div.dataset.enemyId = e.id;
+      const pct = Math.max(0, (e.hp / e.maxHp) * 100);
+      let telegraphHtml = 'Vaincu.';
+      if (!dead && e.nextMove) {
+        const targetName = e.nextMove.heal ? null : (heroById(e.targetHeroId) || {}).name;
+        telegraphHtml = `${e.nextMove.icon} ${e.nextMove.name}${e.nextMove.dmg ? ' — ' + e.nextMove.dmg + ' dégâts' : ' — soigne ' + e.nextMove.heal + ' PV'}`
+          + (targetName ? `<span class="vise">vise ${targetName}</span>` : '');
+      }
+      div.innerHTML = `
+        <div class="portrait">${e.icon}</div>
+        <div class="uname">${e.name}</div>
+        <div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="bar-label">${Math.max(0, e.hp)} / ${e.maxHp} PV</div>
+        <div class="telegraph">${telegraphHtml}</div>
+      `;
+      el.enemies.appendChild(div);
+      div.addEventListener('click', () => { if (awaitingEnemyTarget && !dead) resolvePending('enemy', e.id); });
+    });
+  }
+
+  function renderHeroes() {
+    el.heroes.innerHTML = '';
+    const awaitingHero = state.pending && !state.pending.heroId;
+    const awaitingAllyTarget = state.pending && state.pending.heroId && state.pending.def.target === 'ally';
+    state.heroes.forEach(h => {
+      const dead = h.hp <= 0;
+      const eligibleAsPlayer = awaitingHero && !dead && h.energy >= state.pending.def.cost
+        && (!state.pending.def.owner || state.pending.def.owner === h.id);
+      const eligibleAsTarget = awaitingAllyTarget && !dead;
+      const div = document.createElement('div');
+      div.className = 'unit'
+        + (dead ? ' dead' : '')
+        + (eligibleAsPlayer ? ' hero-eligible' : '')
+        + (eligibleAsTarget ? ' target-eligible' : '');
+      div.dataset.heroId = h.id;
+      const pct = Math.max(0, (h.hp / h.maxHp) * 100);
+      let pips = '';
+      for (let i = 0; i < MAX_ENERGY; i++) pips += `<div class="pip${i < h.energy ? ' filled' : ''}"></div>`;
+      div.innerHTML = `
+        <span class="dodge-badge${h.dodgeQueued ? ' show' : ''}">ESQUIVE</span>
+        <div class="portrait">${h.icon}</div>
+        <div class="uname">${h.name}</div>
+        <div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="bar-label">${Math.max(0, h.hp)} / ${h.maxHp} PV</div>
+        <div class="energy-pips">${pips}</div>
+      `;
+      el.heroes.appendChild(div);
+      div.addEventListener('click', () => {
+        if (eligibleAsPlayer) { assignHero(h.id); return; }
+        if (eligibleAsTarget) { resolvePending('ally', h.id); return; }
+      });
+    });
+  }
+
+  function renderHand() {
+    el.hand.innerHTML = '';
+    state.hand.forEach(card => {
+      const div = document.createElement('div');
+      const isPending = state.pending && state.pending.uid === card.uid;
+      div.className = 'card' + (isPending ? ' pending' : '');
+      div.dataset.uid = card.uid;
+      div.innerHTML = `
+        <div class="cost">${card.def.cost}</div>
+        ${card.def.owner ? `<div class="owner-badge" title="Réservée à ${heroById(card.def.owner) ? heroById(card.def.owner).name : card.def.owner}">${heroIcon(card.def.owner)}</div>` : ''}
+        <div class="icon">${card.def.icon}</div>
+        <div class="cname">${card.def.name}</div>
+        <div class="cdesc">${card.def.desc}</div>
+      `;
+      div.addEventListener('click', () => onHandCardClicked(card));
+      el.hand.appendChild(div);
+    });
+  }
+
+  function renderStatusAndHint() {
+    el.deckCount.textContent = `Pioche : ${state.deck.length}`;
+    el.discardCount.textContent = `Défausse : ${state.discard.length}`;
+    if (!state.pending) {
+      el.handLabel.textContent = `Tour ${state.turn} — main (${state.hand.length}/${HAND_SIZE})`;
+      el.hint.textContent = 'Clique une carte de ta main pour commencer.';
+    } else if (!state.pending.heroId) {
+      el.handLabel.textContent = `${state.pending.def.name} sélectionnée`;
+      el.hint.textContent = state.pending.def.owner
+        ? `Carte réservée à ${heroById(state.pending.def.owner).name} — seul lui peut la jouer.`
+        : 'Choisis quel aventurier va jouer cette carte (contour bleu = énergie suffisante).';
+    } else {
+      const heroName = heroById(state.pending.heroId).name;
+      el.handLabel.textContent = `${state.pending.def.name} — jouée par ${heroName}`;
+      el.hint.textContent = state.pending.def.target === 'enemy'
+        ? 'Choisis l\'ennemi visé (contour vert).'
+        : 'Choisis l\'allié visé (contour vert).';
+    }
+  }
+
+  function render() {
+    renderEnemies();
+    renderHeroes();
+    renderHand();
+    renderStatusAndHint();
+  }
+
+  // ---------- playing cards ----------
+
+  function onHandCardClicked(card) {
+    if (state.over) return;
+    if (state.pending && state.pending.uid === card.uid) { state.pending = null; render(); return; }
+    state.pending = { uid: card.uid, def: card.def, heroId: null };
+    render();
+  }
+
+  function assignHero(heroId) {
+    const hero = heroById(heroId);
+    const def = state.pending.def;
+    if (!hero || hero.hp <= 0 || hero.energy < def.cost) return;
+    if (def.owner && def.owner !== heroId) return;
+    state.pending.heroId = heroId;
+    if (def.target === 'self') { resolvePending('self', heroId); return; }
+    if (def.target === 'all-enemies') { resolvePending('all-enemies', null); return; }
+    render();
+  }
+
+  function resolvePending(kind, targetId) {
+    const pending = state.pending;
+    if (!pending || !pending.heroId) return;
+    const hero = heroById(pending.heroId);
+    const def = pending.def;
+    if (!hero || hero.energy < def.cost) { state.pending = null; render(); return; }
+
+    let target = null;
+    if (def.target === 'enemy') {
+      if (kind !== 'enemy') return;
+      target = state.enemies.find(e => e.id === targetId);
+      if (!target || target.hp <= 0) return;
+    } else if (def.target === 'ally') {
+      if (kind !== 'ally') return;
+      target = heroById(targetId);
+      if (!target || target.hp <= 0) return;
+    } else if (def.target === 'self') {
+      target = hero;
+    }
+    // all-enemies: target stays null, effect handles it via allEnemies arg
+
+    hero.energy -= def.cost;
+    def.effect(hero, target, state.enemies);
+
+    let msg = `${hero.name} joue ${def.name}`;
+    if (target && def.target !== 'self') msg += ` sur ${target.name}`;
+    else if (def.target === 'all-enemies') msg += ` sur tous les ennemis`;
+    log(msg + '.', 'you');
+
+    // move card from hand to discard, capturing its on-screen position first for the fly-out animation
+    const idx = state.hand.findIndex(c => c.uid === pending.uid);
+    let flightOrigin = null;
+    if (idx !== -1) {
+      const cardEl = el.hand.querySelector(`[data-uid="${pending.uid}"]`);
+      if (cardEl) flightOrigin = { rect: cardEl.getBoundingClientRect(), def: state.hand[idx].def };
+      state.discard.push(state.hand[idx]);
+      state.hand.splice(idx, 1);
+    }
+
+    state.pending = null;
+    checkVictory();
+    render();
+    if (flightOrigin) animateDiscardedCards([flightOrigin]);
+  }
+
+  // ---------- turn resolution ----------
+
+  function checkVictory() { if (!state.over && livingEnemies().length === 0) endGame(true); }
+  function checkDefeat() { if (!state.over && livingHeroes().length === 0) endGame(false); }
+
+  function resolveEnemyTurn() {
+    if (state.over) return;
+    // discard the rest of the hand (capture on-screen positions before the data mutation so the fly-out lands correctly)
+    if (state.hand.length > 0) {
+      const flights = state.hand.map(c => {
+        const cardEl = el.hand.querySelector(`[data-uid="${c.uid}"]`);
+        return cardEl ? { rect: cardEl.getBoundingClientRect(), def: c.def } : null;
+      }).filter(Boolean);
+      log(`${state.hand.length} carte(s) non jouée(s) défaussée(s).`, 'sys');
+      state.discard.push(...state.hand);
+      state.hand = [];
+      animateDiscardedCards(flights);
+    }
+    state.pending = null;
+
+    state.enemies.forEach(e => {
+      if (e.hp <= 0 || !e.nextMove) return;
+      if (e.nextMove.heal) {
+        e.hp = Math.min(e.maxHp, e.hp + e.nextMove.heal);
+        log(`${e.name} se régénère de ${e.nextMove.heal} PV.`, 'heal');
+        return;
+      }
+      const target = heroById(e.targetHeroId);
+      if (!target || target.hp <= 0) return;
+      if (target.dodgeQueued) {
+        log(`${e.name} utilise ${e.nextMove.name} sur ${target.name}… esquivé !`, 'sys');
+      } else {
+        target.hp -= e.nextMove.dmg;
+        log(`${e.name} utilise ${e.nextMove.name} sur ${target.name} : ${e.nextMove.dmg} dégâts.`, 'foe');
+      }
+    });
+    state.heroes.forEach(h => { h.dodgeQueued = false; });
+
+    checkDefeat();
+    if (state.over) { render(); return; }
+
+    state.turn += 1;
+    startTurn();
+  }
+
+  function startTurn() {
+    if (state.over) return;
+    state.heroes.forEach(h => { if (h.hp > 0) h.energy = Math.min(MAX_ENERGY, h.energy + 1); });
+    log(`— Tour ${state.turn} : +1 énergie, pioche à ${HAND_SIZE} —`, 'sys');
+    rollEnemyTelegraphs();
+    const drawnUids = drawHand();
+    render();
+    animateDrawnCards(drawnUids);
+  }
+
+  function endGame(won) {
+    state.over = true;
+    render();
+    el.overlayTitle.textContent = won ? 'Victoire !' : 'Défaite…';
+    el.overlayText.textContent = won
+      ? `Le Gobelin et le Troll sont vaincus en ${state.turn} tour(s).`
+      : 'Toute la troupe est tombée au combat.';
+    el.overlay.classList.add('show');
+  }
+
+  function resetGame() {
+    state.heroes = HERO_DEFS.map(h => ({ ...h, hp: h.maxHp, energy: 0, dodgeQueued: false }));
+    state.enemies = ENEMY_DEFS.map(e => ({ ...e, hp: e.maxHp, nextMove: null, targetHeroId: null }));
+    state.deck = buildDeck();
+    state.hand = [];
+    state.discard = [];
+    state.pending = null;
+    state.turn = 1;
+    state.over = false;
+    el.log.innerHTML = '';
+    el.overlay.classList.remove('show');
+    log('Un Gobelin Maraudeur et un Troll des Marais bloquent le chemin !', 'sys');
+    startTurn();
+  }
+
+  el.endTurn.addEventListener('click', resolveEnemyTurn);
+  el.restart.addEventListener('click', resetGame);
+  el.overlayRestart.addEventListener('click', resetGame);
+
+  resetGame();
+})();
+</script>
+</body>
+</html>
