@@ -12,4 +12,6 @@
 - `sessions/` — notes brutes de session par date (YYYY-MM-DD.md), distillées dans MEMORY.md pendant Pulse
 
 ## My Files
-_Cette section grandit à mesure que je crée des fichiers organiques. La tenir à jour à chaque ajout._
+- `glossary.md` — termes propres à Hero Card Game (Astronome, lunes, types de quêtes, etc.), avec source.
+- `open-questions.md` — questions de design ouvertes et résolues, avec origine et statut.
+- `sources.md` — sources externes suivies (GDD Google Doc, tableur des classes) avec dernier relevé connu. *(à créer au prochain usage de `veille-sources`)*

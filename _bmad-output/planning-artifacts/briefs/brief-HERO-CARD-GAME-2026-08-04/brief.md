@@ -108,6 +108,6 @@ Ce périmètre est délibérément resserré : il valide la boucle de combat et 
 - **Rythme du loot** sur un run entier reste à ajuster.
 - **Nom du mécanisme de rétention/défausse des cartes** en fin de tour — à trouver, cohérent avec l'univers.
 - **Direction sonore** entièrement à définir.
-- **Incohérence de nom** entre les documents sources : « Heroic Card Game » (titre du GDD), « Hero Card Game » (document de comparatif concurrentiel), « HERO CARD GAME » (nom du projet). À trancher pour un nom canonique unique.
+- ~~**Incohérence de nom** entre les documents sources~~ — **Résolu** : le nom canonique du jeu est **« Hero Card Game »** (tranché par le porteur de projet lors de la GDD). Le nom de dossier/dépôt « HERO CARD GAME » reste une question d'infrastructure distincte, non affectée.
 - **Discipline de scope après le Mois 2** : le plein périmètre (40 aventuriers, ~480 cartes, ~640 améliorations) reste très large pour une équipe de 2 — la rigueur du Prototype Minimaliste V1 (voir Scope & MVP) doit se maintenir au-delà.
 - **Double plateforme dès le départ** (PC souris/manette *et* smartphone tactile) double la surface de design d'interface pour une équipe de 2 — à confirmer si les deux sortent simultanément ou si l'une précède l'autre.

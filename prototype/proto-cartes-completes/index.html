@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Hero Card Game — Proto Cartes Complètes</title>
+<style>
+  :root {
+    --bg: #1b1420; --panel: #2a1f33; --accent: #e8b93f; --hp: #d9455f;
+    --heal: #4caf7d; --energy: #3fb6e8; --text: #f1e9f7; --muted: #a996b3;
+    --def: #7f9ccf; --status: #c47fe8;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top, #2e2138, var(--bg)); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 18px 12px 60px; }
+  h1 { font-size: 1.2rem; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: .76rem; margin-bottom: 6px; text-align: center; max-width: 700px; }
+  .notes { color: var(--status); font-size: .68rem; margin-bottom: 14px; text-align: center; max-width: 700px; background: rgba(196,127,232,.08); border: 1px dashed var(--status); border-radius: 8px; padding: 6px 10px; }
+  .arena { width: min(820px, 100%); background: var(--panel); border-radius: 16px; padding: 16px; box-shadow: 0 12px 30px rgba(0,0,0,.4); }
+  .row-label { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 4px 2px 6px; }
+  .enemies, .heroes { display: flex; gap: 8px; }
+  .enemies { margin-bottom: 6px; }
+  .heroes { margin-bottom: 6px; flex-wrap: wrap; }
+  .unit { flex: 1; min-width: 128px; background: rgba(255,255,255,.04); border: 2px solid rgba(255,255,255,.08); border-radius: 12px; padding: 8px; text-align: center; position: relative; transition: box-shadow .15s, transform .1s, opacity .2s; }
+  .unit.dead { opacity: .35; filter: grayscale(1); }
+  .unit.target-eligible { box-shadow: 0 0 0 3px var(--heal); cursor: pointer; }
+  .unit.hero-eligible { box-shadow: 0 0 0 3px var(--energy); cursor: pointer; }
+  .portrait { font-size: 1.7rem; line-height: 1; position: relative; }
+  .uname { font-weight: 700; font-size: .72rem; margin: 2px 0 4px; }
+  .bar { height: 7px; border-radius: 5px; background: rgba(0,0,0,.35); overflow: hidden; margin-bottom: 2px; }
+  .bar > div { height: 100%; transition: width .3s ease; background: var(--hp); }
+  .bar-label { font-size: .58rem; color: var(--muted); margin-bottom: 3px; }
+  .energy-pips { display: flex; justify-content: center; flex-wrap: wrap; gap: 3px; margin-top: 3px; max-width: 90px; margin-left: auto; margin-right: auto; }
+  .pip { width: 8px; height: 8px; border-radius: 50%; background: var(--energy); opacity: .35; }
+  .pip.filled { opacity: 1; }
+  .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 3px; margin-top: 4px; min-height: 14px; }
+  .badge { font-size: .58rem; background: rgba(0,0,0,.3); border-radius: 6px; padding: 1px 4px; }
+  .badge.def { color: var(--def); }
+  .badge.status { color: var(--status); }
+  .line-toggle { margin-top: 4px; font-size: .56rem; background: rgba(255,255,255,.08); border: none; color: var(--text); border-radius: 6px; padding: 2px 5px; cursor: pointer; }
+  .line-toggle.front { background: rgba(217,69,95,.35); }
+  .telegraph { margin-top: 5px; font-size: .64rem; background: rgba(232,185,63,.12); border: 1px dashed var(--accent); border-radius: 8px; padding: 4px 5px; color: var(--accent); min-height: 30px; }
+  .telegraph .vise { color: var(--muted); display: block; margin-top: 1px; }
+  .log { background: rgba(0,0,0,.25); border-radius: 10px; padding: 7px 9px; font-size: .72rem; color: var(--muted); height: 66px; overflow-y: auto; margin: 8px 0; }
+  .log p { margin: 1px 0; }
+  .log p.you { color: var(--energy); }
+  .log p.foe { color: var(--hp); }
+  .log p.sys { color: var(--accent); }
+  .log p.heal { color: var(--heal); }
+  .log p.power { color: var(--status); }
+  .hand-label { text-align: center; font-size: .74rem; color: var(--accent); margin-bottom: 6px; min-height: 32px; }
+  .hand-row { display: flex; align-items: center; gap: 10px; }
+  .pile { display: flex; flex-direction: column; align-items: center; gap: 3px; flex-shrink: 0; }
+  .pile-stack { position: relative; width: 40px; height: 54px; }
+  .pile-card { position: absolute; inset: 0; border-radius: 7px; background: linear-gradient(160deg, #3a2a48, #241a2c); border: 1px solid rgba(255,255,255,.15); box-shadow: 0 2px 6px rgba(0,0,0,.3); display: flex; align-items: center; justify-content: center; font-size: .95rem; color: rgba(255,255,255,.25); }
+  .pile-card:nth-child(1) { transform: translate(0,0) rotate(0deg); z-index: 3; }
+  .pile-card:nth-child(2) { transform: translate(3px,-3px) rotate(3deg); z-index: 2; }
+  .pile-card:nth-child(3) { transform: translate(-3px,-6px) rotate(-3deg); z-index: 1; }
+  .pile-count { font-size: .6rem; color: var(--muted); white-space: nowrap; }
+  .hand { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; min-height: 150px; flex: 1; }
+  .ghost-card { position: fixed; z-index: 999; pointer-events: none; background: linear-gradient(160deg, #3a2a48, #241a2c); border: 1px solid rgba(255,255,255,.2); border-radius: 11px; padding: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 10px 20px rgba(0,0,0,.4); }
+  .ghost-card .icon { font-size: 1.2rem; }
+  .ghost-card .cname { font-weight: 700; font-size: .6rem; margin-top: 2px; text-align: center; }
+  .acted-badge { font-size: .56rem; color: var(--muted); margin-top: 3px; }
+  .card { width: 100px; min-height: 148px; background: linear-gradient(160deg, #3a2a48, #241a2c); border: 1px solid rgba(255,255,255,.12); border-radius: 11px; padding: 6px; cursor: pointer; user-select: none; display: flex; flex-direction: column; align-items: center; text-align: center; position: relative; transition: transform .12s, opacity .15s, box-shadow .12s; }
+  .card:hover { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(0,0,0,.35); }
+  .card.pending { box-shadow: 0 0 0 3px var(--accent); transform: translateY(-4px); }
+  .card.disabled { opacity: .3; cursor: not-allowed; }
+  .card .cost { align-self: flex-start; background: var(--energy); color: #04202b; font-weight: 700; font-size: .64rem; border-radius: 50%; width: 17px; height: 17px; display: flex; align-items: center; justify-content: center; margin-bottom: 3px; }
+  .card .tier { position: absolute; top: 5px; right: 5px; font-size: .56rem; color: var(--muted); }
+  .card .icon { font-size: 1.25rem; margin: 2px 0; }
+  .card .cname { font-weight: 700; font-size: .66rem; margin-bottom: 2px; }
+  .card .cclass { font-size: .56rem; color: var(--status); margin-bottom: 2px; }
+  .card .cdesc { font-size: .56rem; color: var(--muted); line-height: 1.25; }
+  .controls { display: flex; justify-content: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button.action { background: var(--accent); color: #2b1e08; border: none; font-weight: 700; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: .78rem; }
+  button.action:disabled { opacity: .4; cursor: not-allowed; }
+  button.secondary { background: transparent; border: 1px solid var(--muted); color: var(--text); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: .78rem; }
+  button.concentrate { background: var(--status); color: #1a0e21; border: none; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: .78rem; font-weight: 700; }
+  .hint { text-align: center; font-size: .68rem; color: var(--muted); margin-top: 8px; }
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 20px; }
+  .overlay.show { display: flex; }
+  .overlay h2 { font-size: 1.5rem; margin-bottom: 6px; }
+  .overlay p { color: var(--muted); margin-bottom: 16px; }
+  .keep-prompt { background: rgba(196,127,232,.12); border: 1px dashed var(--status); border-radius: 8px; padding: 6px; font-size: .68rem; color: var(--status); text-align: center; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<h1>⚔️ Proto — Cartes Complètes (18 cartes)</h1>
+<p class="subtitle">Guerrier · Paladin · Mage · Assassin. Cartes libres (pas de verrouillage) — jouer la carte de sa propre classe déclenche généralement sa Transcendance. Défense, statuts, Pouvoir de Classe inclus. Un héros ne peut recevoir qu'une seule carte par tour, sauf Clairvoyance qui le libère pour en recevoir une autre.</p>
+<p class="notes">Simplifications de proto (voir le récap texte livré à côté) : dégâts du coup gratuit du Guerrier non chiffrés dans la source → 2 dégâts en placeholder. "3 ennemis adjacents" → tous les ennemis vivants (on n'en a que 2). Ennemis actuels ne "se défendent" jamais (Coup d'estoc inerte pour l'instant).</p>
+
+<div class="arena">
+  <div class="row-label">Ennemis</div>
+  <div class="enemies" id="enemies"></div>
+
+  <div class="row-label">Ta troupe</div>
+  <div class="heroes" id="heroes"></div>
+
+  <div class="log" id="log"></div>
+
+  <div class="hand-label" id="hand-label"></div>
+  <div id="keep-prompt-zone"></div>
+  <div class="hand-row">
+    <div class="pile" id="deck-pile">
+      <div class="pile-stack"><div class="pile-card">🂠</div><div class="pile-card"></div><div class="pile-card"></div></div>
+      <div class="pile-count" id="deck-count">Pioche : 0</div>
+    </div>
+    <div class="hand" id="hand"></div>
+    <div class="pile" id="discard-pile">
+      <div class="pile-stack"><div class="pile-card">🗑️</div><div class="pile-card"></div><div class="pile-card"></div></div>
+      <div class="pile-count" id="discard-count">Défausse : 0</div>
+    </div>
+  </div>
+
+  <div class="controls" id="pending-controls" style="display:none;">
+    <button class="action" id="play-normal">Jouer</button>
+    <button class="concentrate" id="play-concentrate">Se concentrer (+1 énergie)</button>
+    <button class="secondary" id="cancel-pending">Annuler</button>
+  </div>
+
+  <div class="controls">
+    <button class="action" id="end-turn">Fin de tour</button>
+    <button class="secondary" id="restart">Recommencer</button>
+  </div>
+  <p class="hint" id="hint"></p>
+</div>
+
+<div class="overlay" id="overlay">
+  <h2 id="overlay-title">Victoire !</h2>
+  <p id="overlay-text"></p>
+  <button class="action" id="overlay-restart">Rejouer</button>
+</div>
+
+<script>
+(function () {
+  const HAND_SIZE = 5;
+  const GUERRIER_FREE_HIT_DMG = 2; // [ASSUMPTION] non chiffré dans la source, placeholder
+
+  const HERO_DEFS = [
+    { id: 'guerrier', classId: 'guerrier', name: 'Guerrier', icon: '⚔️', maxHp: 18 },
+    { id: 'paladin', classId: 'paladin', name: 'Paladin', icon: '🛡️', maxHp: 14 },
+    { id: 'mage', classId: 'mage', name: 'Mage', icon: '🔮', maxHp: 10 },
+    { id: 'assassin', classId: 'assassin', name: 'Assassin', icon: '🗡️', maxHp: 12 },
+  ];
+
+  const ENEMY_DEFS = [
+    { id: 'gobelin', name: 'Gobelin Maraudeur', icon: '👺', maxHp: 15,
+      moves: [ { name: 'Griffure', icon: '🩸', dmg: 4, weight: 2 }, { name: 'Charge Brutale', icon: '💥', dmg: 7, weight: 1 } ] },
+    { id: 'troll', name: 'Troll des Marais', icon: '🧌', maxHp: 28,
+      moves: [ { name: 'Coup de Massue', icon: '🔨', dmg: 8, weight: 2 }, { name: 'Régénération', icon: '💚', heal: 6, weight: 1 } ] },
+  ];
+
+  // ---- Card definitions: 2 génériques + 4 par classe (2 Départ + 2 Avancé) ----
+  const CARDS = [
+    { code: 'coup-direct', name: 'Coup direct', classId: 'generic', tier: 'depart', cost: 0, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', desc: 'Inflige 4 dégâts.',
+      effect: (ctx) => dealDamage(ctx.hero, ctx.target, 4, 'physique', ctx) },
+
+    { code: 'encaisser', name: 'Encaisser', classId: 'generic', tier: 'depart', cost: 0, cats: ['defense'], dmgType: null,
+      target: 'self', desc: 'Gagne 4 défense.',
+      effect: (ctx) => { ctx.hero.defense += 4; } },
+
+    { code: 'coup-estoc', name: "Coup d'estoc", classId: 'guerrier', tier: 'depart', cost: 1, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', desc: 'Inflige 4 dégâts (+4 si l\'ennemi se défend).',
+      effect: (ctx) => { const bonus = ctx.target.defending ? 4 : 0; dealDamage(ctx.hero, ctx.target, 4 + bonus, 'physique', ctx); } },
+
+    { code: 'coup-taille', name: 'Coup de taille', classId: 'guerrier', tier: 'depart', cost: 1, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'all-enemies', desc: 'Inflige 4 dégâts à 3 ennemis adjacents.',
+      effect: (ctx) => livingEnemies().forEach(e => dealDamage(ctx.hero, e, 4, 'physique', ctx)) },
+
+    { code: 'coup-brutal', name: 'Coup Brutal', classId: 'guerrier', tier: 'avance', cost: 2, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', desc: 'Inflige 6 dégâts et Saignements 3.',
+      effect: (ctx) => { dealDamage(ctx.hero, ctx.target, 6, 'physique', ctx); ctx.target.saignements = (ctx.target.saignements || 0) + 3; } },
+
+    { code: 'riposte', name: 'Riposte', classId: 'guerrier', tier: 'avance', cost: 1, cats: ['melee', 'degats', 'defense'], dmgType: 'physique',
+      target: 'self', desc: "Si l'aventurier est ciblé, annule l'attaque et inflige 4 dégâts.",
+      effect: (ctx) => {
+        const attacker = enemyTargeting(ctx.hero);
+        if (!attacker) { log(`Riposte : ${ctx.hero.name} n'est visé par personne, la carte ne fait rien.`, 'sys'); return; }
+        attacker.nextMove = null; attacker.targetHeroId = null;
+        dealDamage(ctx.hero, attacker, 4, 'physique', ctx);
+        log(`Riposte contre ${attacker.name} !`, 'you');
+      } },
+
+    { code: 'rempart', name: 'Rempart', classId: 'paladin', tier: 'depart', cost: 1, cats: ['defense'], dmgType: null,
+      target: 'ally', desc: 'Cet aventurier et un allié gagnent 4 défense (+50% pour l\'allié si joué par le Paladin).',
+      effect: (ctx) => { ctx.hero.defense += 4; const bonus = isSelfPlay(ctx) ? 2 : 0; ctx.target.defense += 4 + bonus; } },
+
+    { code: 'provocation', name: 'Provocation', classId: 'paladin', tier: 'depart', cost: 1, cats: ['defense'], dmgType: null,
+      target: 'enemy', desc: 'Gagne 6 défense. Un ennemi change sa cible pour cet aventurier.',
+      effect: (ctx) => { ctx.hero.defense += 6; if (ctx.target.nextMove && !ctx.target.nextMove.heal) ctx.target.targetHeroId = ctx.hero.id; } },
+
+    { code: 'clairvoyance', name: 'Clairvoyance', classId: 'paladin', tier: 'avance', cost: 0, cats: ['deck', 'concentration'], dmgType: null,
+      target: 'ally', desc: "Pioche 1 carte. Un autre aventurier se concentre. Cet aventurier n'est pas considéré avoir agi — une autre carte peut encore lui être assignée ce tour-ci.",
+      effect: (ctx) => { animatedDraw(1); ctx.target.energy += 1; log(`${ctx.target.name} se concentre grâce à Clairvoyance.`, 'you'); ctx.hero.hasActed = false; log(`${ctx.hero.name} peut encore agir ce tour.`, 'power'); } },
+
+    { code: 'lumiere-divine', name: 'Lumière divine', classId: 'paladin', tier: 'avance', cost: 2, cats: ['defense', 'soin', 'magie'], dmgType: null,
+      target: 'self', desc: 'Gagne 4 défense. Restaure 2 PV à tous les aventuriers.',
+      effect: (ctx) => { ctx.hero.defense += 4; livingHeroes().forEach(h => { h.hp = Math.min(h.maxHp, h.hp + 2); }); } },
+
+    { code: 'missile-magique', name: 'Missile magique', classId: 'mage', tier: 'depart', cost: 2, cats: ['distance', 'degats'], dmgType: 'magique',
+      target: 'enemy', desc: 'Inflige 5 dégâts magiques.',
+      effect: (ctx) => dealDamage(ctx.hero, ctx.target, 5, 'magique', ctx) },
+
+    { code: 'image-miroir', name: 'Image miroir', classId: 'mage', tier: 'depart', cost: 3, cats: ['defense'], dmgType: 'magique',
+      target: 'self', desc: 'Gagne Esquive 2.',
+      effect: (ctx) => { ctx.hero.esquive = (ctx.hero.esquive || 0) + 2; } },
+
+    { code: 'tornade-feu', name: 'Tornade de feu', classId: 'mage', tier: 'avance', cost: 6, cats: ['distance', 'degats'], dmgType: 'magique',
+      target: 'all-enemies', desc: 'Inflige 3 dégâts magiques à tous les ennemis.',
+      effect: (ctx) => livingEnemies().forEach(e => dealDamage(ctx.hero, e, 3, 'magique', ctx)) },
+
+    { code: 'boule-feu', name: 'Boule de feu', classId: 'mage', tier: 'avance', cost: 8, cats: ['distance', 'degats'], dmgType: 'magique',
+      target: 'enemy', desc: 'Inflige 10 dégâts magiques.',
+      effect: (ctx) => dealDamage(ctx.hero, ctx.target, 10, 'magique', ctx) },
+
+    { code: 'strategie', name: 'Stratégie', classId: 'assassin', tier: 'depart', cost: 1, cats: ['melee', 'degats', 'defense'], dmgType: 'physique',
+      target: 'conditional', desc: "Si ciblé : gagne 4 défense. Sinon : inflige 4 dégâts à un ennemi.",
+      effect: (ctx) => {
+        if (enemyTargeting(ctx.hero)) { ctx.hero.defense += 4; log(`${ctx.hero.name} est visé : Stratégie lui donne 4 défense.`, 'you'); }
+        else dealDamage(ctx.hero, ctx.target, 4, 'physique', ctx);
+      } },
+
+    { code: 'coup-mortel', name: 'Coup mortel', classId: 'assassin', tier: 'depart', cost: 1, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', desc: 'Inflige 2 dégâts. Si tue sa cible, rembourse le coût.',
+      effect: (ctx) => { dealDamage(ctx.hero, ctx.target, 2, 'physique', ctx); if (ctx.target.hp <= 0) { ctx.hero.energy += ctx.cardDef.cost; log(`${ctx.hero.name} achève ${ctx.target.name} — Coup mortel remboursé.`, 'you'); } } },
+
+    { code: 'assassinat', name: 'Assassinat', classId: 'assassin', tier: 'avance', cost: 6, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', requiresCamouflage: true, desc: 'Ne peut être joué que Camouflé. Inflige 10 dégâts.',
+      effect: (ctx) => { dealDamage(ctx.hero, ctx.target, 10, 'physique', ctx); ctx.hero.camoufle = false; } },
+
+    { code: 'lachete', name: 'Lâcheté', classId: 'assassin', tier: 'avance', cost: 1, cats: [], dmgType: null,
+      target: 'enemy', desc: "Change la cible pour un autre aventurier. L'ennemi gagne Incapacité 1.",
+      effect: (ctx) => {
+        const others = livingHeroes().filter(h => h.id !== ctx.hero.id);
+        if (others.length && ctx.target.nextMove && !ctx.target.nextMove.heal) {
+          ctx.target.targetHeroId = others[Math.floor(Math.random() * others.length)].id;
+        }
+        ctx.target.incapacite = (ctx.target.incapacite || 0) + 1;
+      } },
+  ];
+
+  const state = { heroes: [], enemies: [], deck: [], hand: [], discard: [], pending: null, turn: 1, over: false, mageKeepPending: false };
+  let uidCounter = 0;
+
+  const el = {
+    enemies: document.getElementById('enemies'),
+    heroes: document.getElementById('heroes'),
+    log: document.getElementById('log'),
+    deckPile: document.getElementById('deck-pile'),
+    deckCount: document.getElementById('deck-count'),
+    discardPile: document.getElementById('discard-pile'),
+    discardCount: document.getElementById('discard-count'),
+    handLabel: document.getElementById('hand-label'),
+    hand: document.getElementById('hand'),
+    keepZone: document.getElementById('keep-prompt-zone'),
+    pendingControls: document.getElementById('pending-controls'),
+    playNormal: document.getElementById('play-normal'),
+    playConcentrate: document.getElementById('play-concentrate'),
+    cancelPending: document.getElementById('cancel-pending'),
+    endTurn: document.getElementById('end-turn'),
+    restart: document.getElementById('restart'),
+    hint: document.getElementById('hint'),
+    overlay: document.getElementById('overlay'),
+    overlayTitle: document.getElementById('overlay-title'),
+    overlayText: document.getElementById('overlay-text'),
+    overlayRestart: document.getElementById('overlay-restart'),
+  };
+
+  function log(msg, cls) {
+    const p = document.createElement('p');
+    p.textContent = msg;
+    if (cls) p.className = cls;
+    el.log.appendChild(p);
+    el.log.scrollTop = el.log.scrollHeight;
+  }
+
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+    return a;
+  }
+
+  // ---------- card-flight animation (pioche <-> main <-> défausse) ----------
+
+  const FLIGHT_MS = 380;
+
+  function flyGhost(originRect, destRect, def, fadeIn) {
+    const ghost = document.createElement('div');
+    ghost.className = 'ghost-card';
+    ghost.style.left = originRect.left + 'px';
+    ghost.style.top = originRect.top + 'px';
+    ghost.style.width = originRect.width + 'px';
+    ghost.style.height = originRect.height + 'px';
+    ghost.style.opacity = fadeIn ? '0' : '1';
+    ghost.innerHTML = `<div class="icon">${{generic:'⚪',guerrier:'⚔️',paladin:'🛡️',mage:'🔮',assassin:'🗡️'}[def.classId]}</div><div class="cname">${def.name}</div>`;
+    document.body.appendChild(ghost);
+    const dx = (destRect.left + destRect.width / 2) - (originRect.left + originRect.width / 2);
+    const dy = (destRect.top + destRect.height / 2) - (originRect.top + originRect.height / 2);
+    const scale = Math.max(0.3, Math.min(1.2, destRect.width / originRect.width));
+    requestAnimationFrame(() => {
+      ghost.style.transition = `transform ${FLIGHT_MS}ms cubic-bezier(.2,.7,.3,1), opacity ${FLIGHT_MS}ms ease`;
+      ghost.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+      ghost.style.opacity = fadeIn ? '1' : '0.2';
+    });
+    setTimeout(() => ghost.remove(), FLIGHT_MS + 60);
+  }
+
+  function animateDrawnCards(newUids) {
+    if (!newUids.length) return;
+    const deckRect = el.deckPile.getBoundingClientRect();
+    newUids.forEach((uid, i) => {
+      const cardEl = el.hand.querySelector(`[data-uid="${uid}"]`);
+      const card = state.hand.find(c => c.uid === uid);
+      if (!cardEl || !card) return;
+      const destRect = cardEl.getBoundingClientRect();
+      setTimeout(() => flyGhost(deckRect, destRect, card.def, true), i * 70);
+    });
+  }
+
+  function animateDiscardedCards(cardsWithRects) {
+    if (!cardsWithRects.length) return;
+    const discardRect = el.discardPile.getBoundingClientRect();
+    cardsWithRects.forEach(({ rect, def }, i) => {
+      setTimeout(() => flyGhost(rect, discardRect, def, false), i * 60);
+    });
+  }
+
+  function livingHeroes() { return state.heroes.filter(h => h.hp > 0); }
+  function livingEnemies() { return state.enemies.filter(e => e.hp > 0); }
+  function heroById(id) { return state.heroes.find(h => h.id === id); }
+  function isSelfPlay(ctx) { return ctx.hero.classId === ctx.cardDef.classId; }
+  function enemyTargeting(hero) { return state.enemies.find(e => e.hp > 0 && e.nextMove && !e.nextMove.heal && e.targetHeroId === hero.id) || null; }
+
+  function dealDamage(sourceHero, targetUnit, base, dmgType, ctx) {
+    let amount = base;
+    if (ctx && isSelfPlay(ctx) && ctx.cardDef.classId === 'guerrier' && ctx.cardDef.cats.includes('melee')) amount *= 1.5; // Transcendance Guerrier
+    if (sourceHero && sourceHero.line === 'back' && dmgType === 'physique') amount *= 0.8; // Paladin backline: -20% dégâts physiques infligés
+    if (targetUnit.line === 'back' && dmgType === 'physique') amount *= 0.8; // -20% dégâts physiques reçus
+    if (targetUnit.incapacite > 0 && !sourceHero) amount *= 0.75; // Incapacité only ever placed on enemies in this card set
+    if (sourceHero && sourceHero.incapacite) amount *= 0.75;
+    if (targetUnit.vulnerabilite > 0) amount *= 1.25;
+    amount = Math.round(amount);
+    const absorbed = Math.min(targetUnit.defense || 0, amount);
+    if (absorbed > 0) targetUnit.defense -= absorbed;
+    const toHp = amount - absorbed;
+    targetUnit.hp -= toHp;
+    log(`${sourceHero ? sourceHero.name : 'Un ennemi'} inflige ${amount} dégâts${absorbed ? ` (${absorbed} absorbés)` : ''} à ${targetUnit.name}.`, sourceHero ? 'you' : 'foe');
+    if (ctx && isSelfPlay(ctx) && ctx.cardDef.classId === 'assassin' && ctx.cardDef.cats.includes('melee') && targetUnit.hp > 0) {
+      targetUnit.incapacite = (targetUnit.incapacite || 0) + 1;
+      targetUnit.vulnerabilite = (targetUnit.vulnerabilite || 0) + 1;
+      log(`Transcendance de l'Assassin : Incapacité 1 et Vulnérabilité 1 sur ${targetUnit.name}.`, 'power');
+    }
+  }
+
+  function buildDeck() {
+    const cards = [];
+    CARDS.forEach(def => cards.push({ uid: uidCounter++, def }));
+    return shuffle(cards);
+  }
+
+  function animatedDraw(n) {
+    const drawn = drawCards(n);
+    render();
+    animateDrawnCards(drawn);
+  }
+
+  function drawCards(n) {
+    const drawn = [];
+    for (let i = 0; i < n; i++) {
+      if (state.hand.length >= HAND_SIZE && n === HAND_SIZE) break;
+      if (state.deck.length === 0) {
+        if (state.discard.length === 0) break;
+        state.deck = shuffle(state.discard); state.discard = [];
+        log('Le deck est vide : la défausse est remélangée.', 'sys');
+      }
+      const c = state.deck.pop(); state.hand.push(c); drawn.push(c.uid);
+    }
+    return drawn;
+  }
+
+  function fillHand() {
+    const drawn = [];
+    while (state.hand.length < HAND_SIZE) {
+      if (state.deck.length === 0) {
+        if (state.discard.length === 0) break;
+        state.deck = shuffle(state.discard); state.discard = [];
+        log('Le deck est vide : la défausse est remélangée.', 'sys');
+      }
+      const c = state.deck.pop(); state.hand.push(c); drawn.push(c.uid);
+    }
+    return drawn;
+  }
+
+  function pickWeighted(moves) {
+    const total = moves.reduce((s, m) => s + m.weight, 0);
+    let r = Math.random() * total;
+    for (const m of moves) { if ((r -= m.weight) <= 0) return m; }
+    return moves[moves.length - 1];
+  }
+
+  function rollEnemyTelegraphs() {
+    const alive = livingHeroes();
+    state.enemies.forEach(e => {
+      if (e.hp <= 0) { e.nextMove = null; e.targetHeroId = null; return; }
+      e.nextMove = pickWeighted(e.moves);
+      e.targetHeroId = e.nextMove.heal ? null : alive[Math.floor(Math.random() * alive.length)].id;
+    });
+  }
+
+  // ---------- rendering ----------
+
+  function renderEnemies() {
+    el.enemies.innerHTML = '';
+    const awaitingEnemyTarget = state.pending && state.pending.mode === 'play' && state.pending.heroId
+      && (state.pending.def.target === 'enemy' || (state.pending.def.target === 'conditional' && !enemyTargeting(heroById(state.pending.heroId))));
+    state.enemies.forEach(e => {
+      const dead = e.hp <= 0;
+      const div = document.createElement('div');
+      div.className = 'unit' + (dead ? ' dead' : '') + (awaitingEnemyTarget && !dead ? ' target-eligible' : '');
+      div.dataset.enemyId = e.id;
+      const pct = Math.max(0, (e.hp / e.maxHp) * 100);
+      let telegraphHtml = 'Vaincu.';
+      if (!dead && e.nextMove) {
+        const targetName = e.nextMove.heal ? null : (heroById(e.targetHeroId) || {}).name;
+        telegraphHtml = `${e.nextMove.icon} ${e.nextMove.name}${e.nextMove.dmg ? ' — ' + e.nextMove.dmg + ' dégâts' : ' — soigne ' + e.nextMove.heal + ' PV'}`
+          + (targetName ? `<span class="vise">vise ${targetName}</span>` : '');
+      }
+      const badges = [];
+      if (e.saignements > 0) badges.push(`<span class="badge status">🩸${e.saignements}</span>`);
+      if (e.incapacite > 0) badges.push(`<span class="badge status">⬇️${e.incapacite}</span>`);
+      if (e.vulnerabilite > 0) badges.push(`<span class="badge status">🎯${e.vulnerabilite}</span>`);
+      div.innerHTML = `
+        <div class="portrait">${e.icon}</div>
+        <div class="uname">${e.name}</div>
+        <div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="bar-label">${Math.max(0, e.hp)} / ${e.maxHp} PV</div>
+        <div class="badges">${badges.join('')}</div>
+        <div class="telegraph">${telegraphHtml}</div>
+      `;
+      el.enemies.appendChild(div);
+      div.addEventListener('click', () => { if (awaitingEnemyTarget && !dead) resolvePending('enemy', e.id); });
+    });
+  }
+
+  function renderHeroes() {
+    el.heroes.innerHTML = '';
+    const pending = state.pending;
+    const awaitingHero = pending && pending.mode !== null && !pending.heroId;
+    const awaitingAllyTarget = pending && pending.mode === 'play' && pending.heroId && pending.def.target === 'ally';
+    state.heroes.forEach(h => {
+      const dead = h.hp <= 0;
+      const canAfford = h.energy >= (pending ? effectiveCost(h, pending.def) : 0);
+      const camoOk = !(pending && pending.def.requiresCamouflage && !h.camoufle);
+      const eligibleAsPlayer = awaitingHero && !dead && canAfford && camoOk && !h.hasActed;
+      const eligibleAsTarget = awaitingAllyTarget && !dead && h.id !== pending.heroId;
+      const div = document.createElement('div');
+      div.className = 'unit' + (dead ? ' dead' : '') + (eligibleAsPlayer ? ' hero-eligible' : '') + (eligibleAsTarget ? ' target-eligible' : '');
+      div.dataset.heroId = h.id;
+      const pct = Math.max(0, (h.hp / h.maxHp) * 100);
+      const maxPipsShown = Math.max(h.energy, 6);
+      let pips = '';
+      for (let i = 0; i < maxPipsShown; i++) pips += `<div class="pip${i < h.energy ? ' filled' : ''}"></div>`;
+      const badges = [];
+      if (h.defense > 0) badges.push(`<span class="badge def">🛡️${h.defense}</span>`);
+      if (h.esquive > 0) badges.push(`<span class="badge status">💨${h.esquive}</span>`);
+      if (h.camoufle) badges.push(`<span class="badge status">🥷</span>`);
+      div.innerHTML = `
+        <div class="portrait">${h.icon}</div>
+        <div class="uname">${h.name}</div>
+        <div class="bar"><div style="width:${pct}%"></div></div>
+        <div class="bar-label">${Math.max(0, h.hp)} / ${h.maxHp} PV — ⚡${h.energy}</div>
+        <div class="badges">${badges.join('')}</div>
+        <div class="energy-pips">${pips}</div>
+        ${h.classId === 'paladin' ? '' : `<button class="line-toggle ${h.line}" data-line-toggle="${h.id}">${h.line === 'front' ? 'Front Line' : 'Back Line'}</button>`}
+        ${h.classId === 'paladin' ? '<div class="badge def" style="margin-top:4px;">Toujours Front Line</div>' : ''}
+        ${!dead && h.hasActed ? '<div class="acted-badge">✅ a agi ce tour</div>' : ''}
+      `;
+      el.heroes.appendChild(div);
+      div.addEventListener('click', (ev) => {
+        if (ev.target.closest('[data-line-toggle]')) return;
+        if (eligibleAsPlayer) { assignHero(h.id); return; }
+        if (eligibleAsTarget) { resolvePending('ally', h.id); return; }
+      });
+      const toggleBtn = div.querySelector('[data-line-toggle]');
+      if (toggleBtn) toggleBtn.addEventListener('click', (ev) => { ev.stopPropagation(); h.line = h.line === 'front' ? 'back' : 'front'; render(); });
+    });
+  }
+
+  function effectiveCost(hero, def) {
+    let cost = def.cost;
+    if (hero.classId === def.classId && def.classId === 'mage' && def.cats.includes('degats')) cost = Math.max(0, cost - 2); // Transcendance Mage
+    return cost;
+  }
+
+  function renderHand() {
+    el.hand.innerHTML = '';
+    state.hand.forEach(card => {
+      const def = card.def;
+      const isPending = state.pending && state.pending.uid === card.uid;
+      const div = document.createElement('div');
+      div.className = 'card' + (isPending ? ' pending' : '');
+      div.dataset.uid = card.uid;
+      div.innerHTML = `
+        <div class="cost">${def.cost}</div>
+        <div class="tier">${def.tier === 'avance' ? 'Av.' : 'Dép.'}</div>
+        <div class="icon">${{generic:'⚪',guerrier:'⚔️',paladin:'🛡️',mage:'🔮',assassin:'🗡️'}[def.classId]}</div>
+        <div class="cname">${def.name}</div>
+        <div class="cclass">${def.classId === 'generic' ? 'Générique' : def.classId[0].toUpperCase()+def.classId.slice(1)}</div>
+        <div class="cdesc">${def.desc}</div>
+      `;
+      div.addEventListener('click', () => onHandCardClicked(card));
+      el.hand.appendChild(div);
+    });
+  }
+
+  function renderKeepPrompt() {
+    el.keepZone.innerHTML = '';
+    if (!state.mageKeepPending) return;
+    const div = document.createElement('div');
+    div.className = 'keep-prompt';
+    div.textContent = '🔮 Pouvoir de Classe du Mage : clique une carte à GARDER (les autres seront défaussées).';
+    el.keepZone.appendChild(div);
+  }
+
+  function renderStatusAndHint() {
+    el.deckCount.textContent = `Pioche : ${state.deck.length}`;
+    el.discardCount.textContent = `Défausse : ${state.discard.length}`;
+    const pending = state.pending;
+    el.pendingControls.style.display = pending && !pending.mode ? 'flex' : 'none';
+    if (!pending) {
+      el.handLabel.textContent = `Tour ${state.turn} — main (${state.hand.length}/${HAND_SIZE})`;
+      el.hint.textContent = state.mageKeepPending ? 'Fin de tour : choisis la carte que le Mage garde.' : 'Clique une carte de ta main pour commencer.';
+    } else if (!pending.mode) {
+      el.handLabel.textContent = `${pending.def.name} sélectionnée — jouer normalement, ou se concentrer ?`;
+      el.hint.textContent = 'Se concentrer défausse la carte contre 1 énergie pour le héros choisi, sans résoudre son effet.';
+    } else if (!pending.heroId) {
+      el.handLabel.textContent = `${pending.def.name} — ${pending.mode === 'concentrate' ? 'Concentration' : 'jeu normal'}`;
+      el.hint.textContent = pending.def.requiresCamouflage ? "Cette carte exige d'être Camouflé — seul un héros Camouflé est éligible." : 'Choisis quel aventurier.';
+    } else {
+      const heroName = heroById(pending.heroId).name;
+      el.handLabel.textContent = `${pending.def.name} — ${heroName}`;
+      el.hint.textContent = pending.def.target === 'enemy' ? "Choisis l'ennemi visé." : pending.def.target === 'ally' ? "Choisis l'allié visé." : 'Résolution en cours...';
+    }
+  }
+
+  function render() {
+    renderEnemies();
+    renderHeroes();
+    renderHand();
+    renderKeepPrompt();
+    renderStatusAndHint();
+  }
+
+  // ---------- playing cards ----------
+
+  function onHandCardClicked(card) {
+    if (state.over || state.mageKeepPending) {
+      if (state.mageKeepPending) resolveMageKeep(card.uid);
+      return;
+    }
+    if (state.pending && state.pending.uid === card.uid) { state.pending = null; render(); return; }
+    state.pending = { uid: card.uid, def: card.def, mode: null, heroId: null };
+    render();
+  }
+
+  function assignHero(heroId) {
+    const pending = state.pending;
+    const hero = heroById(heroId);
+    const def = pending.def;
+    if (!hero || hero.hp <= 0) return;
+    if (hero.hasActed) return;
+    if (hero.energy < effectiveCost(hero, def)) return;
+    if (def.requiresCamouflage && !hero.camoufle) return;
+    pending.heroId = heroId;
+    hero.hasActed = true;
+
+    if (pending.mode === 'concentrate') {
+      hero.energy += 1 - 0; // discard for +1 energy: cost isn't paid, just gained
+      log(`${hero.name} se concentre avec ${def.name} (+1 énergie).`, 'you');
+      if (hero.classId === 'assassin') { hero.camoufle = true; log(`${hero.name} devient Camouflé !`, 'power'); }
+      finishCard(pending);
+      return;
+    }
+    // mode === 'play'
+    if (def.target === 'self') { resolvePending('self', heroId); return; }
+    if (def.target === 'all-enemies') { resolvePending('all-enemies', null); return; }
+    if (def.target === 'conditional' && enemyTargeting(hero)) { resolvePending('self', heroId); return; }
+    render();
+  }
+
+  function resolvePending(kind, targetId) {
+    const pending = state.pending;
+    if (!pending || !pending.heroId) return;
+    const hero = heroById(pending.heroId);
+    const def = pending.def;
+    const cost = effectiveCost(hero, def);
+    if (!hero || hero.energy < cost) { state.pending = null; render(); return; }
+
+    let target = null;
+    if (def.target === 'enemy' || (def.target === 'conditional' && kind === 'enemy')) {
+      if (kind !== 'enemy') return;
+      target = state.enemies.find(e => e.id === targetId);
+      if (!target || target.hp <= 0) return;
+    } else if (def.target === 'ally') {
+      if (kind !== 'ally') return;
+      target = heroById(targetId);
+      if (!target || target.hp <= 0) return;
+    } else if (def.target === 'self' || (def.target === 'conditional' && kind === 'self')) {
+      target = hero;
+    }
+
+    hero.energy -= cost;
+    const ctx = { state, hero, target, cardDef: def };
+    def.effect(ctx);
+    checkVictory();
+    finishCard(pending);
+  }
+
+  function finishCard(pending) {
+    const idx = state.hand.findIndex(c => c.uid === pending.uid);
+    let flightOrigin = null;
+    if (idx !== -1) {
+      const cardEl = el.hand.querySelector(`[data-uid="${pending.uid}"]`);
+      if (cardEl) flightOrigin = { rect: cardEl.getBoundingClientRect(), def: state.hand[idx].def };
+      state.discard.push(state.hand[idx]);
+      state.hand.splice(idx, 1);
+    }
+    state.pending = null;
+    render();
+    if (flightOrigin) animateDiscardedCards([flightOrigin]);
+  }
+
+  // ---------- turn resolution ----------
+
+  function checkVictory() { if (!state.over && livingEnemies().length === 0) endGame(true); }
+  function checkDefeat() { if (!state.over && livingHeroes().length === 0) endGame(false); }
+
+  function resolveMageKeep(uid) {
+    const rest = state.hand.filter(c => c.uid !== uid);
+    state.mageKeepPending = false;
+    if (rest.length) log(`${rest.length} carte(s) défaussée(s) (le Mage en garde 1).`, 'sys');
+    discardThenAdvance(rest);
+  }
+
+  function endTurnClicked() {
+    if (state.over || state.mageKeepPending) return;
+    state.pending = null;
+    const mage = heroById('mage');
+    if (mage && mage.hp > 0 && state.hand.length > 0) {
+      state.mageKeepPending = true;
+      render();
+      return;
+    }
+    if (state.hand.length > 0) log(`${state.hand.length} carte(s) non jouée(s) défaussée(s).`, 'sys');
+    discardThenAdvance(state.hand.slice());
+  }
+
+  // Défausse (avec animation) les cartes données, laisse 1s pour que le joueur voie l'envol,
+  // puis enchaîne sur la résolution ennemie + la pioche du tour suivant (elle-même animée).
+  function discardThenAdvance(cardsToDiscard) {
+    if (!cardsToDiscard.length) { advanceAfterDiscard(); return; }
+    const flights = cardsToDiscard.map(c => {
+      const cardEl = el.hand.querySelector(`[data-uid="${c.uid}"]`);
+      return cardEl ? { rect: cardEl.getBoundingClientRect(), def: c.def } : null;
+    }).filter(Boolean);
+    const discardIds = new Set(cardsToDiscard.map(c => c.uid));
+    state.discard.push(...cardsToDiscard);
+    state.hand = state.hand.filter(c => !discardIds.has(c.uid));
+    render();
+    animateDiscardedCards(flights);
+    setTimeout(advanceAfterDiscard, 1000);
+  }
+
+  function advanceAfterDiscard() {
+    state.enemies.forEach(e => {
+      if (e.hp <= 0) return;
+      if (e.saignements > 0) { const dmg = e.saignements; e.hp -= dmg; log(`${e.name} saigne : ${dmg} dégâts.`, 'sys'); e.saignements -= 1; }
+    });
+    state.enemies.forEach(e => {
+      if (e.hp <= 0 || !e.nextMove) return;
+      if (e.nextMove.heal) { e.hp = Math.min(e.maxHp, e.hp + e.nextMove.heal); log(`${e.name} se régénère de ${e.nextMove.heal} PV.`, 'heal'); return; }
+      const target = heroById(e.targetHeroId);
+      if (!target || target.hp <= 0) return;
+      if (target.esquive > 0) { target.esquive -= 1; log(`${e.name} utilise ${e.nextMove.name} sur ${target.name}… esquivé !`, 'sys'); return; }
+      dealDamage(null, target, e.nextMove.dmg, 'physique', null);
+    });
+    state.heroes.forEach(h => { if (h.incapacite) h.incapacite = Math.max(0, h.incapacite - 1); });
+    state.enemies.forEach(e => { if (e.incapacite) e.incapacite = Math.max(0, e.incapacite - 1); if (e.vulnerabilite) e.vulnerabilite = Math.max(0, e.vulnerabilite - 1); });
+
+    checkDefeat();
+    if (state.over) { render(); return; }
+    state.turn += 1;
+    startTurn();
+  }
+
+  function startTurn() {
+    if (state.over) return;
+    state.heroes.forEach(h => { if (h.hp > 0) { h.energy += 1; h.defense = 0; h.hasActed = false; } });
+    log(`— Tour ${state.turn} : +1 énergie, pioche à ${HAND_SIZE} —`, 'sys');
+
+    // Pouvoir de Classe Guerrier : coup gratuit par carte de mêlée offensive en main
+    const guerrier = heroById('guerrier');
+    rollEnemyTelegraphs();
+    const drawn = fillHand();
+    if (guerrier && guerrier.hp > 0) {
+      const meleeCount = state.hand.filter(c => c.def.cats.includes('melee') && c.def.cats.includes('degats')).length;
+      for (let i = 0; i < meleeCount; i++) {
+        const targets = livingEnemies();
+        if (!targets.length) break;
+        const t = targets[Math.floor(Math.random() * targets.length)];
+        log(`Pouvoir de Classe du Guerrier : coup gratuit sur ${t.name}.`, 'power');
+        dealDamage(guerrier, t, GUERRIER_FREE_HIT_DMG, 'physique', null);
+      }
+    }
+    render();
+    animateDrawnCards(drawn);
+  }
+
+  function endGame(won) {
+    state.over = true;
+    render();
+    el.overlayTitle.textContent = won ? 'Victoire !' : 'Défaite…';
+    el.overlayText.textContent = won ? `Ennemis vaincus en ${state.turn} tour(s).` : 'Toute la troupe est tombée au combat.';
+    el.overlay.classList.add('show');
+  }
+
+  function resetGame() {
+    state.heroes = HERO_DEFS.map(h => ({ ...h, hp: h.maxHp, energy: 0, defense: 0, esquive: 0, camoufle: false, incapacite: 0, hasActed: false, line: h.classId === 'paladin' ? 'front' : 'back' }));
+    state.enemies = ENEMY_DEFS.map(e => ({ ...e, hp: e.maxHp, defense: 0, saignements: 0, incapacite: 0, vulnerabilite: 0, defending: false, nextMove: null, targetHeroId: null }));
+    state.deck = buildDeck();
+    state.hand = []; state.discard = []; state.pending = null; state.mageKeepPending = false;
+    state.turn = 1; state.over = false;
+    el.log.innerHTML = '';
+    el.overlay.classList.remove('show');
+    log('Un Gobelin Maraudeur et un Troll des Marais bloquent le chemin !', 'sys');
+    startTurn();
+  }
+
+  el.playNormal.addEventListener('click', () => { if (state.pending) { state.pending.mode = 'play'; render(); } });
+  el.playConcentrate.addEventListener('click', () => { if (state.pending) { state.pending.mode = 'concentrate'; render(); } });
+  el.cancelPending.addEventListener('click', () => { state.pending = null; render(); });
+  el.endTurn.addEventListener('click', endTurnClicked);
+  el.restart.addEventListener('click', resetGame);
+  el.overlayRestart.addEventListener('click', resetGame);
+
+  resetGame();
+})();
+</script>
+</body>
+</html>
