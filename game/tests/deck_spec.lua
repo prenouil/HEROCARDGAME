@@ -1,0 +1,66 @@
+local Deck = require("src.rules.deck")
+local Combat = require("src.rules.combat")
+local Cards = require("src.data.cards")
+
+local function make_state()
+  return { hand = {}, deck = {}, discard = {}, log = {} }
+end
+
+local function fake_cards(n)
+  local out = {}
+  local def = Cards.by_code("coup-direct")
+  for i = 1, n do out[i] = { uid = i, def = def } end
+  return out
+end
+
+describe("Deck.build_starting_deck", function()
+  it("contient 10 cartes : 3 Coup direct, 3 Encaisser, 1 par classe", function()
+    local uid = 0
+    local deck = Deck.build_starting_deck(function() uid = uid + 1 return uid end)
+    assert.equal(10, #deck)
+    local counts = {}
+    for _, c in ipairs(deck) do counts[c.def.code] = (counts[c.def.code] or 0) + 1 end
+    assert.equal(3, counts["coup-direct"])
+    assert.equal(3, counts["encaisser"])
+    assert.equal(1, counts["coup-estoc"])
+    assert.equal(1, counts["rempart"])
+    assert.equal(1, counts["missile-magique"])
+    assert.equal(1, counts["strategie"])
+  end)
+end)
+
+describe("Deck.draw_cards / fill_hand", function()
+  it("pioche jusqu'à HAND_SIZE et remélange la défausse quand le deck est vide", function()
+    local state = make_state()
+    state.deck = fake_cards(2)
+    state.discard = fake_cards(3)
+    local drawn = Deck.fill_hand(state)
+    assert.equal(Deck.HAND_SIZE, #drawn)
+    assert.equal(Deck.HAND_SIZE, #state.hand)
+    assert.equal(0, #state.discard) -- entièrement recyclée dans le deck puis piochée
+  end)
+
+  it("s'arrête proprement quand deck et défausse sont tous les deux vides", function()
+    local state = make_state()
+    local drawn = Deck.fill_hand(state)
+    assert.equal(0, #drawn)
+    assert.equal(0, #state.hand)
+  end)
+
+  it("draw_cards(1) pioche 1 carte même si la main n'est pas pleine (cas Clairvoyance)", function()
+    local state = make_state()
+    state.deck = fake_cards(3)
+    state.hand = fake_cards(4) -- déjà proche de HAND_SIZE mais pas égal
+    local drawn = Deck.draw_cards(state, 1)
+    assert.equal(1, #drawn)
+    assert.equal(5, #state.hand)
+  end)
+end)
+
+describe("Deck.shuffle", function()
+  it("ne perd ni ne duplique de carte", function()
+    local original = fake_cards(10)
+    local shuffled = Deck.shuffle(original)
+    assert.equal(#original, #shuffled)
+  end)
+end)

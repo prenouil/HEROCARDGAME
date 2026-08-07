@@ -1,0 +1,191 @@
+-- Bestiaire (10 ennemis, "Run Infini", 2026-08-06) et aides de scaling par niveau.
+-- Port fidèle de ENEMY_TEMPLATES / VALUE_VARIANCE / LEVEL_GROWTH / roll*/scaled*
+-- depuis proto-cartes-completes/index.html. Seules les VALEURS scalent avec le
+-- niveau ; le comportement de chaque ennemi (chooseMove) est fixe.
+-- NOTE : ce système "Run Infini" (bestiaire à 10, scaling de niveau, budget de
+-- rencontre) n'est pour l'instant documenté nulle part dans gdd.md/epics.md —
+-- signalé, pas corrigé ici (hors scope de ce port).
+-- `icon` = vraie donnée de design (emoji) ; `label` = repli texte utilisé par la
+-- UI LÖVE, dont la police par défaut ne contient pas ces glyphes.
+
+local Enemies = {}
+
+Enemies.VALUE_VARIANCE = 0.20
+Enemies.LEVEL_GROWTH = 0.20 -- +20%/niveau, valeur de départ à tester (placeholder assumé)
+
+local function round(x) return math.floor(x + 0.5) end
+Enemies.round = round
+
+local function value_range(v)
+  return round(v * (1 - Enemies.VALUE_VARIANCE)), round(v * (1 + Enemies.VALUE_VARIANCE))
+end
+Enemies.value_range = value_range
+
+local function roll_value(v)
+  local lo, hi = value_range(v)
+  return lo + math.random(0, hi - lo)
+end
+Enemies.roll_value = roll_value
+
+local function scaled_base(base, level)
+  return base * (1 + Enemies.LEVEL_GROWTH * (level - 1))
+end
+Enemies.scaled_base = scaled_base
+
+local function roll_scaled(base, level)
+  return roll_value(scaled_base(base, level))
+end
+Enemies.roll_scaled = roll_scaled
+
+local function scaled_range(base, level)
+  return value_range(scaled_base(base, level))
+end
+Enemies.scaled_range = scaled_range
+
+local function cost_at_level(template, level)
+  return round(scaled_base(template.cost, level))
+end
+Enemies.cost_at_level = cost_at_level
+
+local function range_text(base, level)
+  local lo, hi = scaled_range(base, level)
+  return lo .. "-" .. hi
+end
+
+Enemies.status_labels = { vulnerabilite = "Vulnérabilité", incapacite = "Incapacité" }
+
+Enemies.templates = {
+  {
+    id = "gobelin", name = "Gobelin Maraudeur", icon = "\u{1F47A}", label = "GOB", hp_base = 15, cost = 8, target_mode = "random",
+    choose_move = function(e)
+      if math.random() < 2 / 3 then
+        return { kind = "dmg", name = "Griffure", icon = "\u{1FA78}", amount = roll_scaled(4, e.level) }
+      end
+      return { kind = "dmg", name = "Charge Brutale", icon = "\u{1F4A5}", amount = roll_scaled(7, e.level) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1FA78}", name = "Griffure", text = range_text(4, level) .. " dégâts (fréquent)" },
+        { icon = "\u{1F4A5}", name = "Charge Brutale", text = range_text(7, level) .. " dégâts (rare)" },
+      }
+    end,
+  },
+  {
+    id = "squelette", name = "Squelette Archer", icon = "\u{1F480}", label = "SQE", hp_base = 12, cost = 6, target_mode = "random",
+    choose_move = function(e)
+      return { kind = "dmg", name = "Tir à l'Arc", icon = "\u{1F3F9}", amount = roll_scaled(4, e.level) }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{1F3F9}", name = "Tir à l'Arc", text = range_text(4, level) .. " dégâts (toujours)" } }
+    end,
+  },
+  {
+    id = "troll", name = "Troll des Marais", icon = "\u{1F9CC}", label = "TRL", hp_base = 28, cost = 14, target_mode = "random",
+    choose_move = function(e)
+      if math.random() < 1 / 3 then
+        return { kind = "heal-self", name = "Régénération", icon = "\u{1F49A}", amount = roll_scaled(15, e.level) }
+      end
+      return { kind = "dmg", name = "Coup de Massue", icon = "\u{1F528}", amount = roll_scaled(8, e.level) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F528}", name = "Coup de Massue", text = range_text(8, level) .. " dégâts (fréquent)" },
+        { icon = "\u{1F49A}", name = "Régénération", text = "+" .. range_text(15, level) .. ' PV (rare) — annulée si le Troll a subi des dégâts "feu" pendant la phase joueur de ce tour' },
+      }
+    end,
+  },
+  {
+    id = "gobelourd", name = "Gobelourd", icon = "\u{1F5FF}", label = "GBD", hp_base = 20, cost = 10, shield_base = 1, target_mode = "random",
+    choose_move = function(e)
+      e.defend_cycle = not e.defend_cycle
+      local defending = e.defend_cycle
+      e.defending = defending
+      local amount = defending and roll_scaled(3, e.level) or roll_scaled(8, e.level)
+      local defense_bonus = defending and roll_scaled(3, e.level) or 0
+      return { kind = "dmg", name = "Coup de Gourdin", icon = "\u{1F528}", amount = amount, defense_bonus_this_turn = defense_bonus }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F528}", name = "Coup de Gourdin", text = range_text(8, level) .. " dégâts hors défense / " .. range_text(3, level) .. " en défense (+ bouclier), un tour sur deux chacun — attaque toujours" },
+        { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(1, level) .. " défense en permanence" },
+      }
+    end,
+  },
+  {
+    id = "loup", name = "Loup Enragé", icon = "\u{1F43A}", label = "LUP", hp_base = 10, cost = 9, target_mode = "random",
+    choose_move = function(e)
+      return { kind = "dmg", name = "Morsure", icon = "\u{1F43E}", amount = roll_scaled(9, e.level) }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{1F43E}", name = "Morsure", text = range_text(9, level) .. " dégâts (toujours) — peu de PV" } }
+    end,
+  },
+  {
+    id = "araignee", name = "Araignée Venimeuse", icon = "\u{1F577}\u{FE0F}", label = "ARA", hp_base = 12, cost = 7, target_mode = "random",
+    choose_move = function(e)
+      return { kind = "dmg", name = "Piqûre", icon = "\u{2620}\u{FE0F}", amount = roll_scaled(2, e.level), brut = true, bleed = roll_scaled(3, e.level) }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{2620}\u{FE0F}", name = "Piqûre", text = range_text(2, level) .. " dégâts brut + Saignement " .. range_text(3, level) .. " (toujours)" } }
+    end,
+  },
+  {
+    id = "necromancien", name = "Nécromancien Novice", icon = "\u{1F9D9}", label = "NEC", hp_base = 10, cost = 8, target_mode = "random",
+    choose_move = function(e)
+      return { kind = "debuff", name = "Malédiction", icon = "\u{1F52E}", status_key = "vulnerabilite", amount = roll_scaled(3, e.level) }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{1F52E}", name = "Malédiction", text = "Vulnérabilité " .. range_text(3, level) .. ", pas de dégât direct (toujours)" } }
+    end,
+  },
+  {
+    id = "golem", name = "Golem de Pierre", icon = "\u{1FAA8}", label = "GOL", hp_base = 35, cost = 16, shield_base = 3, target_mode = "random",
+    choose_move = function(e)
+      return { kind = "conditional-retaliate", name = "Repos (sauf si touché)", icon = "\u{1FAA8}", amount = roll_scaled(7, e.level) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1FAA8}", name = "Poing de Pierre", text = range_text(7, level) .. " dégâts, seulement s'il subit des dégâts pendant la phase joueur ; sinon ne fait rien" },
+        { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(3, level) .. " défense en permanence — très gros PV" },
+      }
+    end,
+  },
+  {
+    id = "bandit", name = "Bandit Fourbe", icon = "\u{1F52A}", label = "BAN", hp_base = 14, cost = 9, target_mode = "lowest-hp",
+    choose_move = function(e)
+      return { kind = "dmg", name = "Coup Sournois", icon = "\u{1F52A}", amount = roll_scaled(6, e.level) }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{1F52A}", name = "Coup Sournois", text = range_text(6, level) .. " dégâts, cible toujours le héros au moins de PV (toujours)" } }
+    end,
+  },
+  {
+    id = "chaman", name = "Chaman Gobelin", icon = "\u{1FA84}", label = "CHA", hp_base = 12, cost = 8, target_mode = "random",
+    choose_move = function(e, all)
+      local wounded = {}
+      for _, o in ipairs(all) do
+        if o.id ~= e.id and o.hp > 0 and o.hp < o.max_hp then wounded[#wounded + 1] = o end
+      end
+      if #wounded > 0 then
+        local target = wounded[math.random(#wounded)]
+        return { kind = "heal-ally", name = "Chant Rituel", icon = "\u{1FA84}", amount = roll_scaled(5, e.level), heal_target_id = target.id }
+      end
+      return { kind = "dmg", name = "Chant Rituel (repli)", icon = "\u{2734}\u{FE0F}", amount = roll_scaled(3, e.level) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1FA84}", name = "Chant Rituel", text = "Soigne un allié blessé de " .. range_text(5, level) .. " PV s'il y en a un" },
+        { icon = "\u{2734}\u{FE0F}", name = "Chant Rituel (repli)", text = "Sinon, attaque pour " .. range_text(3, level) .. " dégâts" },
+      }
+    end,
+  },
+}
+
+function Enemies.by_id(id)
+  for _, t in ipairs(Enemies.templates) do
+    if t.id == id then return t end
+  end
+  return nil
+end
+
+return Enemies
