@@ -3,7 +3,7 @@ title: Hero Card Game - Game Design Document
 game_type: Roguelike / Card Game (hybride)
 platforms: PC (souris, manette), smartphone (tactile)
 created: 2026-08-04
-updated: 2026-08-04
+updated: 2026-08-06
 status: draft
 ---
 
@@ -69,6 +69,8 @@ Pression-testés ("si on coupe ce pilier, que reste-t-il ?") lors de la Discover
 **Boucle de run (niveau macro) :**
 Choisir 4 aventuriers parmi les débloqués (1-2 parfois imposés selon le type de quête) → sélectionner une quête sur la carte → traverser combats et événements → vaincre un boss → débloquer une récompense significative et permanente → retour au village pour dépenser les ressources accumulées → relancer un run.
 
+**Retour au village (confirmé) :** automatique et instantané (« Pierre de Foyer »), sans retraverser le chemin. Les éléments temporaires du run (deck, potions, objets spécifiques) sont perdus au retour — seules les ressources de village sont ramenées (« Transport par Tunnel des Taupes »). Impossible d'enchaîner directement sur une autre quête sans repasser par le village et réinitialiser son deck — référence explicite du porteur de projet à la mort inéluctable de *Slay the Spire* face à l'Architecte en fin de run : le même type d'artifice est recherché ici.
+
 **Boucle de combat (sous-boucle, imbriquée dans "traverser combats") :**
 Début de tour (chaque héros vivant gagne +1 énergie ; la main est complétée jusqu'à 5 cartes ; chaque ennemi vivant télégraphie son action et sa cible) → phase joueur (le joueur assigne des cartes de sa main aux héros disponibles, dans la limite de leur énergie) → fin de tour (les cartes non jouées de la main sont défaussées) → phase ennemie (chaque ennemi résout son action telegraphée contre sa cible déclarée) → tour suivant, jusqu'à victoire ou défaite du combat.
 
@@ -80,6 +82,7 @@ Début de tour (chaque héros vivant gagne +1 énergie ; la main est complétée
 - **Défaite de combat :** tous les héros de la troupe à 0 PV → le run s'arrête, le joueur est renvoyé au village.
 - **Égalités** (victoire et défaite au même tour) : à trancher au cas par cas — non spécifié plus précisément dans les sources. `[NOTE FOR DESIGNER]`
 - **Victoire de run :** boss de fin de run vaincu → épilogue narratif + déblocage majeur + ressources de village importantes.
+- **Mission Secours (optionnelle, confirmée par le document source) :** en cas de défaite, une quête spéciale apparaît temporairement, permettant à une autre équipe de tenter de rejoindre l'équipe vaincue. Si elle y parvient, le run vaincu reprend dans l'état où il a été perdu ; sinon, il est perdu définitivement.
 - `[NOTE FOR DESIGNER]` **Justification narrative du retour au village après défaite** (résurrection façon *Dead Cells* — malédiction, réincarnation) : demandée explicitement par le porteur de projet mais **non tranchée à sa propre demande** (voir Risks du brief). Ne pas inventer de réponse ici — décision à prendre séparément, probablement au passage `gds-create-narrative`.
 
 ---
@@ -108,12 +111,20 @@ Début de tour (chaque héros vivant gagne +1 énergie ; la main est complétée
 
 ### Controls and Input
 
-Séquence à 3 étapes (validée par le prototype le plus récent, cohérente avec l'objectif de parité PC/mobile posé dans le brief — une séquence de taps successifs porte mieux sur tactile qu'un glisser-déposer) :
-1. Toucher/cliquer une carte de la main → la carte passe "en attente".
-2. Toucher/cliquer un héros éligible pour lui assigner la carte (doit avoir l'énergie suffisante et respecter la restriction de propriétaire si la carte est une spéciale) → surbrillance des héros éligibles.
-3. Toucher/cliquer la cible valide (ennemi, allié) → surbrillance des cibles éligibles selon le type de ciblage de la carte ; les cibles `self` et `all-enemies` se résolvent automatiquement sans ce troisième temps.
+*(Mise à jour 2026-08-06 : le document source distingue maintenant clairement la cible de design finale et le choix volontaire du prototype — les deux sont documentés ci-dessous plutôt qu'un seul schéma "canon".)*
 
-Annulation : clic droit (PC) / à définir pour tactile `[NOTE FOR DESIGNER]`. Séquence à 3 taps confirmée comme schéma de contrôle canon par le porteur de projet — le glisser-déposer des deux prototypes plus anciens est une itération antérieure, abandonnée.
+**Design cible (jeu final) — Drag & Drop :** le joueur sélectionne une carte et la fait glisser sur l'aire de jeu. La carte suit la souris et change d'aspect/VFX selon la zone survolée, pour indiquer clairement ce qui va se passer si le joueur relâche :
+- Relâchée dans la zone basse d'un aventurier (zone dédiée, sous ses pieds) : la carte n'est pas jouée, l'aventurier se concentre pour gagner 1 point d'énergie (action générique).
+- Relâchée dans la zone haute d'un aventurier éligible : déclenche l'action de la carte. Si une cible est nécessaire, le curseur se change en flèche colorée selon l'effet pour sélectionner une cible éligible (allié ou ennemi) ; sinon l'effet se résout immédiatement.
+- Relâchée sur un aventurier sans assez d'énergie : VFX d'échec, la carte retourne en main.
+- Annulation à tout moment : clic droit.
+
+**Choix du prototype (temporaire) — séquence à 3 taps :** le Drag & Drop est volontairement absent de `proto-cartes-completes`, remplacé par un enchaînement de taps successifs, plus rapide à implémenter en premier passage et jugé plus robuste sur tactile :
+1. Toucher/cliquer une carte de la main → la carte passe "en attente".
+2. Toucher/cliquer un héros éligible (énergie suffisante) → surbrillance des héros éligibles.
+3. Toucher/cliquer la cible valide → surbrillance des cibles éligibles selon le type de ciblage de la carte ; les cibles `self` et `all-enemies` se résolvent automatiquement sans ce troisième temps.
+
+Annulation dans le prototype : clic droit (PC) / à définir pour tactile `[NOTE FOR DESIGNER]`. **Le Drag & Drop reste la cible de design du jeu final** — la séquence à 3 taps est un raccourci d'implémentation pour le prototype, pas une décision qui le remplace au canon.
 
 **Disposition et animation pioche/main/défausse (confirmée) :** la pioche est affichée à gauche de la main, la défausse à droite. Piocher anime les cartes depuis la pioche vers la main ; défausser les anime depuis la main vers la défausse. Quand un même tour enchaîne une défausse puis une pioche (fin de tour → tour suivant), une pause d'**1 seconde** sépare les deux animations pour que le joueur ait le temps de voir chacune distinctement.
 
@@ -126,6 +137,8 @@ Annulation : clic droit (PC) / à définir pour tactile `[NOTE FOR DESIGNER]`. S
 ### Run Structure
 
 Durée d'un run : de ~20 minutes en début de campagne à ~1 heure en fin de campagne. Conditions de départ : 4 aventuriers choisis parmi les débloqués (1-2 parfois imposés selon le type de quête — voir Quêtes ci-dessous). Montée en difficulté intra-run : la rareté du loot augmente avec la progression du run ; le système de l'Astronome (voir Difficulty Modifiers) peut ajouter des contraintes globales. Condition de victoire de run : boss de fin de run vaincu.
+
+**Biomes :** chaque biome apporte un bestiaire dédié, des règles de déplacement sur la carte et des règles de combat propres, pour poser des contraintes que le joueur peut anticiper sur ses prochains runs. Une encyclopédie se remplit progressivement (par biome, monstre, événement, boss…) à mesure que le joueur passe du temps avec chaque élément.
 
 ### Procedural Generation
 
@@ -147,7 +160,7 @@ Pas de permadeath au sens strict d'un personnage supprimé : une défaite met fi
 
 **MVP (Mois 1) :** 4 héros — Guerrier, Paladin, Mage, Assassin *(le Paladin remplace le Clerc initialement prévu — décision du porteur de projet)*. Chacun : 1 skin avec animations idle (2 frames), action, coup reçu, KO ; 1 Pouvoir de Classe ; 1 Transcendance ; 1 carte de classe ; 2 cartes de base communes partagées par tous. Chaque aventurier porte aussi un passé, un but dans la vie, et des interactions particulières avec les éléments du jeu — contenu narratif, à développer avec `gds-create-narrative` (`needs_narrative` déjà signalé, voir Finalize).
 
-**Cible long terme :** 40 héros débloquables au total, ~480 cartes, ~640 améliorations. Ce périmètre complet est délibérément hors du MVP — voir Out of Scope.
+**Cible long terme :** 40 héros débloquables au total (4 au départ, 36 à débloquer). Chaque héros possède au maximum **15 cartes propres** : 5 "cartes de départ" (1 initiale + 4 à débloquer — 1 seule utilisée dans le deck au lancement d'un run) et 10 "cartes spéciales" (2 initiales + 8 à débloquer, toutes rencontrables au loot une fois débloquées), soit 12 cartes à débloquer par héros. Sur 40 héros : **~480 cartes à débloquer** (12×40) pour **~600 cartes distinctes au total** sur l'ensemble du roster (15×40), plus **80 améliorations de passifs** (Pouvoir de Classe + Transcendance, 2 par héros × 40). *(Corrige le chiffre "~640 améliorations" utilisé jusqu'ici — erreur de transcription du document source, 15×40 fait 600, pas 640 ; confirmé par le porteur de projet le 2026-08-06.)* Ce périmètre complet est délibérément hors du MVP — voir Out of Scope.
 
 **Contrôle en village :** n'importe quel aventurier de la troupe active peut être déplacé physiquement pour interagir avec les PNJ — pas limité à un "chef de groupe" fixe (voir Level Design Framework pour le rôle du chef de groupe dans le choix des quêtes).
 
@@ -155,23 +168,27 @@ Pas de permadeath au sens strict d'un personnage supprimé : une défaite met fi
 
 Défini au niveau de la classe (partagé par tous les héros de cette classe), un Pouvoir de Classe modifie radicalement une règle du jeu. Volontairement complexe : le joueur le consulte à un moment calme — la composition d'équipe entre deux runs — et son impact sur le run est majeur.
 
+*(Mise à jour 2026-08-06 : le tableur des classes a été entièrement refait par le porteur de projet — remplace la version précédente, y compris le système de lignes Front/Back du Paladin, abandonné.)*
+
 | Classe | Pouvoir de Classe |
 |---|---|
-| Guerrier | Au début de chaque tour, déclenche gratuitement une attaque aléatoire pour chaque carte d'attaque de mêlée en main. |
-| Paladin | Les héros sont répartis en 2 lignes : Front Line (+20% de chances d'être ciblé) et Back Line (-20% dégâts physiques reçus ET infligés). Le Paladin est toujours en Front Line ; les autres héros changent de ligne gratuitement. `[NOTE FOR DESIGNER] Commande de changement de ligne non définie par le porteur de projet.` |
-| Mage | En fin de tour, permet de conserver 1 carte en main au lieu de la défausser automatiquement. `[NOTE FOR DESIGNER] Commande de sélection de la carte gardée non définie.` |
-| Assassin | Quand il joue Concentration (l'action générique de gain d'énergie), devient Camouflé jusqu'à sa prochaine attaque. Camouflé : ne peut pas être ciblé ; +50% de dégâts. `[NOTE FOR DESIGNER] Formulation source ambiguë sur la condition exacte du bonus de dégâts ("+50% aux dégâts si la cible attaque") — à clarifier avec le porteur de projet avant implémentation.` |
+| Guerrier | Au début de chaque tour, inflige aléatoirement 2 dégâts ⚔️ (mêlée physique) pour chaque carte contenant ⚔️ en main — dégâts désormais chiffrés par la source (2), ce n'est plus une hypothèse. |
+| Paladin | La première fois que le Paladin ou un allié tombe à 0 PV, il se relève avec 1 PV — une seule fois par combat (remplace intégralement le système Front/Back Line documenté précédemment, absent du tableur refait). |
+| Mage | En fin de tour, permet de conserver 1 carte en main au lieu de la défausser automatiquement. **Optionnel, pas obligatoire** : le joueur peut choisir "tout défausser" pour ne rien garder. Commande UI implémentée dans le prototype (2026-08-06) : clic sur la carte à garder, ou bouton "tout défausser" — résout la note de conception précédente. |
+| Assassin | Quand il se concentre, devient Camouflé (jusqu'à sa prochaine attaque, ne peut être ciblé) et gagne Puissance 2 (+25% dégâts physiques par charge, -1 charge au début de chaque tour) — remplace le "+50% dégâts sur la prochaine attaque" précédemment documenté par un statut Puissance générique et chiffré, cohérent avec le glossaire du tableur de cartes. |
 
 #### Transcendance
 
 Pouvoir spécial supplémentaire, propre à chaque **aventurier individuel** (contrairement au Pouvoir de Classe, partagé par classe) — qui se déclenche sur une condition particulière, presque toujours le fait de jouer une carte assignée à cet aventurier lui-même. `[NOTE FOR DESIGNER] Le MVP n'a qu'un héros par classe, donc la distinction individu/classe n'est pas encore testable : dès qu'un 2ᵉ Guerrier sera débloqué, il faudra lui définir sa propre Transcendance, potentiellement différente de celle ci-dessous.`
 
+**Règle générale (confirmée 2026-08-06) : la Transcendance se déclenche sur le mot-clé/la catégorie de la carte, jamais sur sa classe d'origine.** Elle s'applique dès que l'aventurier de la classe concernée joue **n'importe quelle carte** remplissant la condition — y compris une carte générique ou une carte d'une autre classe (ex. le Guerrier qui joue Coup direct générique, le Mage qui joue un sort d'une autre classe si un jour cela existe, le Paladin qui joue Encaisser générique ou Stratégie de l'Assassin). Restreindre le bonus aux seules cartes de la classe de l'aventurier est une règle incorrecte : c'était un bug du prototype (corrigé le 2026-08-06 pour les 4 classes), pas la règle canon.
+
 | Classe (1 héros par classe dans le MVP) | Transcendance |
 |---|---|
-| Guerrier | +50% dégâts d'attaque de mêlée. |
-| Paladin | +50% défense pour protéger un autre aventurier. |
-| Mage | -2 coût en énergie si le sort lancé est un sort d'attaque. |
-| Assassin | Les attaques de mêlée infligent Incapacité 1 (-25% dégâts infligés par la cible touchée) et Vulnérabilité 1 (+25% dégâts reçus par la cible touchée). |
+| Guerrier | +50% dégâts sur toute carte "épée" (⚔️, dégâts physique de mêlée) qu'il joue lui-même. |
+| Paladin | +50% sur toute carte "bouclier" (défense) et/ou "soin" qu'il joue lui-même. |
+| Mage | -2 coût en énergie sur toute carte "sort" (🪄) qu'il joue lui-même. |
+| Assassin | Toute carte "épée" qu'il joue lui-même inflige en plus Incapacité 1 (-25% dégâts infligés par la cible touchée) et Vulnérabilité 1 (+25% dégâts reçus par la cible touchée). Gagne aussi Camouflé en se concentrant, quelle que soit la carte utilisée pour se concentrer (Pouvoir de Classe, pas la Transcendance — déjà non restreint par carte). |
 
 **Rapport entre carte de classe et Transcendance — et conséquence sur le verrouillage de carte :** les cartes de classe d'un aventurier sont *majoritairement* compatibles avec sa propre Transcendance (pas systématiquement), ce qui incite à assigner la bonne carte au bon héros sans jamais l'imposer, l'interdire, ni même l'indiquer à l'écran. Certaines classes proches sont conçues pour bien fonctionner ensemble, multipliant les déclenchements croisés de Transcendance entre plusieurs héros. **En conséquence, l'association carte↔aventurier d'origine n'est plus une contrainte de gameplay** : toute carte de classe peut être jouée par tout héros disposant de l'énergie requise. Cette association reste affichée comme repère de lore et de collection (voir Primary Mechanics), mais son rôle mécanique est entièrement repris par la Transcendance. Ceci remplace et referme la question ouverte "verrouillage strict vs. libre + synergie" soulevée en `bmad-party-mode` : c'était bien la piste "libre" qui était la bonne, portée un cran plus loin par la Transcendance.
 
@@ -183,34 +200,66 @@ Pouvoir spécial supplémentaire, propre à chaque **aventurier individuel** (co
 
 `[NOTE FOR DESIGNER] L'Astronome n'apparaît pas dans le périmètre MVP défini (Scope & MVP du brief) — traité ici comme un système post-MVP, voir Out of Scope et Development Epics.`
 
+**Malédictions (système distinct de l'Astronome, confirmé par le document source) :** déclenchées par certaines quêtes, biomes, monstres ou événements. Deux formes : cartes supplémentaires ajoutées au deck avec un effet négatif (à l'utilisation ou à la non-utilisation), ou passifs qui modifient une règle générale de combat pour un personnage ou pour l'équipe.
+
+**Règles spécifiques de quête :** certaines quêtes imposent des règles particulières qui durent tout le run (venant de la narration ou liées à la récompense de la quête — référence *Final Fantasy 8* Triple Triad). De nouvelles mécaniques inédites apparaissent au fil de la progression, pour limiter la répétition jusqu'au 100%.
+
+**Difficulté des quêtes :** la quête principale d'un run a une difficulté fixe, non modifiable. Les autres quêtes ont une difficulté ajustable par le joueur, qui affecte le loot méta mais jamais le déblocage final — rien n'empêche de jouer systématiquement en facile ; des incentives de déblocage (non chiffrées) doivent inciter à monter en difficulté. `[NOTE FOR DESIGNER]`
+
+**Challenge hard :** débloqué à un moment donné de la progression, un palier de difficulté supplémentaire nettement plus exigeant. En cas de victoire, débloque un skin cosmétique différent pour les cartes utilisées dans le run (référence *Monster Train*), et parfois des skins pour les héros ou les villageois selon la quête.
+
 ---
 
 ### Card Types and Effects
 
-Liste complète du deck du joueur pour le MVP, fournie par le porteur de projet (2 cartes génériques + 4 cartes par classe × 4 classes = 18 cartes) :
+*(Mise à jour 2026-08-06 : le tableur des cartes a été entièrement refait par le porteur de projet — Coup mortel passe de la classe Assassin à la classe Guerrier, une nouvelle carte Assassin "Blessure ouverte" apparaît, et plusieurs coûts/effets changent. Correction du même jour : Coup Brutal retiré du Guerrier — laissé par erreur lors de la refonte, il faisait doublon avec Blessure ouverte de l'Assassin, effet strictement identique. Le deck du MVP reste donc à 18 cartes : 2 génériques + 4 par classe × 4 classes.)*
+
+La table ci-dessous est la liste **MVP** telle qu'implémentée dans le prototype (18 cartes fixes, 4 par héros). Elle est une instanciation simplifiée de la structure long terme décrite en Character Selection (5 "cartes de départ" + 10 "cartes spéciales" par héros, débloquées progressivement sur les 40 héros) — les deux ne se contredisent pas : celle-ci est le sous-ensemble jouable dès aujourd'hui, l'autre la cible complète du jeu fini.
 
 | Carte | Classe | Palier | Coût | Catégorie | Effet |
 |---|---|---|---|---|---|
-| Coup direct | Générique | Départ | 0 | dégâts mêlée physique | Inflige 4 dégâts. |
-| Encaisser | Générique | Départ | 0 | défense physique | Gagne 4 défense. |
-| Coup d'estoc | Guerrier | Départ | 1 | dégâts mêlée physique | Inflige 4 dégâts. Inflige 4 dégâts de plus si l'ennemi se défend. |
-| Coup de taille | Guerrier | Départ | 1 | dégâts mêlée physique | Inflige 4 dégâts à 3 ennemis adjacents. |
-| Coup Brutal | Guerrier | Avancé | 2 | dégâts mêlée physique | Inflige 6 dégâts et Saignements 3. |
-| Riposte | Guerrier | Avancé | 1 | défense + dégâts mêlée physique | Si l'aventurier est la cible de l'attaque ennemie, annule cette attaque et inflige 4 dégâts. |
-| Rempart | Paladin | Départ | 1 | défense physique | Cet aventurier et un autre gagnent 4 en défense. |
-| Provocation | Paladin | Départ | 1 | défense physique | Gagne 6 défense. Un ennemi change sa cible pour cet aventurier. |
-| Clairvoyance | Paladin | Avancé | 0 | deck / concentration | Pioche une carte. Un autre aventurier se concentre. Cet aventurier n'est pas considéré avoir agi (voir la règle "un héros, une carte par tour" dans Core Gameplay Loop) — il peut recevoir une autre carte ce tour-ci. |
-| Lumière divine | Paladin | Avancé | 2 | défense + magie + soin | Gagne 4 défense. Restaure 2 PV à tous les aventuriers. |
-| Missile magique | Mage | Départ | 2 | dégâts distance magique | Inflige 5 dégâts magiques. |
-| Image miroir | Mage | Départ | 3 | défense magique | Gagne Esquive 2. |
-| Tornade de feu | Mage | Avancé | 6 | dégâts distance feu | Inflige 3 dégâts magiques à tous les ennemis. |
-| Boule de feu | Mage | Avancé | 8 | dégâts distance feu | Inflige 10 dégâts magiques. |
-| Stratégie | Assassin | Départ | 1 | dégâts mêlée physique + défense | S'il est ciblé, gagne 4 en défense ; sinon, inflige 4 dégâts. |
-| Coup mortel | Assassin | Départ | 1 | dégâts mêlée physique | Inflige 2 dégâts. Si tue sa cible, peut agir à nouveau. |
-| Assassinat | Assassin | Avancé | 6 | dégâts mêlée physique | Ne peut être joué que Camouflé. Inflige 10 dégâts. |
+| Coup direct | Générique | Départ | 0 | épée | Inflige 4 dégâts. |
+| Encaisser | Générique | Départ | 0 | bouclier | Gagne 4 défense. |
+| Coup d'estoc | Guerrier | Départ | 0 | épée | Inflige 4 dégâts. Inflige 4 dégâts de plus si la cible a de la défense. |
+| Coup de taille | Guerrier | Avancé | 1 | épée | Inflige 4 dégâts à tous les ennemis. |
+| Coup mortel | Guerrier | Avancé | 0 | épée | Inflige 4 dégâts. Si tue sa cible, l'aventurier n'est pas considéré avoir agi et la carte retourne en main (au lieu de la défausse). |
+| Riposte | Guerrier | Avancé | 3 | bouclier + épée | Si l'aventurier est la cible de l'attaque ennemie, annule cette attaque et inflige 4 dégâts. |
+| Rempart | Paladin | Départ | 1 | bouclier | Cet aventurier et un autre gagnent 4 en défense chacun (6 chacun si joué par le Paladin — Transcendance s'applique aux deux gains). |
+| Provocation | Paladin | Avancé | 0 | bouclier | Gagne 6 défense (9 si joué par le Paladin — Transcendance). Un ennemi change sa cible pour cet aventurier. |
+| Clairvoyance | Paladin | Avancé | 0 | sort | Pioche une carte. Un autre aventurier se concentre. Cet aventurier n'est pas considéré avoir agi (voir la règle "un héros, une carte par tour" dans Core Gameplay Loop) — il peut recevoir une autre carte ce tour-ci. |
+| Lumière divine | Paladin | Avancé | 2 | sort | Gagne 4 défense (6 si joué par le Paladin). Restaure 2 PV à tous les aventuriers (3 si joué par le Paladin — Transcendance s'applique aux deux effets). |
+| Missile magique | Mage | Départ | 2 | sort, distance | Inflige 5 dégâts magiques. |
+| Image miroir | Mage | Avancé | 3 | sort, défense | Gagne Esquive 2. |
+| Tornade de feu | Mage | Avancé | 6 | sort, distance, feu | Inflige 5 dégâts magiques de feu à tous les ennemis. |
+| Boule de feu | Mage | Avancé | 8 | sort, distance, feu | Inflige 15 dégâts magiques de feu. |
+| Stratégie | Assassin | Départ | 0 | épée + bouclier | S'il est ciblé par un ennemi, gagne 4 en défense ; sinon, inflige 4 dégâts. |
+| Blessure ouverte | Assassin | Avancé | 2 | épée | Inflige 6 dégâts et Saignements 3. |
+| Assassinat | Assassin | Avancé | 4 | épée, brut | Si camouflé : inflige 10 dégâts bruts et perd le Camouflage. Sinon : se concentre (+1 énergie) et la carte retourne au sommet du deck au lieu d'être jouée. |
 | Lâcheté | Assassin | Avancé | 1 | — | Change la cible pour un autre aventurier. L'ennemi gagne Incapacité 1. |
 
-Catégories confirmées : cartes génériques (communes, coût 0), cartes de classe (palier Départ = deck de run initial, palier Avancé = débloqué), cartes épiques (spécifiques à une ou plusieurs classes, intégration temporaire au deck pendant un run — non détaillées carte par carte à ce stade). Paliers de rareté (au-delà de Départ/Avancé, pour la collection long terme) : commune, rare, légendaire. Coût du Mage (2 à 8, contre 0 à 2 ailleurs) confirmé intentionnel par le porteur de projet — archétype lent et puissant assumé, pas un oubli d'équilibrage.
+**Coût de Stratégie confirmé à 0** par le porteur de projet (2026-08-06) — le tableur refait fait foi, la valeur 1 d'une itération précédente est abandonnée.
+
+**Glossaire de mots-clés :** un glossaire de 23 termes (icône, mot-clé lié, explication) a été fourni par le porteur de projet et implémenté dans le prototype — les mots-clés entre guillemets dans le texte des cartes sont automatiquement remplacés par leur icône (ex. "épée" → ⚔️, "bouclier" → 🛡️, "brut" → 💥, "soin" → 💚) quand le glossaire indique une icône, ou laissés en texte sinon (ex. Esquive, Saignements, Incapacité, Vulnérabilité, Camouflage, Puissance, Pioche). Une infobulle au survol (1s de délai), déjà en place pour les aventuriers et ennemis, liste désormais aussi les mots-clés présents sur chaque carte avec leurs mots-clés liés et explications. Le mot-clé "soin" (employé par Lumière divine) a été ajouté au glossaire le 2026-08-06 avec une icône (💚, choisie par distinction avec ❤️ de "pv") — la lacune précédemment signalée est comblée.
+
+Catégories confirmées : cartes génériques (communes, coût 0), cartes de classe (palier Départ = deck de run initial, palier Avancé = débloqué), cartes épiques (spécifiques à une ou plusieurs classes, intégration temporaire au deck pendant un run — non détaillées carte par carte à ce stade). Paliers de rareté (au-delà de Départ/Avancé, pour la collection long terme) : commune, rare, légendaire. **Coût du Mage (2 à 8, contre 0 à 2 ailleurs) confirmé intentionnel par le porteur de projet** — équilibré par la Transcendance du Mage (-2 sur le coût de tout sort qu'il joue lui-même), qui ramène ses coûts effectifs dans la norme des autres classes tout en gardant des effets nettement plus puissants (dégâts et portée) que le reste du roster ; pas un oubli d'équilibrage.
+
+**"Coup de taille" cible tous les ennemis, sans notion d'adjacence :** confirmé par le porteur de projet (2026-08-06) — la notion de ligne/adjacence entre ennemis est abandonnée à ce stade du prototype, pas seulement simplifiée temporairement.
+
+**Chaque classe n'a plus qu'une seule carte Départ** (Coup d'estoc, Rempart, Missile magique, Stratégie) — Coup de taille, Coup mortel, Provocation et Image miroir sont passées en palier Avancé le 2026-08-06, en cohérence avec le deck de départ du mode Run Infini ci-dessous (une carte Départ par classe).
+
+### Run Infini (mode de prototype, implémenté 2026-08-06)
+
+Amélioration du prototype de combat existant (le continue, ne le remplace pas) — implémentée dans `proto-cartes-completes` suite à une session de party mode dédiée aux "nouveaux objectifs". Fonctionnement :
+
+- **Deck de départ (10 cartes) :** 3 Coup direct, 3 Encaisser, 1 carte Départ par classe (Coup d'estoc, Rempart, Missile magique, Stratégie).
+- **Progression :** à la fin de chaque combat gagné, le joueur choisit 1 carte parmi 3 (draft) qui s'ajoute à son deck. Entre deux combats d'un même run, **le deck et les PV des aventuriers persistent** (blessures non soignées d'un combat à l'autre — un héros tombé à 0 PV le reste tant qu'il n'est pas soigné) ; tout le reste repart à zéro à chaque nouveau combat : énergie, Défense, Esquive, Incapacité, Vulnérabilité, Camouflage, Puissance, Saignements, réanimation du Paladin réarmée. Le run est **infini** — pas encore de condition de victoire ni de récompense de fin de run ; il s'arrête à la défaite (tous les héros à 0 PV), l'écran de fin indiquant le nombre de combats remportés.
+- **Difficulté :** chaque combat reçoit un budget fixe, totalement indépendant de l'état du groupe joueur (`16 × 1.35^(N-1)`, croissance exponentielle à +35%/combat — remplace la version linéaire initiale du 2026-08-06, jugée trop lente en playtest ; valeurs placeholder, à tester). Le moteur traduit ce budget en un nombre d'ennemis (jusqu'à 4, pour la lisibilité) et leur niveau, tirés dans un bestiaire de 10 types.
+- **Bestiaire (10 ennemis, niveau 1, comportement fixe — seules les valeurs scalent avec le niveau, +20 %/niveau) :** Gobelin Maraudeur, Squelette Archer, Troll des Marais (régénération annulée par des dégâts de feu subis pendant la phase joueur), Gobelourd (attaque toujours, dégâts réduits en défense), Loup Enragé, Araignée Venimeuse (dégâts brut + Saignement), Nécromancien Novice (Vulnérabilité 3, pas de dégât direct), Golem de Pierre (ne fait rien sauf s'il est touché pendant la phase joueur, auquel cas il riposte), Bandit Fourbe (cible toujours le héros au moins de PV), Chaman Gobelin (soigne un allié blessé s'il y en a un, sinon attaque).
+- **Variance aléatoire :** chaque montant ennemi (dégâts, soin, bouclier, PV max) est tiré dans une fourchette ±20 % autour d'une valeur centrale — le télégraphe affiche toujours le montant réel déjà tiré (jamais la fourchette), qui n'apparaît qu'à titre informatif dans l'infobulle de l'ennemi.
+- **Écran de fin de combat :** les 3 cartes du draft apparaissent face cachée, se retournent une par une après 2 s, sont survolables (même infobulle que la main) ; le choix ajoute la carte au deck, les 2 autres sont détruites visuellement. Règles de tirage : pool = génériques + classes présentes dans le groupe ; une carte Départ ne peut être que celle déjà dans le deck ; probabilité de doublon par slot 100 % / 25 % / 50 % ; jamais deux fois la même carte parmi les 3 ; pool de cartes inédites épuisé → retombe simplement sur un doublon.
+- **"Recommencer" relance le combat en cours**, pas toute la run (mêmes ennemis, mêmes niveaux/PV déjà tirés, même deck) — une sauvegarde de l'état est prise au tout début de chaque combat. Le "Rejouer" affiché sur l'écran de défaite, lui, relance bien une run entière depuis le combat 1.
+
+Hors scope de cette implémentation : le scaling comportemental des ennemis (nouveaux patterns à des paliers de puissance, prévu plus tard) et la récompense de fin de run garantie (pilier 3) — testé via Playwright (chargement sans erreur, boucle combat→draft→combat suivant→défaite jouée sur un run réel).
 
 Mots-clés/statuts : voir Primary Mechanics.
 
@@ -228,7 +277,9 @@ Alternée (jamais simultanée) : phase joueur libre (toutes les cartes jouables 
 
 ### Card Collection and Progression
 
-Acquisition exclusivement par le jeu : loot de run (choix de 1 carte parmi 3, la carte du milieu ayant plus de chances d'être spéciale/épique), la proportion cartes neutres/cartes de classe déblocables augmente avec le niveau des héros (pourcentage non chiffré). Monnaie de progression = ressources de village (voir Economy and Resources), jamais d'achat direct — cohérent avec le modèle "achat unique" (pas de packs, pas de gacha).
+Acquisition exclusivement par le jeu : loot de run (choix de 1 carte parmi 3, la carte du milieu ayant plus de chances d'être spéciale/épique), la proportion cartes neutres/cartes de classe déblocables augmente avec le niveau des héros (pourcentage non chiffré). Une carte déjà présente dans le deck du joueur peut malgré tout réapparaître au loot ; elle se retrouve alors en plusieurs exemplaires dans le deck. Monnaie de progression = ressources de village (voir Economy and Resources), jamais d'achat direct — cohérent avec le modèle "achat unique" (pas de packs, pas de gacha).
+
+Chaque aventurier possède jusqu'à 15 cartes propres à débloquer sur sa durée de vie (voir Character Selection) — au lancement d'un run, seule 1 de ses "cartes de départ" débloquées entre dans le deck ; ses "cartes spéciales" débloquées sont, elles, toutes rencontrables en loot pendant le run. Chaque carte peut être améliorée 1 fois (amélioration non détaillée par les sources actuelles). `[NOTE FOR DESIGNER]`
 
 ### Game Modes
 
@@ -240,7 +291,7 @@ MVP et cible Mois 2 : un seul mode, le run solo. Aucun mode compétitif, coopér
 
 ### Player Progression
 
-Trois axes persistants entre les runs : héros débloqués (cible 40), cartes débloquées (cible ~480), améliorations débloquées (cible ~640). Le déblocage passe par les quêtes (voir Level Design Framework) et par les upgrades de village achetées avec les ressources accumulées.
+Quatre axes persistants entre les runs : héros débloqués (cible 40, dont 36 à débloquer), cartes débloquées (cible ~480 sur ~600 cartes distinctes au total, voir Character Selection), améliorations de passifs débloquées (cible 80 : 2 par héros × 40), et upgrades de village. Le déblocage passe par les quêtes (voir Level Design Framework) et par les upgrades de village achetées avec les ressources accumulées.
 
 ### Difficulty Curve
 
@@ -256,14 +307,33 @@ Ressources de village : **métaux** (dépensés chez le forgeron), **plantes** (
 
 ### Level Types
 
-- **Village (hub) :** déplacement physique actif d'un aventurier (pas de point-and-click contemplatif) entre les maisons des villageois, initialement délabrées/vides, débloquées et upgradées au fil de la progression.
+- **Village (hub) :** déplacement physique actif d'un aventurier (pas de point-and-click contemplatif) entre les maisons des villageois, initialement délabrées/vides, débloquées et upgradées au fil de la progression. Détail du rôle de chef de groupe : voir Village ci-dessous.
 - **Carte de quêtes :** structure à embranchements menant à un boss (génération non détaillée — voir Procedural Generation).
 - **Combats :** 2 à 5 tours pour un combat normal ; MVP = 3 combats avec 5 types de monstres différents.
-- **Événements :** mentionnés dans la boucle de run du brief mais non détaillés dans les sources actuelles. `[NOTE FOR DESIGNER]`
+- **Événements (confirmé par le document source) :** 1 à 3 événements espacent chaque combat le long d'une quête — rencontre narrative avec choix bonus/malus, gain de loot, bénédiction/malédiction, entre autres.
+- **Durée par quête :** les premières quêtes sont courtes (quelques combats, 1 seul boss) ; les dernières sont beaucoup plus longues (jusqu'à ~1h, jusqu'à 3 boss). Précise le chiffre "20 min → 1h" ci-dessus, qui décrit la durée d'un run entier, pas d'une quête individuelle.
+
+### Village
+
+Un aventurier est désigné **chef de groupe** pour chaque quête ; c'est lui qui apparaît en portrait dans les dialogues, et la quête le concerne au minimum (même si elle implique plusieurs aventuriers). Une fois le run terminé (réussi ou échoué), c'est ce même aventurier que le joueur continue de contrôler librement dans le village — le joueur peut changer de chef de groupe en parlant à un autre aventurier ; l'option reste disponible à tout moment. Un nouveau chef de groupe est désigné au lancement de chaque nouvelle quête.
+
+Chaque aventurier possède un ou plusieurs lieux dédiés où il apparaît en train d'effectuer une activité liée à sa classe, avec un dialogue le plus souvent générique — pour donner l'impression d'un village de plus en plus vivant à mesure qu'il se peuple.
 
 ### Level Progression
 
-**Quêtes de classe :** imposent de désigner au moins 1 héros "chef de groupe", puis liberté de choisir les 3 autres. **Quêtes narratives :** peuvent imposer plusieurs héros spécifiques selon la narration, en échange de rebondissements narratifs pendant le run. **Quêtes spéciales :** aucun chef imposé, liberté totale de composition. **Quêtes multiples/liées :** demandent de coordonner plusieurs groupes sur plusieurs runs différents pour accomplir des actions simultanées sur la carte.
+**Quêtes de classe :** imposent de désigner au moins 1 héros "chef de groupe", puis liberté de choisir les 3 autres. **Quêtes narratives :** peuvent imposer plusieurs héros spécifiques selon la narration, en échange de rebondissements narratifs pendant le run. **Quêtes spéciales :** aucun chef imposé, liberté totale de composition. **Quêtes multiples/liées :** demandent de coordonner plusieurs groupes sur plusieurs runs différents pour accomplir des actions simultanées sur la carte ; le village reste dépeuplé des aventuriers engagés pendant ce temps, et le joueur peut interrompre ce type de quête à tout moment pour récupérer sa troupe.
+
+**Arbre de quêtes :** les quêtes narratives sont chaînées pour offrir une histoire suivie ; de nombreuses quêtes sans narration de quête principale sont reliées à un déblocage (personnage, villageois, carte), formant des arcs indépendants. Certaines quêtes spéciales répondent à des compteurs cachés au joueur (amitié/animosité entre 2 aventuriers, présence d'un aventurier dans un biome donné, conditions spéciales façon Gogo dans *Final Fantasy 6*).
+
+### Narrative Delivery
+
+**Présence de la narration :** quasi absente en début de campagne (le joueur doit apprendre les règles vite), elle monte progressivement avec les déblocages de héros et de villageois.
+
+**Déclenchement :** un compteur d'événements (invisible au joueur) rend un dialogue disponible une fois un seuil atteint, si le joueur se rend au bon endroit et effectue la bonne action. Cinq contextes de déclenchement : parler à un PNJ générique au village, parler à un PNJ lié à un aventurier spécifique (visible seulement avec le bon aventurier contrôlé), entrer dans une zone de dialogue entre 2 personnages au village, pendant un événement ou combat spécifique en run, ou à la résolution d'une quête. Suivi via un journal PNJ (voir Development Epics → Epic 7).
+
+**Non-obligation :** dialogues courts, aucun narrateur ni narration environnementale — tout passe par le dialogue entre personnages. Un joueur qui saute systématiquement les dialogues perd le message mais jamais de progression : pas d'indices cachés ni de choix de dialogue (sauf rares exceptions), les quêtes qui en découlent restent listées automatiquement. Le jeu est finissable à 100% sans jamais prêter attention à la narration.
+
+Contenu narratif (histoires, personnages, dialogues eux-mêmes) toujours hors périmètre de ce document — voir `needs_narrative` en Character Selection.
 
 ---
 
@@ -291,7 +361,7 @@ PC (souris et manette) et smartphone (tactile), à parité dès le départ — a
 
 ### Asset Requirements
 
-**MVP (Mois 1) :** 4 skins de héros (Guerrier, Clerc, Mage, Assassin) avec animations idle (2 frames), action, coup reçu, KO ; 5 designs de monstres ; art du village en état "abandonné" de départ. **Cible long terme :** jusqu'à 40 skins de héros, ~480 illustrations de cartes, art du village évolutif par villageois upgradé.
+**MVP (Mois 1) :** 4 skins de héros (Guerrier, Clerc, Mage, Assassin) avec animations idle (2 frames), action, coup reçu, KO ; 5 designs de monstres ; art du village en état "abandonné" de départ. **Cible long terme :** jusqu'à 40 skins de héros, ~600 illustrations de cartes (une par carte du roster complet, voir Character Selection), art du village évolutif par villageois upgradé, skins cosmétiques additionnels pour le mode Challenge hard (voir Difficulty Modifiers).
 
 ---
 
@@ -302,7 +372,7 @@ PC (souris et manette) et smartphone (tactile), à parité dès le départ — a
 | # | Épic | Pilier(s) servis | Statut |
 |---|------|-------------------|--------|
 | 1 | Boucle de combat centrale (énergie individuelle, deck/main/défausse, ciblage, télégraphie ennemie) | 1, 2 | Prototypé (3 prototypes de code existants) |
-| 2 | Identité de classe (4 héros MVP, Pouvoir de Classe, Transcendance, cartes de classe libres) | 4 | Prototypé partiellement — le verrouillage de carte, le Clerc, et le nom "Voleur" du proto sont désormais en divergence avec le canon |
+| 2 | Identité de classe (4 héros MVP, Pouvoir de Classe, Transcendance, cartes de classe libres) | 4 | Prototypé — `proto-cartes-completes` est aligné sur le canon (Paladin, Assassin, cartes libres + Transcendance) ; les 3 prototypes plus anciens restent en divergence (historique, non mis à jour) |
 | 3 | Lisibilité du premier combat / onboarding | 1, 2 | Non démarré — flaggé prioritaire par la séance `bmad-party-mode` |
 | 4 | Structure de run et déblocage garanti (carte de quêtes, boss, récompense de fin de run) | 3 | Non démarré — cible Mois 2 |
 | 5 | Village (déplacement physique, économie de ressources, upgrades de villageois) | 3 | Non démarré — cible Mois 2 |
@@ -330,7 +400,7 @@ Non définies — dépendent des cibles de performance encore à fixer (voir Tec
 ## Out of Scope
 
 Explicitement hors du Prototype Minimaliste V1 (Mois 1) :
-- Les 36 héros restants au-delà des 4 du MVP (cible 40), les ~476 cartes restantes (cible ~480), les ~640 améliorations.
+- Les 36 héros restants au-delà des 4 du MVP (cible 40), les ~476 cartes restantes du MVP vers la cible ~480 à débloquer (~600 cartes distinctes au total sur les 40 héros), les 80 améliorations de passifs (2 par héros × 40).
 - Le système de l'Astronome (modificateurs globaux).
 - La boucle complète de dépense de ressources au village (le MVP valide la boucle de combat, pas l'économie de village).
 - La carte de quêtes à embranchements complète et les 4 types de quêtes (classe/narrative/spéciale/multiple) — ciblés Mois 2.
@@ -346,33 +416,42 @@ Hors périmètre du jeu en général (aucune source ne l'évoque) :
 **Décisions actées cette session (à ne pas re-demander) :**
 - Type de jeu hybride Roguelike + Card Game confirmé par le porteur de projet.
 - Modèle de main/défausse confirmé : main commune de 5 cartes, piochée en début de tour, défausse en fin de tour, remélange à vide (mécanique du prototype `proto-deck-main-defausse`, cohérente avec le "main de 5 cartes" déjà écrit dans le brief). **Le chiffre "deck de 12 cartes" est caduc** — remplacé par la liste de cartes réelle (2 génériques + 2 "Départ" par héros, voir Primary Mechanics et Card Types and Effects), nombre de copies par carte encore à confirmer pour le jeu final.
-- **Taille de deck du prototype (temporaire, pas le canon final) :** 18 cartes, 1 exemplaire de chacune des 18 cartes du MVP (génériques + Départ + Avancé confondus). Scope explicitement limité au prototype pour permettre de tester le système complet tout de suite ; le nombre de copies pour les versions ultérieures reste ouvert.
-- Coût de la carte Assassin "Stratégie" confirmé à 1 (notée "—" dans le tableur source, clarifié directement par le porteur de projet).
+- **Taille de deck du prototype (temporaire, pas le canon final) :** 18 cartes (mise à jour 2026-08-06 : brièvement passée à 19, puis Coup Brutal retiré du Guerrier le même jour — doublon avec Blessure ouverte — ramenant le total à 18), 1 exemplaire de chacune. Scope explicitement limité au prototype pour permettre de tester le système complet tout de suite ; le nombre de copies pour les versions ultérieures reste ouvert.
+- Coût de la carte Assassin "Stratégie" **confirmé à 0** par le porteur de projet (2026-08-06), tranchant le conflit avec la valeur 1 fixée lors d'une session précédente (abandonnée).
 - Coûts de cartes du Mage (2 à 8) confirmés intentionnels, aucune correction nécessaire.
-- PV de départ du Guerrier fixé à 18 (aligné sur les 2 prototypes les plus récents).
+- **PV des héros — aucun montant fixé pour le moment, tout est temporaire** (précision du porteur de projet, 2026-08-06). PV de départ du Guerrier un temps noté "fixé à 18" ; cette formulation est retirée, la valeur redevient provisoire comme celle des 3 autres classes. Le prototype `proto-cartes-completes` utilise actuellement Guerrier 18, Paladin 14, Mage 10, Assassin 12 — à traiter comme des repères de test, pas comme le canon final.
 - **Nom canonique du jeu : "Hero Card Game"** — tranché par le porteur de projet. Les variantes "Heroic Card Game" (ancien titre du GDD source) et "HERO CARD GAME" (nom de dossier/projet BMad, casse infrastructure uniquement) sont abandonnées comme noms du jeu ; le nom de dossier/dépôt technique reste inchangé, c'est une question d'infrastructure distincte du titre créatif.
 - **Pas de plafond d'énergie** — l'énergie individuelle par héros se banque indéfiniment si non dépensée. Les 3 prototypes de code (plafond à 3) sont désormais en divergence avec le canon et à corriger.
-- **Contrôles : séquence à 3 taps confirmée** comme schéma canon (carte → héros → cible), le glisser-déposer des deux premiers prototypes est abandonné.
+- **Contrôles : Drag & Drop confirmé comme cible de design du jeu final** (carte glissée sur l'aire de jeu, VFX contextuel selon la zone survolée) — voir Controls and Input. La séquence à 3 taps (carte → héros → cible) reste un choix volontaire du prototype `proto-cartes-completes` pour aller plus vite, pas un remplacement du canon. **Corrige la lecture précédente** qui traitait le Drag & Drop comme abandonné.
+- **Économie de cartes long terme corrigée (2026-08-06) :** 15 cartes propres par héros (5 "cartes de départ" + 10 "cartes spéciales", 12 à débloquer), soit ~480 cartes à débloquer et ~600 cartes distinctes au total sur 40 héros, plus 80 améliorations de passifs (2 par héros × 40) — remplace le chiffre "~640 améliorations" utilisé jusqu'ici, qui provenait d'une erreur de transcription du document source (15×40 = 600, pas 640).
 - **Le Paladin remplace le Clerc dans le roster MVP** (Guerrier, Paladin, Mage, Assassin).
 - **Nom de classe canonique : Assassin**, pas "Voleur" — le prototype `proto-deck-main-defausse` a dérivé sur ce nom, à corriger.
 - **Verrouillage de carte par classe abandonné** : toute carte de classe est jouable par tout héros ayant l'énergie requise. Le mécanisme de synergie réel est la Transcendance (voir Character Selection), pas une restriction d'accès. Referme la question ouverte débattue en `bmad-party-mode` — c'est bien la piste "libre" qui était juste, affinée par la Transcendance plutôt que par un simple bonus de passif.
+- **Système de ligne Front/Back abandonné** : absent du tableur des classes refait le 2026-08-06, remplacé par le pouvoir de réanimation du Paladin (voir Character Selection). Retiré du prototype `proto-cartes-completes` (CSS + logique + bonus de dégâts par ligne).
+- **Relecture complète du GDD source (Google Doc), 2026-08-06 :** le porteur de projet a fourni un export PDF intégral (la lecture web précédente ne renvoyait qu'un résumé automatique tronqué, jugé peu fiable et écarté). Contenu significativement plus riche que l'extraction du 2026-08-04 sur Win/Loss (Mission Secours), Core Gameplay Loop (retour au village), Controls and Input (Drag & Drop vs prototype), Difficulty Modifiers (Malédictions, règles spécifiques de quête, difficulté ajustable, Challenge hard), Run Structure (Biomes), Level Design Framework (événements, durée par quête, Village, arbre de quêtes, Narrative Delivery) et Character Selection/Card Collection (économie de cartes par héros). Toutes ces sections ont été mises à jour en conséquence — voir chacune pour le détail.
 
-**Répercussions sur le code du prototype, signalées mais non appliquées** (accord de travail : jamais de modification de code sans confirmation) :
-- `MAX_ENERGY = 3` codé en dur dans les 3 prototypes — à retirer (pas de plafond).
-- Verrouillage strict des cartes spéciales par classe, codé dans `proto-deck-main-defausse` (champ `owner` bloquant) — à transformer en association cosmétique + logique de Transcendance.
-- Classe "Voleur" nommée ainsi dans le code — à renommer "Assassin".
-- Le Clerc et sa carte "Soin" existent dans les 3 prototypes — à remplacer par le Paladin (cartes de classe maintenant définies : Rempart, Provocation, Clairvoyance, Lumière divine).
-- Les 3 prototypes n'ont ni ressource Défense, ni statuts (Saignements, Esquive en stacks, Incapacité, Vulnérabilité, Camouflé) — tout le système de combat carte par carte doit être réécrit pour correspondre à la vraie liste de 18 cartes, pas seulement les 4 classes/coûts renommés.
-- Coût de "Coup direct" : 1 dans le code actuel, 0 dans le canon. "Esquive" (annulation totale, coût 1) n'existe plus — remplacée par "Encaisser" (gain de 4 défense, coût 0) et le statut Esquive à stacks (accordé par certaines cartes, ex. Image miroir).
+**État du prototype `proto-cartes-completes` (le plus à jour) — canon désormais appliqué en code, plus seulement documenté :**
+- Pas de `MAX_ENERGY` : l'énergie se banque indéfiniment.
+- Aucun verrouillage de carte par classe : toute carte de classe est assignable à tout héros ; la Transcendance s'applique quand la classe propriétaire de la carte la joue elle-même.
+- Classe renommée "Assassin" (plus de "Voleur").
+- Clerc retiré, remplacé par le Paladin (Rempart, Provocation, Clairvoyance, Lumière divine, pouvoir de réanimation).
+- Ressource Défense et statuts (Saignements, Esquive en stacks, Incapacité, Vulnérabilité, Camouflage, Puissance) implémentés.
+- Liste de cartes alignée sur le tableur refait (18 cartes, voir Card Types and Effects) — Coup mortel déplacé vers le Guerrier, Blessure ouverte ajoutée à l'Assassin, Assassinat révisé (branche Camouflé/non-Camouflé), Coup Brutal retiré du Guerrier (doublon avec Blessure ouverte).
+- Glossaire de mots-clés (icônes + infobulles au survol) implémenté.
+
+**Prototypes plus anciens (`mini-proto-2-cartes`, `proto-4-heros-2-ennemis`, `proto-deck-main-defausse`), conservés comme jalons historiques, non mis à jour — toujours en divergence avec le canon** (plafond d'énergie à 3, verrouillage de carte par classe, nom "Voleur", Clerc/Soin, pas de ressource Défense ni de statuts, coût de "Coup direct" à 1 au lieu de 0).
 
 **Questions ouvertes signalées mais explicitement non tranchées ici (à la demande du porteur de projet) :**
 - Justification narrative du retour au village après défaite (façon *Dead Cells*).
 - Nom du mécanisme de rétention/défausse de fin de tour.
 - Direction sonore, entièrement à définir.
-- Rythme exact du loot (pourcentages de drop).
-- Carte de classe du Paladin (voir Primary Mechanics).
-- Commandes UI pour le changement de ligne du Paladin et la conservation de carte du Mage (voir Character Selection → Pouvoir de Classe).
-- Condition exacte du bonus de dégâts du Camouflé de l'Assassin (formulation source ambiguë).
+- Rythme exact du loot (pourcentages de drop, taux de rareté par palier de run).
+- **Variété d'ennemis :** le prototype ne contient que des ennemis placeholder (dont le Gobelourd). Le porteur de projet prévoit d'ajouter de nouveaux ennemis au tableur, avec une échelle de puissance permettant de rendre un même ennemi plus faible ou plus fort selon la composition du groupe d'aventuriers — mécanique encore à chiffrer, non implémentée.
+- Commande UI de sélection de la carte gardée par le Pouvoir de Classe du Mage (voir Character Selection → Pouvoir de Classe).
+- Formule exacte d'absorption de la Défense (voir Primary Mechanics).
+- Nombre de copies par carte dans le deck final (au-delà du prototype).
+
+*(Retirées le 2026-08-06, rouvertes trop longtemps par erreur de tenue à jour : "carte de classe du Paladin" — résolue depuis Rempart/Provocation/Clairvoyance/Lumière divine ; "commande UI de changement de ligne du Paladin" — n'a plus d'objet depuis l'abandon du système Front/Back ; "condition du bonus Camouflé de l'Assassin" — résolue par le Pouvoir de Classe chiffré, Puissance 2.)*
 
 **Dépendances de contenu :**
 - Le tableur des classes ne documente pour l'instant qu'1 classe sur les 40 héros prévus (Paladin) — mais son Pouvoir de Classe et sa Transcendance sont maintenant définis directement par le porteur de projet, indépendamment du tableur. La dépendance bloquante porte sur les 36 héros restants, pas sur le Paladin du MVP.

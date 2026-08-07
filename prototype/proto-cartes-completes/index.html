@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<title>Hero Card Game — Proto Cartes Complètes</title>
+<title>Hero Card Game — Proto Run Infini</title>
 <style>
   :root {
     --bg: #1b1420; --panel: #2a1f33; --accent: #e8b93f; --hp: #d9455f;
@@ -18,11 +18,44 @@
   .row-label { font-size: .66rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 4px 2px 6px; }
   .enemies, .heroes { display: flex; gap: 8px; }
   .enemies { margin-bottom: 6px; }
-  .heroes { margin-bottom: 6px; flex-wrap: wrap; }
-  .unit { flex: 1; min-width: 128px; background: rgba(255,255,255,.04); border: 2px solid rgba(255,255,255,.08); border-radius: 12px; padding: 8px; text-align: center; position: relative; transition: box-shadow .15s, transform .1s, opacity .2s; }
+  .heroes { margin-bottom: 6px; flex-wrap: wrap; align-items: flex-start; }
+  .unit { flex: 1; min-width: 128px; background: rgba(255,255,255,.04); border: 2px solid rgba(255,255,255,.08); border-radius: 12px; padding: 8px; text-align: center; position: relative; transition: box-shadow .15s, transform .1s, opacity .2s, margin-top .25s ease; }
   .unit.dead { opacity: .35; filter: grayscale(1); }
+  .unit.acted { opacity: .5; filter: grayscale(.5); }
   .unit.target-eligible { box-shadow: 0 0 0 3px var(--heal); cursor: pointer; }
   .unit.hero-eligible { box-shadow: 0 0 0 3px var(--energy); cursor: pointer; }
+
+  @keyframes pulseUp {
+    0% { transform: translateY(0) scale(1); }
+    45% { transform: translateY(-10px) scale(1.07); }
+    100% { transform: translateY(-2px) scale(1.04); }
+  }
+  .unit.acting-up { animation: pulseUp 380ms ease-out forwards; z-index: 4; }
+
+  @keyframes pulseDown {
+    0% { transform: translateY(0) scale(1); }
+    45% { transform: translateY(10px) scale(1.07); }
+    100% { transform: translateY(2px) scale(1.04); }
+  }
+  .unit.acting-down { animation: pulseDown 380ms ease-out forwards; z-index: 4; }
+
+  @keyframes shakeUnit {
+    0%, 100% { transform: translateX(0); }
+    10% { transform: translateX(-7px); } 20% { transform: translateX(7px); }
+    30% { transform: translateX(-7px); } 40% { transform: translateX(7px); }
+    50% { transform: translateX(-5px); } 60% { transform: translateX(5px); }
+    70% { transform: translateX(-3px); } 80% { transform: translateX(3px); }
+    90% { transform: translateX(-2px); }
+  }
+  .unit.shaking { animation: shakeUnit 1000ms ease-in-out; }
+
+  .hover-tip { position: absolute; left: 50%; transform: translateX(-50%); width: 200px; background: linear-gradient(160deg, #3a2a48, #241a2c); border: 1px solid var(--status); border-radius: 10px; padding: 8px 10px; font-size: .64rem; color: var(--text); box-shadow: 0 10px 24px rgba(0,0,0,.5); pointer-events: none; text-align: left; z-index: 50; opacity: 0; transition: opacity 0s linear 0s; }
+  .unit:hover .hover-tip, .card:hover .hover-tip { opacity: 1; transition: opacity 0s linear 1000ms; }
+  .heroes .hover-tip { bottom: calc(100% + 8px); }
+  .enemies .hover-tip { top: calc(100% + 8px); }
+  .hand .hover-tip { bottom: calc(100% + 8px); width: 210px; }
+  .hover-tip .tip-title { font-weight: 700; color: var(--status); margin-bottom: 5px; font-size: .68rem; }
+  .hover-tip .tip-line { margin-bottom: 4px; line-height: 1.3; }
   .portrait { font-size: 1.7rem; line-height: 1; position: relative; }
   .uname { font-weight: 700; font-size: .72rem; margin: 2px 0 4px; }
   .bar { height: 7px; border-radius: 5px; background: rgba(0,0,0,.35); overflow: hidden; margin-bottom: 2px; }
@@ -35,8 +68,6 @@
   .badge { font-size: .58rem; background: rgba(0,0,0,.3); border-radius: 6px; padding: 1px 4px; }
   .badge.def { color: var(--def); }
   .badge.status { color: var(--status); }
-  .line-toggle { margin-top: 4px; font-size: .56rem; background: rgba(255,255,255,.08); border: none; color: var(--text); border-radius: 6px; padding: 2px 5px; cursor: pointer; }
-  .line-toggle.front { background: rgba(217,69,95,.35); }
   .telegraph { margin-top: 5px; font-size: .64rem; background: rgba(232,185,63,.12); border: 1px dashed var(--accent); border-radius: 8px; padding: 4px 5px; color: var(--accent); min-height: 30px; }
   .telegraph .vise { color: var(--muted); display: block; margin-top: 1px; }
   .log { background: rgba(0,0,0,.25); border-radius: 10px; padding: 7px 9px; font-size: .72rem; color: var(--muted); height: 66px; overflow-y: auto; margin: 8px 0; }
@@ -64,6 +95,7 @@
   .card:hover { transform: translateY(-4px); box-shadow: 0 8px 16px rgba(0,0,0,.35); }
   .card.pending { box-shadow: 0 0 0 3px var(--accent); transform: translateY(-4px); }
   .card.disabled { opacity: .3; cursor: not-allowed; }
+  .card.card-hidden { opacity: 0; pointer-events: none; }
   .card .cost { align-self: flex-start; background: var(--energy); color: #04202b; font-weight: 700; font-size: .64rem; border-radius: 50%; width: 17px; height: 17px; display: flex; align-items: center; justify-content: center; margin-bottom: 3px; }
   .card .tier { position: absolute; top: 5px; right: 5px; font-size: .56rem; color: var(--muted); }
   .card .icon { font-size: 1.25rem; margin: 2px 0; }
@@ -81,13 +113,30 @@
   .overlay h2 { font-size: 1.5rem; margin-bottom: 6px; }
   .overlay p { color: var(--muted); margin-bottom: 16px; }
   .keep-prompt { background: rgba(196,127,232,.12); border: 1px dashed var(--status); border-radius: 8px; padding: 6px; font-size: .68rem; color: var(--status); text-align: center; margin-bottom: 8px; }
+  .keep-prompt button { font-size: .64rem; padding: 3px 8px; margin-left: 4px; }
+
+  .draft-screen { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: center; justify-content: center; flex-direction: column; text-align: center; padding: 20px; z-index: 200; }
+  .draft-screen.show { display: flex; }
+  .draft-screen h2 { font-size: 1.5rem; margin-bottom: 6px; }
+  .draft-subtitle { color: var(--muted); margin-bottom: 20px; }
+  .draft-cards { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .draft-card { width: 112px; height: 162px; perspective: 800px; }
+  .draft-card-inner { position: relative; width: 100%; height: 100%; transition: transform .5s ease, opacity .5s ease; transform-style: preserve-3d; }
+  .draft-card.flipped .draft-card-inner { transform: rotateY(180deg); }
+  .draft-card.destroyed .draft-card-inner { opacity: 0; transform: rotateY(180deg) scale(.5); }
+  .draft-card.chosen .draft-card-inner { transform: rotateY(180deg) scale(1.08); }
+  .draft-card-face { position: absolute; inset: 0; backface-visibility: hidden; border-radius: 11px; }
+  .draft-card-back { background: linear-gradient(160deg, #3a2a48, #241a2c); border: 1px solid rgba(255,255,255,.15); display: flex; align-items: center; justify-content: center; font-size: 2rem; color: rgba(255,255,255,.2); }
+  .draft-card-front { transform: rotateY(180deg); }
+  .draft-card-front.card { width: 100%; height: 100%; min-height: 0; position: absolute; inset: 0; cursor: pointer; }
+  .draft-card-front.card:hover { transform: rotateY(180deg); box-shadow: 0 8px 16px rgba(0,0,0,.4); }
 </style>
 </head>
 <body>
 
-<h1>⚔️ Proto — Cartes Complètes (18 cartes)</h1>
+<h1>⚔️ Proto — Run Infini</h1>
 <p class="subtitle">Guerrier · Paladin · Mage · Assassin. Cartes libres (pas de verrouillage) — jouer la carte de sa propre classe déclenche généralement sa Transcendance. Défense, statuts, Pouvoir de Classe inclus. Un héros ne peut recevoir qu'une seule carte par tour, sauf Clairvoyance qui le libère pour en recevoir une autre.</p>
-<p class="notes">Simplifications de proto (voir le récap texte livré à côté) : dégâts du coup gratuit du Guerrier non chiffrés dans la source → 2 dégâts en placeholder. "3 ennemis adjacents" → tous les ennemis vivants (on n'en a que 2). Ennemis actuels ne "se défendent" jamais (Coup d'estoc inerte pour l'instant).</p>
+<p class="notes">Run Infini (2026-08-06) : deck de départ à 10 cartes, budget de difficulté croissant (linéaire, valeurs placeholder), bestiaire à 10 ennemis dont les valeurs scalent avec le niveau (comportement fixe), variance aléatoire ±20% sur dégâts/soin/bouclier/PV max des ennemis. Après chaque victoire, choisis 1 carte parmi 3 pour l'ajouter au deck ; le run continue jusqu'à la défaite. 18 cartes au total dans le pool, glossaire à 23 mots-clés. Survolez une carte, un héros ou un ennemi 1s pour voir ses mots-clés/pouvoirs/attaques.</p>
 
 <div class="arena">
   <div class="row-label">Ennemis</div>
@@ -120,21 +169,46 @@
 
   <div class="controls">
     <button class="action" id="end-turn">Fin de tour</button>
-    <button class="secondary" id="restart">Recommencer</button>
+    <button class="secondary" id="restart">Recommencer le combat</button>
   </div>
   <p class="hint" id="hint"></p>
 </div>
 
 <div class="overlay" id="overlay">
-  <h2 id="overlay-title">Victoire !</h2>
+  <h2 id="overlay-title">Défaite…</h2>
   <p id="overlay-text"></p>
   <button class="action" id="overlay-restart">Rejouer</button>
+</div>
+
+<div class="draft-screen" id="draft-screen">
+  <h2>Victoire !</h2>
+  <p class="draft-subtitle" id="draft-subtitle"></p>
+  <div class="draft-cards" id="draft-cards"></div>
 </div>
 
 <script>
 (function () {
   const HAND_SIZE = 5;
-  const GUERRIER_FREE_HIT_DMG = 2; // [ASSUMPTION] non chiffré dans la source, placeholder
+  const GUERRIER_FREE_HIT_DMG = 2; // confirmé par le tableur des classes refait (n'est plus un placeholder)
+
+  const CLASS_POWERS = {
+    guerrier: {
+      pouvoir: '⚡ Pouvoir de Classe — Au début de chaque tour, inflige aléatoirement 2 ⚔️ pour chaque carte contenant ⚔️ en main.',
+      transcendance: '✨ Transcendance — +50% dégâts ⚔️ (mêlée physique).',
+    },
+    paladin: {
+      pouvoir: '⚡ Pouvoir de Classe — La première fois que le Paladin ou un allié tombe à 0 PV (une fois par combat), il se relève avec 1 PV.',
+      transcendance: '✨ Transcendance — +50% sur le bouclier gagné ET sur le soin prodigué.',
+    },
+    mage: {
+      pouvoir: '⚡ Pouvoir de Classe — En fin de tour, peut garder 1 carte en main au lieu de la défausser.',
+      transcendance: '✨ Transcendance — -2 coût en énergie sur tout 🪄 (sort), pas seulement les sorts offensifs.',
+    },
+    assassin: {
+      pouvoir: '⚡ Pouvoir de Classe — En se concentrant, devient Camouflé (jusqu\'à sa prochaine attaque, ne peut être ciblé) et gagne Puissance 2 (+25% dégâts physiques par stack, -1/tour).',
+      transcendance: '✨ Transcendance — Les attaques de mêlée infligent Incapacité 1 et Vulnérabilité 1.',
+    },
+  };
 
   const HERO_DEFS = [
     { id: 'guerrier', classId: 'guerrier', name: 'Guerrier', icon: '⚔️', maxHp: 18 },
@@ -143,37 +217,234 @@
     { id: 'assassin', classId: 'assassin', name: 'Assassin', icon: '🗡️', maxHp: 12 },
   ];
 
-  const ENEMY_DEFS = [
-    { id: 'gobelin', name: 'Gobelin Maraudeur', icon: '👺', maxHp: 15,
-      moves: [ { name: 'Griffure', icon: '🩸', dmg: 4, weight: 2 }, { name: 'Charge Brutale', icon: '💥', dmg: 7, weight: 1 } ] },
-    { id: 'troll', name: 'Troll des Marais', icon: '🧌', maxHp: 28,
-      moves: [ { name: 'Coup de Massue', icon: '🔨', dmg: 8, weight: 2 }, { name: 'Régénération', icon: '💚', heal: 6, weight: 1 } ] },
+  // ---- Run Infini : variance aléatoire + scaling de niveau (2026-08-06) ----
+  // r = 20%, identique pour tous les ennemis, appliqué à dégâts/soin/bouclier/PV max.
+  // Le télégraphe affiche toujours le montant réel déjà tiré (jamais la fourchette) ;
+  // la fourchette n'apparaît que dans l'infobulle (movesInfo), à titre informatif.
+  const VALUE_VARIANCE = 0.20;
+  const LEVEL_GROWTH = 0.20; // +20%/niveau, valeur de départ à tester (placeholder assumé)
+  function valueRange(v) { return [Math.round(v * (1 - VALUE_VARIANCE)), Math.round(v * (1 + VALUE_VARIANCE))]; }
+  function rollValue(v) { const [lo, hi] = valueRange(v); return lo + Math.floor(Math.random() * (hi - lo + 1)); }
+  function scaledBase(base, level) { return base * (1 + LEVEL_GROWTH * (level - 1)); }
+  function rollScaled(base, level) { return rollValue(scaledBase(base, level)); }
+  function scaledRange(base, level) { return valueRange(scaledBase(base, level)); }
+  function costAtLevel(template, level) { return Math.round(scaledBase(template.cost, level)); }
+
+  const STATUS_LABELS = { vulnerabilite: 'Vulnérabilité', incapacite: 'Incapacité' };
+
+  // ---- Bestiaire à 10 ennemis (proposition de session, révisée par le porteur de projet 2026-08-06) ----
+  // Seules les VALEURS scalent avec le niveau ; le comportement de chaque ennemi est fixe.
+  const ENEMY_TEMPLATES = [
+    { id: 'gobelin', name: 'Gobelin Maraudeur', icon: '👺', hpBase: 15, cost: 8, targetMode: 'random',
+      chooseMove(e) {
+        if (Math.random() < 2 / 3) return { kind: 'dmg', name: 'Griffure', icon: '🩸', amount: rollScaled(4, e.level) };
+        return { kind: 'dmg', name: 'Charge Brutale', icon: '💥', amount: rollScaled(7, e.level) };
+      },
+      movesInfo(level) { return [
+        { icon: '🩸', name: 'Griffure', text: `${scaledRange(4, level).join('-')} dégâts (fréquent)` },
+        { icon: '💥', name: 'Charge Brutale', text: `${scaledRange(7, level).join('-')} dégâts (rare)` },
+      ]; } },
+
+    { id: 'squelette', name: 'Squelette Archer', icon: '💀', hpBase: 12, cost: 6, targetMode: 'random',
+      chooseMove(e) { return { kind: 'dmg', name: "Tir à l'Arc", icon: '🏹', amount: rollScaled(4, e.level) }; },
+      movesInfo(level) { return [{ icon: '🏹', name: "Tir à l'Arc", text: `${scaledRange(4, level).join('-')} dégâts (toujours)` }]; } },
+
+    { id: 'troll', name: 'Troll des Marais', icon: '🧌', hpBase: 28, cost: 14, targetMode: 'random',
+      chooseMove(e) {
+        if (Math.random() < 1 / 3) return { kind: 'heal-self', name: 'Régénération', icon: '💚', amount: rollScaled(15, e.level) };
+        return { kind: 'dmg', name: 'Coup de Massue', icon: '🔨', amount: rollScaled(8, e.level) };
+      },
+      movesInfo(level) { return [
+        { icon: '🔨', name: 'Coup de Massue', text: `${scaledRange(8, level).join('-')} dégâts (fréquent)` },
+        { icon: '💚', name: 'Régénération', text: `+${scaledRange(15, level).join('-')} PV (rare) — annulée si le Troll a subi des dégâts "feu" pendant la phase joueur de ce tour` },
+      ]; } },
+
+    { id: 'gobelourd', name: 'Gobelourd', icon: '🗿', hpBase: 20, cost: 10, shieldBase: 1, targetMode: 'random',
+      chooseMove(e) {
+        e.defendCycle = !e.defendCycle;
+        const defending = e.defendCycle;
+        e.defending = defending;
+        const amount = defending ? rollScaled(3, e.level) : rollScaled(8, e.level);
+        const defenseBonusThisTurn = defending ? rollScaled(3, e.level) : 0;
+        return { kind: 'dmg', name: 'Coup de Gourdin', icon: '🔨', amount, defenseBonusThisTurn };
+      },
+      movesInfo(level) { return [
+        { icon: '🔨', name: 'Coup de Gourdin', text: `${scaledRange(8, level).join('-')} dégâts hors défense / ${scaledRange(3, level).join('-')} en défense (+ bouclier), un tour sur deux chacun — attaque toujours` },
+        { icon: '🛡️', name: 'Bouclier passif', text: `${scaledRange(1, level).join('-')} défense en permanence` },
+      ]; } },
+
+    { id: 'loup', name: 'Loup Enragé', icon: '🐺', hpBase: 10, cost: 9, targetMode: 'random',
+      chooseMove(e) { return { kind: 'dmg', name: 'Morsure', icon: '🐾', amount: rollScaled(9, e.level) }; },
+      movesInfo(level) { return [{ icon: '🐾', name: 'Morsure', text: `${scaledRange(9, level).join('-')} dégâts (toujours) — peu de PV` }]; } },
+
+    { id: 'araignee', name: 'Araignée Venimeuse', icon: '🕷️', hpBase: 12, cost: 7, targetMode: 'random',
+      chooseMove(e) { return { kind: 'dmg', name: 'Piqûre', icon: '☠️', amount: rollScaled(2, e.level), brut: true, bleed: rollScaled(3, e.level) }; },
+      movesInfo(level) { return [{ icon: '☠️', name: 'Piqûre', text: `${scaledRange(2, level).join('-')} dégâts brut + Saignement ${scaledRange(3, level).join('-')} (toujours)` }]; } },
+
+    { id: 'necromancien', name: 'Nécromancien Novice', icon: '🧙', hpBase: 10, cost: 8, targetMode: 'random',
+      chooseMove(e) { return { kind: 'debuff', name: 'Malédiction', icon: '🔮', statusKey: 'vulnerabilite', amount: rollScaled(3, e.level) }; },
+      movesInfo(level) { return [{ icon: '🔮', name: 'Malédiction', text: `Vulnérabilité ${scaledRange(3, level).join('-')}, pas de dégât direct (toujours)` }]; } },
+
+    { id: 'golem', name: 'Golem de Pierre', icon: '🪨', hpBase: 35, cost: 16, shieldBase: 3, targetMode: 'random',
+      chooseMove(e) { return { kind: 'conditional-retaliate', name: 'Repos (sauf si touché)', icon: '🪨', amount: rollScaled(7, e.level) }; },
+      movesInfo(level) { return [
+        { icon: '🪨', name: 'Poing de Pierre', text: `${scaledRange(7, level).join('-')} dégâts, seulement s'il subit des dégâts pendant la phase joueur ; sinon ne fait rien` },
+        { icon: '🛡️', name: 'Bouclier passif', text: `${scaledRange(3, level).join('-')} défense en permanence — très gros PV` },
+      ]; } },
+
+    { id: 'bandit', name: 'Bandit Fourbe', icon: '🔪', hpBase: 14, cost: 9, targetMode: 'lowest-hp',
+      chooseMove(e) { return { kind: 'dmg', name: 'Coup Sournois', icon: '🔪', amount: rollScaled(6, e.level) }; },
+      movesInfo(level) { return [{ icon: '🔪', name: 'Coup Sournois', text: `${scaledRange(6, level).join('-')} dégâts, cible toujours le héros au moins de PV (toujours)` }]; } },
+
+    { id: 'chaman', name: 'Chaman Gobelin', icon: '🪄', hpBase: 12, cost: 8, targetMode: 'random',
+      chooseMove(e, all) {
+        const woundedAllies = all.filter(o => o.id !== e.id && o.hp > 0 && o.hp < o.maxHp);
+        if (woundedAllies.length) {
+          const target = woundedAllies[Math.floor(Math.random() * woundedAllies.length)];
+          return { kind: 'heal-ally', name: 'Chant Rituel', icon: '🪄', amount: rollScaled(5, e.level), healTargetId: target.id };
+        }
+        return { kind: 'dmg', name: 'Chant Rituel (repli)', icon: '✴️', amount: rollScaled(3, e.level) };
+      },
+      movesInfo(level) { return [
+        { icon: '🪄', name: 'Chant Rituel', text: `Soigne un allié blessé de ${scaledRange(5, level).join('-')} PV s'il y en a un` },
+        { icon: '✴️', name: 'Chant Rituel (repli)', text: `Sinon, attaque pour ${scaledRange(3, level).join('-')} dégâts` },
+      ]; } },
   ];
 
-  // ---- Card definitions: 2 génériques + 4 par classe (2 Départ + 2 Avancé) ----
+  function enemyTemplateOf(e) { return ENEMY_TEMPLATES.find(t => t.id === e.templateId); }
+
+  // ---- Budget de difficulté et génération de rencontre (Run Infini) ----
+  const MAX_ENEMIES_PER_COMBAT = 4; // lisibilité, à confirmer en playtest (surtout tactile)
+  const BUDGET_BASE = 16;
+  const BUDGET_GROWTH = 0.35; // +35%/combat, exponentiel — remplace le +8 linéaire jugé trop lent, valeur placeholder à tester
+  function budgetForCombat(n) { return Math.round(BUDGET_BASE * Math.pow(1 + BUDGET_GROWTH, n - 1)); }
+
+  function generateEncounter(budget) {
+    let best = null;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const count = 1 + Math.floor(Math.random() * MAX_ENEMIES_PER_COMBAT);
+      const picks = [];
+      for (let i = 0; i < count; i++) picks.push(ENEMY_TEMPLATES[Math.floor(Math.random() * ENEMY_TEMPLATES.length)]);
+      const perSlot = budget / count;
+      const instances = picks.map(t => ({ template: t, level: Math.max(1, Math.round(perSlot / t.cost)) }));
+      const total = instances.reduce((s, i) => s + costAtLevel(i.template, i.level), 0);
+      if (!best || Math.abs(total - budget) < Math.abs(best.total - budget)) best = { instances, total };
+    }
+    return best.instances;
+  }
+
+  function instantiateEnemy(template, level) {
+    const maxHp = rollScaled(template.hpBase, level);
+    return {
+      id: template.id + '-' + (uidCounter++), templateId: template.id, name: template.name, icon: template.icon, level,
+      maxHp, hp: maxHp, shieldRolled: template.shieldBase ? rollScaled(template.shieldBase, level) : 0,
+      defense: 0, saignements: 0, incapacite: 0, vulnerabilite: 0,
+      defending: false, defendCycle: false, tookDamageThisTurn: false, tookFireDamageThisTurn: false,
+      nextMove: null, targetHeroId: null,
+    };
+  }
+
+  function encounterSummary(enemies) { return enemies.map(e => `${e.name} (Nv.${e.level})`).join(', '); }
+
+  // ---- Glossaire (tableur "Système de jeu") ----
+  // hasIcon = colonne "Icone" = "yes". Les entrées "no" restent en texte (juste débarrassées des guillemets).
+  const GLOSSARY = [
+    { key: 'energie', icon: '⚡', hasIcon: true, related: 'énergie', explain: '' },
+    { key: 'epee', icon: '⚔️', hasIcon: true, related: 'dégats physique de mélée', explain: '' },
+    { key: 'arc', icon: '🏹', hasIcon: true, related: 'dégats physique à distance', explain: '' },
+    { key: 'brut', icon: '💥', hasIcon: true, related: 'dégats brut', explain: 'Ne tient pas compte des boucliers ou barrières.' },
+    { key: 'bouclier', icon: '🛡️', hasIcon: true, related: 'défense physique', explain: '' },
+    { key: 'barriere', icon: '💠', hasIcon: true, related: 'défense magique', explain: '' },
+    { key: 'concentration', icon: '🌀', hasIcon: true, related: 'concentration', explain: '', aliases: ['concentre'] },
+    { key: 'epeefeu', icon: '🔥⚔️', hasIcon: true, related: 'dégâts physique feu', explain: '' },
+    { key: 'fireball', icon: '🔥', hasIcon: true, related: 'dégâts magique feu', explain: '' },
+    { key: 'etincelle', icon: '✨', hasIcon: true, related: 'dégâts magique', explain: '' },
+    { key: 'poison', icon: '☠️', hasIcon: true, related: 'dégat brut', explain: '' },
+    { key: 'sort', icon: '🪄', hasIcon: true, related: 'sort', explain: '' },
+    { key: 'pv', icon: '❤️', hasIcon: true, related: '', explain: 'Point de vie.' },
+    { key: 'soin', icon: '💚', hasIcon: true, related: 'soin', explain: '' },
+    { key: 'cibleennemi', icon: '⚠️', hasIcon: true, related: '', explain: 'Ciblé par un ennemi.', aliases: ['cibleenemi', 'ennemicible'] },
+    { key: 'alliecible', icon: '🤝', hasIcon: true, related: '', explain: 'Cible un allié.' },
+    { key: 'pioche', icon: null, hasIcon: false, related: '', explain: 'Pioche X carte(s).' },
+    { key: 'esquive', icon: null, hasIcon: false, related: '', explain: 'Ne subit aucun dégât des X prochaines attaques (-1 Esquive à chaque attaque esquivée).' },
+    { key: 'saignement', icon: null, hasIcon: false, related: '', explain: 'Inflige X dégâts brut à la fin du tour, -1 Saignement au début de chaque tour.', aliases: ['saignements'] },
+    { key: 'incapacite', icon: null, hasIcon: false, related: '', explain: 'Inflige -25% de dégâts, -1 Incapacité au début de chaque tour.' },
+    { key: 'vulnerabilite', icon: null, hasIcon: false, related: '', explain: 'Reçoit +25% de dégâts, -1 Vulnérabilité au début de chaque tour.' },
+    { key: 'camoufle', icon: null, hasIcon: false, related: '', explain: "Ne peut pas être ciblé par un ennemi tant qu'un autre allié est présent, jusqu'à la prochaine attaque." },
+    { key: 'puissance', icon: null, hasIcon: false, related: '', explain: 'Les attaques physiques gagnent +25%, -1 Puissance au début de chaque tour.' },
+  ];
+
+  function normalizeKw(w) {
+    return w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z]/g, '');
+  }
+  const GLOSSARY_INDEX = {};
+  GLOSSARY.forEach(g => {
+    GLOSSARY_INDEX[normalizeKw(g.key)] = g;
+    (g.aliases || []).forEach(a => { GLOSSARY_INDEX[normalizeKw(a)] = g; });
+  });
+  function findGlossaryTerm(word) { return GLOSSARY_INDEX[normalizeKw(word)] || null; }
+
+  // Remplace les mots-clés entre guillemets par leur icône (colonne Icone = yes) ;
+  // dégrafe simplement les guillemets pour les autres (glossaire "no").
+  function renderCardText(text) {
+    return text.replace(/"([^"]+)"/g, (match, inner) => {
+      const g = findGlossaryTerm(inner);
+      return (g && g.hasIcon) ? g.icon : inner;
+    });
+  }
+
+  // Mots-clés du glossaire réellement présents (entre guillemets) dans le texte d'une carte, dans l'ordre, sans doublon.
+  function cardKeywordsPresent(text) {
+    const found = [];
+    const seen = new Set();
+    const re = /"([^"]+)"/g;
+    let m;
+    while ((m = re.exec(text))) {
+      const g = findGlossaryTerm(m[1]);
+      if (g && !seen.has(g.key)) { seen.add(g.key); found.push(g); }
+    }
+    return found;
+  }
+
+  function cardTooltipHtml(def) {
+    const terms = cardKeywordsPresent(def.desc);
+    if (!terms.length) return `<div class="tip-title">${def.name}</div><div class="tip-line">Aucun mot-clé de glossaire sur cette carte.</div>`;
+    const rows = terms.map(g => {
+      const label = g.hasIcon ? `${g.icon} ${g.key}` : `<b>${g.key}</b>`;
+      const related = g.related ? ` — <i>${g.related}</i>` : '';
+      const explain = g.explain ? `<br>${g.explain}` : '';
+      return `<div class="tip-line">${label}${related}${explain}</div>`;
+    }).join('');
+    return `<div class="tip-title">${def.name} — mots-clés</div>${rows}`;
+  }
+
+  // ---- Card definitions — refonte suivant le tableur "Jeu de cartes" (2026-08-06), 18 cartes (Coup Brutal retiré) ----
   const CARDS = [
     { code: 'coup-direct', name: 'Coup direct', classId: 'generic', tier: 'depart', cost: 0, cats: ['melee', 'degats'], dmgType: 'physique',
-      target: 'enemy', desc: 'Inflige 4 dégâts.',
+      target: 'enemy', desc: 'Inflige 4 "epee".',
       effect: (ctx) => dealDamage(ctx.hero, ctx.target, 4, 'physique', ctx) },
 
     { code: 'encaisser', name: 'Encaisser', classId: 'generic', tier: 'depart', cost: 0, cats: ['defense'], dmgType: null,
-      target: 'self', desc: 'Gagne 4 défense.',
-      effect: (ctx) => { ctx.hero.defense += 4; } },
+      target: 'self', desc: 'Gagne 4 "bouclier".',
+      effect: (ctx) => { grantDefense(ctx.hero, 4, ctx); } },
 
-    { code: 'coup-estoc', name: "Coup d'estoc", classId: 'guerrier', tier: 'depart', cost: 1, cats: ['melee', 'degats'], dmgType: 'physique',
-      target: 'enemy', desc: 'Inflige 4 dégâts (+4 si l\'ennemi se défend).',
-      effect: (ctx) => { const bonus = ctx.target.defending ? 4 : 0; dealDamage(ctx.hero, ctx.target, 4 + bonus, 'physique', ctx); } },
+    { code: 'coup-estoc', name: "Coup d'estoc", classId: 'guerrier', tier: 'depart', cost: 0, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', desc: 'Inflige 4 "epee". Inflige 4 "epee" de plus si l\'ennemi a du "bouclier".',
+      effect: (ctx) => { const bonus = (ctx.target.defense > 0) ? 4 : 0; dealDamage(ctx.hero, ctx.target, 4 + bonus, 'physique', ctx); } },
 
-    { code: 'coup-taille', name: 'Coup de taille', classId: 'guerrier', tier: 'depart', cost: 1, cats: ['melee', 'degats'], dmgType: 'physique',
-      target: 'all-enemies', desc: 'Inflige 4 dégâts à 3 ennemis adjacents.',
+    { code: 'coup-taille', name: 'Coup de taille', classId: 'guerrier', tier: 'avance', cost: 1, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'all-enemies', desc: 'Inflige 4 "epee" à tous les ennemis.',
       effect: (ctx) => livingEnemies().forEach(e => dealDamage(ctx.hero, e, 4, 'physique', ctx)) },
 
-    { code: 'coup-brutal', name: 'Coup Brutal', classId: 'guerrier', tier: 'avance', cost: 2, cats: ['melee', 'degats'], dmgType: 'physique',
-      target: 'enemy', desc: 'Inflige 6 dégâts et Saignements 3.',
-      effect: (ctx) => { dealDamage(ctx.hero, ctx.target, 6, 'physique', ctx); ctx.target.saignements = (ctx.target.saignements || 0) + 3; } },
+    { code: 'coup-mortel', name: 'Coup mortel', classId: 'guerrier', tier: 'avance', cost: 0, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', desc: 'Inflige 4 "epee". Si cette attaque tue sa cible, peut agir à nouveau et Coup mortel revient dans la main du joueur.',
+      effect: (ctx) => {
+        dealDamage(ctx.hero, ctx.target, 4, 'physique', ctx);
+        if (ctx.target.hp <= 0) { ctx.hero.hasActed = false; ctx.returnToHand = true; log(`${ctx.hero.name} achève ${ctx.target.name} — peut agir à nouveau, Coup mortel revient en main.`, 'power'); }
+      } },
 
-    { code: 'riposte', name: 'Riposte', classId: 'guerrier', tier: 'avance', cost: 1, cats: ['melee', 'degats', 'defense'], dmgType: 'physique',
-      target: 'self', desc: "Si l'aventurier est ciblé, annule l'attaque et inflige 4 dégâts.",
+    { code: 'riposte', name: 'Riposte', classId: 'guerrier', tier: 'avance', cost: 3, cats: ['melee', 'degats', 'defense'], dmgType: 'physique',
+      target: 'self', desc: 'Si "cibleennemi", annule l\'attaque et inflige 4 "epee".',
       effect: (ctx) => {
         const attacker = enemyTargeting(ctx.hero);
         if (!attacker) { log(`Riposte : ${ctx.hero.name} n'est visé par personne, la carte ne fait rien.`, 'sys'); return; }
@@ -183,64 +454,76 @@
       } },
 
     { code: 'rempart', name: 'Rempart', classId: 'paladin', tier: 'depart', cost: 1, cats: ['defense'], dmgType: null,
-      target: 'ally', desc: 'Cet aventurier et un allié gagnent 4 défense (+50% pour l\'allié si joué par le Paladin).',
-      effect: (ctx) => { ctx.hero.defense += 4; const bonus = isSelfPlay(ctx) ? 2 : 0; ctx.target.defense += 4 + bonus; } },
+      target: 'ally', desc: 'Gagne 4 "bouclier". Un allié gagne 4 "bouclier" (+50% sur les deux si joué par le Paladin).',
+      effect: (ctx) => { grantDefense(ctx.hero, 4, ctx); grantDefense(ctx.target, 4, ctx); } },
 
-    { code: 'provocation', name: 'Provocation', classId: 'paladin', tier: 'depart', cost: 1, cats: ['defense'], dmgType: null,
-      target: 'enemy', desc: 'Gagne 6 défense. Un ennemi change sa cible pour cet aventurier.',
-      effect: (ctx) => { ctx.hero.defense += 6; if (ctx.target.nextMove && !ctx.target.nextMove.heal) ctx.target.targetHeroId = ctx.hero.id; } },
+    { code: 'provocation', name: 'Provocation', classId: 'paladin', tier: 'avance', cost: 0, cats: ['defense'], dmgType: null,
+      target: 'enemy', desc: 'Gagne 6 "bouclier". Devient "cibleennemi" d\'un ennemi.',
+      effect: (ctx) => { grantDefense(ctx.hero, 6, ctx); if (ctx.target.nextMove && TARGETABLE_MOVE_KINDS.includes(ctx.target.nextMove.kind)) ctx.target.targetHeroId = ctx.hero.id; } },
 
-    { code: 'clairvoyance', name: 'Clairvoyance', classId: 'paladin', tier: 'avance', cost: 0, cats: ['deck', 'concentration'], dmgType: null,
-      target: 'ally', desc: "Pioche 1 carte. Un autre aventurier se concentre. Cet aventurier n'est pas considéré avoir agi — une autre carte peut encore lui être assignée ce tour-ci.",
+    { code: 'clairvoyance', name: 'Clairvoyance', classId: 'paladin', tier: 'avance', cost: 0, cats: ['sort'], dmgType: null,
+      target: 'ally', desc: '"Pioche" 1. "alliecible" se "concentre". Peut agir à nouveau ce tour.',
       effect: (ctx) => { animatedDraw(1); ctx.target.energy += 1; log(`${ctx.target.name} se concentre grâce à Clairvoyance.`, 'you'); ctx.hero.hasActed = false; log(`${ctx.hero.name} peut encore agir ce tour.`, 'power'); } },
 
     { code: 'lumiere-divine', name: 'Lumière divine', classId: 'paladin', tier: 'avance', cost: 2, cats: ['defense', 'soin', 'magie'], dmgType: null,
-      target: 'self', desc: 'Gagne 4 défense. Restaure 2 PV à tous les aventuriers.',
-      effect: (ctx) => { ctx.hero.defense += 4; livingHeroes().forEach(h => { h.hp = Math.min(h.maxHp, h.hp + 2); }); } },
+      target: 'self', desc: 'Gagne 4 "bouclier". "soin" 2 à tous les alliés (+50% pour le bouclier ET le soin si joué par le Paladin).',
+      effect: (ctx) => {
+        grantDefense(ctx.hero, 4, ctx);
+        livingHeroes().forEach(h => grantHeal(h, 2, ctx));
+      } },
 
-    { code: 'missile-magique', name: 'Missile magique', classId: 'mage', tier: 'depart', cost: 2, cats: ['distance', 'degats'], dmgType: 'magique',
-      target: 'enemy', desc: 'Inflige 5 dégâts magiques.',
+    { code: 'missile-magique', name: 'Missile magique', classId: 'mage', tier: 'depart', cost: 2, cats: ['sort', 'distance', 'degats'], dmgType: 'magique',
+      target: 'enemy', desc: 'Inflige 5 "etincelle".',
       effect: (ctx) => dealDamage(ctx.hero, ctx.target, 5, 'magique', ctx) },
 
-    { code: 'image-miroir', name: 'Image miroir', classId: 'mage', tier: 'depart', cost: 3, cats: ['defense'], dmgType: 'magique',
-      target: 'self', desc: 'Gagne Esquive 2.',
+    { code: 'image-miroir', name: 'Image miroir', classId: 'mage', tier: 'avance', cost: 3, cats: ['sort', 'defense'], dmgType: 'magique',
+      target: 'self', desc: 'Gagne "Esquive" 2.',
       effect: (ctx) => { ctx.hero.esquive = (ctx.hero.esquive || 0) + 2; } },
 
-    { code: 'tornade-feu', name: 'Tornade de feu', classId: 'mage', tier: 'avance', cost: 6, cats: ['distance', 'degats'], dmgType: 'magique',
-      target: 'all-enemies', desc: 'Inflige 3 dégâts magiques à tous les ennemis.',
-      effect: (ctx) => livingEnemies().forEach(e => dealDamage(ctx.hero, e, 3, 'magique', ctx)) },
+    { code: 'tornade-feu', name: 'Tornade de feu', classId: 'mage', tier: 'avance', cost: 6, cats: ['sort', 'distance', 'degats', 'feu'], dmgType: 'magique',
+      target: 'all-enemies', desc: 'Inflige 5 "fireball" à tous les ennemis.',
+      effect: (ctx) => livingEnemies().forEach(e => dealDamage(ctx.hero, e, 5, 'magique', ctx)) },
 
-    { code: 'boule-feu', name: 'Boule de feu', classId: 'mage', tier: 'avance', cost: 8, cats: ['distance', 'degats'], dmgType: 'magique',
-      target: 'enemy', desc: 'Inflige 10 dégâts magiques.',
-      effect: (ctx) => dealDamage(ctx.hero, ctx.target, 10, 'magique', ctx) },
+    { code: 'boule-feu', name: 'Boule de feu', classId: 'mage', tier: 'avance', cost: 8, cats: ['sort', 'distance', 'degats', 'feu'], dmgType: 'magique',
+      target: 'enemy', desc: 'Inflige 15 "fireball".',
+      effect: (ctx) => dealDamage(ctx.hero, ctx.target, 15, 'magique', ctx) },
 
-    { code: 'strategie', name: 'Stratégie', classId: 'assassin', tier: 'depart', cost: 1, cats: ['melee', 'degats', 'defense'], dmgType: 'physique',
-      target: 'conditional', desc: "Si ciblé : gagne 4 défense. Sinon : inflige 4 dégâts à un ennemi.",
+    { code: 'strategie', name: 'Stratégie', classId: 'assassin', tier: 'depart', cost: 0, cats: ['melee', 'degats', 'defense'], dmgType: 'physique',
+      target: 'conditional', desc: 'Si "cibleennemi", gagne 4 "bouclier", sinon inflige 4 "epee".',
       effect: (ctx) => {
-        if (enemyTargeting(ctx.hero)) { ctx.hero.defense += 4; log(`${ctx.hero.name} est visé : Stratégie lui donne 4 défense.`, 'you'); }
+        if (enemyTargeting(ctx.hero)) { grantDefense(ctx.hero, 4, ctx); log(`${ctx.hero.name} est visé : Stratégie lui donne 4 défense.`, 'you'); }
         else dealDamage(ctx.hero, ctx.target, 4, 'physique', ctx);
       } },
 
-    { code: 'coup-mortel', name: 'Coup mortel', classId: 'assassin', tier: 'depart', cost: 1, cats: ['melee', 'degats'], dmgType: 'physique',
-      target: 'enemy', desc: 'Inflige 2 dégâts. Si tue sa cible, rembourse le coût.',
-      effect: (ctx) => { dealDamage(ctx.hero, ctx.target, 2, 'physique', ctx); if (ctx.target.hp <= 0) { ctx.hero.energy += ctx.cardDef.cost; log(`${ctx.hero.name} achève ${ctx.target.name} — Coup mortel remboursé.`, 'you'); } } },
+    { code: 'blessure-ouverte', name: 'Blessure ouverte', classId: 'assassin', tier: 'avance', cost: 2, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', desc: 'Inflige 6 "epee" et "Saignements" 3.',
+      effect: (ctx) => { dealDamage(ctx.hero, ctx.target, 6, 'physique', ctx); ctx.target.saignements = (ctx.target.saignements || 0) + 3; } },
 
-    { code: 'assassinat', name: 'Assassinat', classId: 'assassin', tier: 'avance', cost: 6, cats: ['melee', 'degats'], dmgType: 'physique',
-      target: 'enemy', requiresCamouflage: true, desc: 'Ne peut être joué que Camouflé. Inflige 10 dégâts.',
-      effect: (ctx) => { dealDamage(ctx.hero, ctx.target, 10, 'physique', ctx); ctx.hero.camoufle = false; } },
+    { code: 'assassinat', name: 'Assassinat', classId: 'assassin', tier: 'avance', cost: 4, cats: ['melee', 'degats'], dmgType: 'physique',
+      target: 'enemy', desc: 'Si Camouflé, inflige 10 "epee", sinon se "concentre" et Assassinat va sur le dessus du deck.',
+      effect: (ctx) => {
+        if (ctx.hero.camoufle) {
+          dealDamage(ctx.hero, ctx.target, 10, 'physique', ctx);
+          ctx.hero.camoufle = false;
+        } else {
+          ctx.hero.energy += 1;
+          ctx.returnToDeckTop = true;
+          log(`${ctx.hero.name} n'est pas Camouflé : Assassinat se concentre (+1 énergie) et retourne au sommet du deck.`, 'you');
+        }
+      } },
 
     { code: 'lachete', name: 'Lâcheté', classId: 'assassin', tier: 'avance', cost: 1, cats: [], dmgType: null,
-      target: 'enemy', desc: "Change la cible pour un autre aventurier. L'ennemi gagne Incapacité 1.",
+      target: 'enemy', desc: 'Si "cibleennemi", change vers "alliecible". L\'ennemi gagne Incapacité 1.',
       effect: (ctx) => {
         const others = livingHeroes().filter(h => h.id !== ctx.hero.id);
-        if (others.length && ctx.target.nextMove && !ctx.target.nextMove.heal) {
+        if (others.length && ctx.target.nextMove && TARGETABLE_MOVE_KINDS.includes(ctx.target.nextMove.kind)) {
           ctx.target.targetHeroId = others[Math.floor(Math.random() * others.length)].id;
         }
         ctx.target.incapacite = (ctx.target.incapacite || 0) + 1;
       } },
   ];
 
-  const state = { heroes: [], enemies: [], deck: [], hand: [], discard: [], pending: null, turn: 1, over: false, mageKeepPending: false };
+  const state = { heroes: [], enemies: [], deck: [], hand: [], discard: [], pending: null, turn: 1, over: false, mageKeepPending: false, drawingUids: new Set(), shakingIds: new Set(), paladinReviveUsed: false, run: { combatIndex: 1 }, draftPicks: null };
   let uidCounter = 0;
 
   const el = {
@@ -265,6 +548,9 @@
     overlayTitle: document.getElementById('overlay-title'),
     overlayText: document.getElementById('overlay-text'),
     overlayRestart: document.getElementById('overlay-restart'),
+    draftScreen: document.getElementById('draft-screen'),
+    draftSubtitle: document.getElementById('draft-subtitle'),
+    draftCards: document.getElementById('draft-cards'),
   };
 
   function log(msg, cls) {
@@ -273,6 +559,50 @@
     if (cls) p.className = cls;
     el.log.appendChild(p);
     el.log.scrollTop = el.log.scrollHeight;
+  }
+
+  function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+  function enemyMovesHtml(e) {
+    const template = enemyTemplateOf(e);
+    let html = template.movesInfo(e.level).map(m => `<div class="tip-line">${m.icon} <b>${m.name}</b> — ${m.text}</div>`).join('');
+    html += `<div class="tip-line">📊 Niveau ${e.level} · PV max ${e.maxHp}</div>`;
+    return html;
+  }
+
+  // Pouvoir de Classe du Paladin : la première fois que le Paladin ou un allié tombe à 0 PV
+  // (une seule fois par combat), il se relève avec 1 PV.
+  function tryPaladinRevive(hero) {
+    if (state.paladinReviveUsed) return;
+    const paladin = heroById('paladin');
+    if (!paladin || paladin.hp <= 0) return;
+    hero.hp = 1;
+    state.paladinReviveUsed = true;
+    log(`Pouvoir de Classe du Paladin : ${hero.name} se relève avec 1 PV !`, 'power');
+  }
+
+  function triggerShake(unit) {
+    state.shakingIds.add(unit.id);
+    render();
+    setTimeout(() => { state.shakingIds.delete(unit.id); render(); }, 1000);
+  }
+
+  // Impulsions d'action : manipulation DOM directe (aucun render() ne survient pendant
+  // ces 380ms, donc pas de risque que le nœud soit reconstruit sous nos pieds).
+  async function pulseHero(hero) {
+    const elh = el.heroes.querySelector(`[data-hero-id="${hero.id}"]`);
+    if (!elh) return;
+    elh.classList.add('acting-up');
+    await sleep(380);
+    elh.classList.remove('acting-up');
+  }
+
+  async function pulseEnemy(enemyId) {
+    const ele = el.enemies.querySelector(`[data-enemy-id="${enemyId}"]`);
+    if (!ele) return;
+    ele.classList.add('acting-down');
+    await sleep(380);
+    ele.classList.remove('acting-down');
   }
 
   function shuffle(arr) {
@@ -308,13 +638,19 @@
 
   function animateDrawnCards(newUids) {
     if (!newUids.length) return;
+    // Les nouvelles cartes restent masquées (voir renderHand) tant que leur vol n'est pas arrivé.
+    newUids.forEach(uid => state.drawingUids.add(uid));
+    render();
     const deckRect = el.deckPile.getBoundingClientRect();
     newUids.forEach((uid, i) => {
-      const cardEl = el.hand.querySelector(`[data-uid="${uid}"]`);
-      const card = state.hand.find(c => c.uid === uid);
-      if (!cardEl || !card) return;
-      const destRect = cardEl.getBoundingClientRect();
-      setTimeout(() => flyGhost(deckRect, destRect, card.def, true), i * 70);
+      setTimeout(() => {
+        const cardEl = el.hand.querySelector(`[data-uid="${uid}"]`);
+        const card = state.hand.find(c => c.uid === uid);
+        if (!cardEl || !card) { state.drawingUids.delete(uid); render(); return; }
+        const destRect = cardEl.getBoundingClientRect();
+        flyGhost(deckRect, destRect, card.def, true);
+        setTimeout(() => { state.drawingUids.delete(uid); render(); }, FLIGHT_MS);
+      }, i * 70);
     });
   }
 
@@ -329,39 +665,75 @@
   function livingHeroes() { return state.heroes.filter(h => h.hp > 0); }
   function livingEnemies() { return state.enemies.filter(e => e.hp > 0); }
   function heroById(id) { return state.heroes.find(h => h.id === id); }
-  function isSelfPlay(ctx) { return ctx.hero.classId === ctx.cardDef.classId; }
-  function enemyTargeting(hero) { return state.enemies.find(e => e.hp > 0 && e.nextMove && !e.nextMove.heal && e.targetHeroId === hero.id) || null; }
+  const TARGETABLE_MOVE_KINDS = ['dmg', 'debuff', 'conditional-retaliate'];
+  function enemyTargeting(hero) { return state.enemies.find(e => e.hp > 0 && e.nextMove && TARGETABLE_MOVE_KINDS.includes(e.nextMove.kind) && e.targetHeroId === hero.id) || null; }
 
-  function dealDamage(sourceHero, targetUnit, base, dmgType, ctx) {
+  function dealDamage(sourceHero, targetUnit, base, dmgType, ctx, opts) {
+    opts = opts || {};
     let amount = base;
-    if (ctx && isSelfPlay(ctx) && ctx.cardDef.classId === 'guerrier' && ctx.cardDef.cats.includes('melee')) amount *= 1.5; // Transcendance Guerrier
-    if (sourceHero && sourceHero.line === 'back' && dmgType === 'physique') amount *= 0.8; // Paladin backline: -20% dégâts physiques infligés
-    if (targetUnit.line === 'back' && dmgType === 'physique') amount *= 0.8; // -20% dégâts physiques reçus
+    // Transcendance Guerrier : +50% sur toute carte "epee" jouée PAR le Guerrier, quelle que soit sa classe d'origine
+    // (Coup direct générique, Blessure ouverte de l'Assassin, etc.) — pas seulement les cartes de la classe Guerrier.
+    if (ctx && sourceHero && sourceHero.classId === 'guerrier' && cardKeywordsPresent(ctx.cardDef.desc).some(g => g.key === 'epee')) amount *= 1.5;
+    if (sourceHero && sourceHero.puissance > 0 && dmgType === 'physique') amount *= (1 + 0.25 * sourceHero.puissance); // Puissance (Assassin, via Concentration)
     if (targetUnit.incapacite > 0 && !sourceHero) amount *= 0.75; // Incapacité only ever placed on enemies in this card set
     if (sourceHero && sourceHero.incapacite) amount *= 0.75;
     if (targetUnit.vulnerabilite > 0) amount *= 1.25;
     amount = Math.round(amount);
-    const absorbed = Math.min(targetUnit.defense || 0, amount);
-    if (absorbed > 0) targetUnit.defense -= absorbed;
+    let absorbed = 0;
+    if (!opts.brut) {
+      absorbed = Math.min(targetUnit.defense || 0, amount);
+      if (absorbed > 0) targetUnit.defense -= absorbed;
+    }
     const toHp = amount - absorbed;
     targetUnit.hp -= toHp;
-    log(`${sourceHero ? sourceHero.name : 'Un ennemi'} inflige ${amount} dégâts${absorbed ? ` (${absorbed} absorbés)` : ''} à ${targetUnit.name}.`, sourceHero ? 'you' : 'foe');
-    if (ctx && isSelfPlay(ctx) && ctx.cardDef.classId === 'assassin' && ctx.cardDef.cats.includes('melee') && targetUnit.hp > 0) {
+    log(`${sourceHero ? sourceHero.name : 'Un ennemi'} inflige ${amount} dégâts${opts.brut ? ' brut' : ''}${absorbed ? ` (${absorbed} absorbés)` : ''} à ${targetUnit.name}.`, sourceHero ? 'you' : 'foe');
+    if (toHp > 0) triggerShake(targetUnit);
+    // Run Infini : marque l'ennemi comme touché ce tour (Golem) / touché par du feu ce tour (Troll).
+    if (sourceHero && state.enemies.includes(targetUnit)) {
+      targetUnit.tookDamageThisTurn = true;
+      if (ctx && ctx.cardDef && ctx.cardDef.cats && ctx.cardDef.cats.includes('feu')) targetUnit.tookFireDamageThisTurn = true;
+    }
+    // Transcendance Assassin : toute carte "epee" jouée PAR l'Assassin inflige Incapacité 1 + Vulnérabilité 1,
+    // quelle que soit sa classe d'origine — même principe que le Guerrier ci-dessus.
+    if (ctx && sourceHero && sourceHero.classId === 'assassin' && cardKeywordsPresent(ctx.cardDef.desc).some(g => g.key === 'epee') && targetUnit.hp > 0) {
       targetUnit.incapacite = (targetUnit.incapacite || 0) + 1;
       targetUnit.vulnerabilite = (targetUnit.vulnerabilite || 0) + 1;
       log(`Transcendance de l'Assassin : Incapacité 1 et Vulnérabilité 1 sur ${targetUnit.name}.`, 'power');
     }
   }
 
-  function buildDeck() {
+  // Transcendance Paladin : +50% sur toute carte "bouclier"/"soin" jouée PAR le Paladin, quelle que soit sa
+  // classe d'origine (Encaisser générique, Stratégie de l'Assassin, etc.) — même principe que Guerrier/Assassin.
+  function grantDefense(targetUnit, base, ctx) {
+    let amount = base;
+    if (ctx && ctx.hero.classId === 'paladin' && cardKeywordsPresent(ctx.cardDef.desc).some(g => g.key === 'bouclier')) amount *= 1.5;
+    amount = Math.round(amount);
+    targetUnit.defense += amount;
+    return amount;
+  }
+  function grantHeal(targetUnit, base, ctx) {
+    let amount = base;
+    if (ctx && ctx.hero.classId === 'paladin' && cardKeywordsPresent(ctx.cardDef.desc).some(g => g.key === 'soin')) amount *= 1.5;
+    amount = Math.round(amount);
+    targetUnit.hp = Math.min(targetUnit.maxHp, targetUnit.hp + amount);
+    return amount;
+  }
+
+  // Run Infini : deck de départ à 10 cartes (3 Coup direct, 3 Encaisser, 1 carte Départ par classe).
+  const STARTING_DECK_CODES = [
+    ['coup-direct', 3], ['encaisser', 3], ['coup-estoc', 1], ['rempart', 1], ['missile-magique', 1], ['strategie', 1],
+  ];
+  function buildStartingDeck() {
     const cards = [];
-    CARDS.forEach(def => cards.push({ uid: uidCounter++, def }));
+    STARTING_DECK_CODES.forEach(([code, n]) => {
+      const def = CARDS.find(c => c.code === code);
+      for (let i = 0; i < n; i++) cards.push({ uid: uidCounter++, def });
+    });
     return shuffle(cards);
   }
 
   function animatedDraw(n) {
     const drawn = drawCards(n);
-    render();
     animateDrawnCards(drawn);
   }
 
@@ -392,19 +764,28 @@
     return drawn;
   }
 
-  function pickWeighted(moves) {
-    const total = moves.reduce((s, m) => s + m.weight, 0);
-    let r = Math.random() * total;
-    for (const m of moves) { if ((r -= m.weight) <= 0) return m; }
-    return moves[moves.length - 1];
+  function pickHeroTarget(mode) {
+    const alive = livingHeroes();
+    if (!alive.length) return null;
+    if (mode === 'lowest-hp') return alive.reduce((a, b) => (b.hp < a.hp ? b : a));
+    return alive[Math.floor(Math.random() * alive.length)];
   }
 
   function rollEnemyTelegraphs() {
-    const alive = livingHeroes();
     state.enemies.forEach(e => {
-      if (e.hp <= 0) { e.nextMove = null; e.targetHeroId = null; return; }
-      e.nextMove = pickWeighted(e.moves);
-      e.targetHeroId = e.nextMove.heal ? null : alive[Math.floor(Math.random() * alive.length)].id;
+      e.tookDamageThisTurn = false;
+      e.tookFireDamageThisTurn = false;
+      if (e.hp <= 0) { e.nextMove = null; e.targetHeroId = null; e.defense = 0; return; }
+      const template = enemyTemplateOf(e);
+      const move = template.chooseMove(e, state.enemies);
+      e.nextMove = move;
+      e.defense = (e.shieldRolled || 0) + (move.defenseBonusThisTurn || 0);
+      if (TARGETABLE_MOVE_KINDS.includes(move.kind)) {
+        const t = pickHeroTarget(template.targetMode);
+        e.targetHeroId = t ? t.id : null;
+      } else {
+        e.targetHeroId = null;
+      }
     });
   }
 
@@ -417,16 +798,29 @@
     state.enemies.forEach(e => {
       const dead = e.hp <= 0;
       const div = document.createElement('div');
-      div.className = 'unit' + (dead ? ' dead' : '') + (awaitingEnemyTarget && !dead ? ' target-eligible' : '');
+      div.className = 'unit' + (dead ? ' dead' : '') + (awaitingEnemyTarget && !dead ? ' target-eligible' : '') + (state.shakingIds.has(e.id) ? ' shaking' : '');
       div.dataset.enemyId = e.id;
       const pct = Math.max(0, (e.hp / e.maxHp) * 100);
       let telegraphHtml = 'Vaincu.';
       if (!dead && e.nextMove) {
-        const targetName = e.nextMove.heal ? null : (heroById(e.targetHeroId) || {}).name;
-        telegraphHtml = `${e.nextMove.icon} ${e.nextMove.name}${e.nextMove.dmg ? ' — ' + e.nextMove.dmg + ' dégâts' : ' — soigne ' + e.nextMove.heal + ' PV'}`
-          + (targetName ? `<span class="vise">vise ${targetName}</span>` : '');
+        const move = e.nextMove;
+        if (move.kind === 'dmg' || move.kind === 'debuff') {
+          const targetName = (heroById(e.targetHeroId) || {}).name;
+          const amountText = move.kind === 'dmg' ? `${move.amount} dégâts${move.brut ? ' brut' : ''}` : `${STATUS_LABELS[move.statusKey] || move.statusKey} ${move.amount}`;
+          telegraphHtml = `${move.icon} ${move.name} — ${amountText}` + (targetName ? `<span class="vise">vise ${targetName}</span>` : '');
+        } else if (move.kind === 'heal-self') {
+          telegraphHtml = `${move.icon} ${move.name} — soigne ${move.amount} PV`;
+        } else if (move.kind === 'heal-ally') {
+          const allyName = (state.enemies.find(o => o.id === move.healTargetId) || {}).name;
+          telegraphHtml = `${move.icon} ${move.name} — soigne ${allyName || 'un allié'} de ${move.amount} PV`;
+        } else if (move.kind === 'conditional-retaliate') {
+          const targetName = (heroById(e.targetHeroId) || {}).name;
+          telegraphHtml = `${move.icon} ${move.name}` + (targetName ? `<span class="vise">ripostera sur ${targetName} (${move.amount} dégâts) s'il est touché</span>` : '');
+        }
+        if (e.defending) telegraphHtml += `<span class="vise">🛡️ se défend aussi ce tour</span>`;
       }
       const badges = [];
+      if (e.defense > 0) badges.push(`<span class="badge def">🛡️${e.defense}</span>`);
       if (e.saignements > 0) badges.push(`<span class="badge status">🩸${e.saignements}</span>`);
       if (e.incapacite > 0) badges.push(`<span class="badge status">⬇️${e.incapacite}</span>`);
       if (e.vulnerabilite > 0) badges.push(`<span class="badge status">🎯${e.vulnerabilite}</span>`);
@@ -437,6 +831,7 @@
         <div class="bar-label">${Math.max(0, e.hp)} / ${e.maxHp} PV</div>
         <div class="badges">${badges.join('')}</div>
         <div class="telegraph">${telegraphHtml}</div>
+        <div class="hover-tip"><div class="tip-title">${e.name} — Attaques</div>${enemyMovesHtml(e)}</div>
       `;
       el.enemies.appendChild(div);
       div.addEventListener('click', () => { if (awaitingEnemyTarget && !dead) resolvePending('enemy', e.id); });
@@ -450,12 +845,17 @@
     const awaitingAllyTarget = pending && pending.mode === 'play' && pending.heroId && pending.def.target === 'ally';
     state.heroes.forEach(h => {
       const dead = h.hp <= 0;
-      const canAfford = h.energy >= (pending ? effectiveCost(h, pending.def) : 0);
+      const canAfford = h.energy >= requiredCost(h, pending);
       const camoOk = !(pending && pending.def.requiresCamouflage && !h.camoufle);
       const eligibleAsPlayer = awaitingHero && !dead && canAfford && camoOk && !h.hasActed;
       const eligibleAsTarget = awaitingAllyTarget && !dead && h.id !== pending.heroId;
       const div = document.createElement('div');
-      div.className = 'unit' + (dead ? ' dead' : '') + (eligibleAsPlayer ? ' hero-eligible' : '') + (eligibleAsTarget ? ' target-eligible' : '');
+      div.className = 'unit'
+        + (dead ? ' dead' : '')
+        + (!dead && h.hasActed ? ' acted' : '')
+        + (eligibleAsPlayer ? ' hero-eligible' : '')
+        + (eligibleAsTarget ? ' target-eligible' : '')
+        + (state.shakingIds.has(h.id) ? ' shaking' : '');
       div.dataset.heroId = h.id;
       const pct = Math.max(0, (h.hp / h.maxHp) * 100);
       const maxPipsShown = Math.max(h.energy, 6);
@@ -465,6 +865,9 @@
       if (h.defense > 0) badges.push(`<span class="badge def">🛡️${h.defense}</span>`);
       if (h.esquive > 0) badges.push(`<span class="badge status">💨${h.esquive}</span>`);
       if (h.camoufle) badges.push(`<span class="badge status">🥷</span>`);
+      if (h.puissance > 0) badges.push(`<span class="badge status">💪${h.puissance}</span>`);
+      if (h.saignements > 0) badges.push(`<span class="badge status">🩸${h.saignements}</span>`);
+      const p = CLASS_POWERS[h.classId];
       div.innerHTML = `
         <div class="portrait">${h.icon}</div>
         <div class="uname">${h.name}</div>
@@ -472,25 +875,30 @@
         <div class="bar-label">${Math.max(0, h.hp)} / ${h.maxHp} PV — ⚡${h.energy}</div>
         <div class="badges">${badges.join('')}</div>
         <div class="energy-pips">${pips}</div>
-        ${h.classId === 'paladin' ? '' : `<button class="line-toggle ${h.line}" data-line-toggle="${h.id}">${h.line === 'front' ? 'Front Line' : 'Back Line'}</button>`}
-        ${h.classId === 'paladin' ? '<div class="badge def" style="margin-top:4px;">Toujours Front Line</div>' : ''}
         ${!dead && h.hasActed ? '<div class="acted-badge">✅ a agi ce tour</div>' : ''}
+        <div class="hover-tip"><div class="tip-title">${h.name}</div><div class="tip-line">${p.pouvoir}</div><div class="tip-line">${p.transcendance}</div></div>
       `;
       el.heroes.appendChild(div);
-      div.addEventListener('click', (ev) => {
-        if (ev.target.closest('[data-line-toggle]')) return;
+      div.addEventListener('click', () => {
         if (eligibleAsPlayer) { assignHero(h.id); return; }
         if (eligibleAsTarget) { resolvePending('ally', h.id); return; }
       });
-      const toggleBtn = div.querySelector('[data-line-toggle]');
-      if (toggleBtn) toggleBtn.addEventListener('click', (ev) => { ev.stopPropagation(); h.line = h.line === 'front' ? 'back' : 'front'; render(); });
     });
   }
 
   function effectiveCost(hero, def) {
     let cost = def.cost;
-    if (hero.classId === def.classId && def.classId === 'mage' && def.cats.includes('degats')) cost = Math.max(0, cost - 2); // Transcendance Mage
+    // Transcendance Mage : -2 sur tout sort joué PAR le Mage, quelle que soit sa classe d'origine (pas seulement les sorts Mage).
+    if (hero.classId === 'mage' && def.cats.includes('sort')) cost = Math.max(0, cost - 2);
     return cost;
+  }
+
+  // La Concentration ne paie jamais le coût imprimé : c'est justement l'action de secours
+  // quand on n'a PAS assez d'énergie pour jouer la carte normalement.
+  function requiredCost(hero, pending) {
+    if (!pending) return 0;
+    if (pending.mode === 'concentrate') return 0;
+    return effectiveCost(hero, pending.def);
   }
 
   function renderHand() {
@@ -498,8 +906,9 @@
     state.hand.forEach(card => {
       const def = card.def;
       const isPending = state.pending && state.pending.uid === card.uid;
+      const isDrawing = state.drawingUids.has(card.uid);
       const div = document.createElement('div');
-      div.className = 'card' + (isPending ? ' pending' : '');
+      div.className = 'card' + (isPending ? ' pending' : '') + (isDrawing ? ' card-hidden' : '');
       div.dataset.uid = card.uid;
       div.innerHTML = `
         <div class="cost">${def.cost}</div>
@@ -507,7 +916,8 @@
         <div class="icon">${{generic:'⚪',guerrier:'⚔️',paladin:'🛡️',mage:'🔮',assassin:'🗡️'}[def.classId]}</div>
         <div class="cname">${def.name}</div>
         <div class="cclass">${def.classId === 'generic' ? 'Générique' : def.classId[0].toUpperCase()+def.classId.slice(1)}</div>
-        <div class="cdesc">${def.desc}</div>
+        <div class="cdesc">${renderCardText(def.desc)}</div>
+        <div class="hover-tip">${cardTooltipHtml(def)}</div>
       `;
       div.addEventListener('click', () => onHandCardClicked(card));
       el.hand.appendChild(div);
@@ -519,8 +929,9 @@
     if (!state.mageKeepPending) return;
     const div = document.createElement('div');
     div.className = 'keep-prompt';
-    div.textContent = '🔮 Pouvoir de Classe du Mage : clique une carte à GARDER (les autres seront défaussées).';
+    div.innerHTML = '🔮 Pouvoir de Classe du Mage : clique une carte à GARDER (les autres seront défaussées), ou <button class="secondary" id="mage-discard-all">tout défausser</button>.';
     el.keepZone.appendChild(div);
+    document.getElementById('mage-discard-all').addEventListener('click', resolveMageKeepNone);
   }
 
   function renderStatusAndHint() {
@@ -564,34 +975,41 @@
     render();
   }
 
-  function assignHero(heroId) {
+  async function assignHero(heroId) {
     const pending = state.pending;
     const hero = heroById(heroId);
     const def = pending.def;
     if (!hero || hero.hp <= 0) return;
     if (hero.hasActed) return;
-    if (hero.energy < effectiveCost(hero, def)) return;
+    if (hero.energy < requiredCost(hero, pending)) return;
     if (def.requiresCamouflage && !hero.camoufle) return;
     pending.heroId = heroId;
     hero.hasActed = true;
 
     if (pending.mode === 'concentrate') {
-      hero.energy += 1 - 0; // discard for +1 energy: cost isn't paid, just gained
+      pending.resolving = true;
+      render();
+      await pulseHero(hero);
+      hero.energy += 1; // discard for +1 energy: cost isn't paid, just gained
       log(`${hero.name} se concentre avec ${def.name} (+1 énergie).`, 'you');
-      if (hero.classId === 'assassin') { hero.camoufle = true; log(`${hero.name} devient Camouflé !`, 'power'); }
+      if (hero.classId === 'assassin') {
+        hero.camoufle = true;
+        hero.puissance = (hero.puissance || 0) + 2;
+        log(`${hero.name} devient Camouflé et gagne Puissance 2 !`, 'power');
+      }
       finishCard(pending);
       return;
     }
     // mode === 'play'
-    if (def.target === 'self') { resolvePending('self', heroId); return; }
-    if (def.target === 'all-enemies') { resolvePending('all-enemies', null); return; }
-    if (def.target === 'conditional' && enemyTargeting(hero)) { resolvePending('self', heroId); return; }
+    if (def.target === 'self') { await resolvePending('self', heroId); return; }
+    if (def.target === 'all-enemies') { await resolvePending('all-enemies', null); return; }
+    if (def.target === 'conditional' && enemyTargeting(hero)) { await resolvePending('self', heroId); return; }
     render();
   }
 
-  function resolvePending(kind, targetId) {
+  async function resolvePending(kind, targetId) {
     const pending = state.pending;
-    if (!pending || !pending.heroId) return;
+    if (!pending || !pending.heroId || pending.resolving) return;
     const hero = heroById(pending.heroId);
     const def = pending.def;
     const cost = effectiveCost(hero, def);
@@ -610,21 +1028,32 @@
       target = hero;
     }
 
+    pending.resolving = true;
+    await pulseHero(hero);
+
     hero.energy -= cost;
     const ctx = { state, hero, target, cardDef: def };
     def.effect(ctx);
     checkVictory();
-    finishCard(pending);
+    finishCard(pending, ctx);
   }
 
-  function finishCard(pending) {
+  function finishCard(pending, ctx) {
     const idx = state.hand.findIndex(c => c.uid === pending.uid);
     let flightOrigin = null;
     if (idx !== -1) {
+      const card = state.hand[idx];
       const cardEl = el.hand.querySelector(`[data-uid="${pending.uid}"]`);
-      if (cardEl) flightOrigin = { rect: cardEl.getBoundingClientRect(), def: state.hand[idx].def };
-      state.discard.push(state.hand[idx]);
+      if (cardEl) flightOrigin = { rect: cardEl.getBoundingClientRect(), def: card.def };
       state.hand.splice(idx, 1);
+      if (ctx && ctx.returnToHand) {
+        state.hand.push(card); // reste en main (ex : Coup mortel sur un kill) — pas d'animation de défausse
+        flightOrigin = null;
+      } else if (ctx && ctx.returnToDeckTop) {
+        state.deck.push(card); // dessus du deck (dernier élément = prochaine carte piochée)
+      } else {
+        state.discard.push(card);
+      }
     }
     state.pending = null;
     render();
@@ -633,14 +1062,21 @@
 
   // ---------- turn resolution ----------
 
-  function checkVictory() { if (!state.over && livingEnemies().length === 0) endGame(true); }
-  function checkDefeat() { if (!state.over && livingHeroes().length === 0) endGame(false); }
+  function checkVictory() { if (!state.over && livingEnemies().length === 0) { state.over = true; render(); showDraftScreen(); } }
+  function checkDefeat() { if (!state.over && livingHeroes().length === 0) endGame(); }
 
   function resolveMageKeep(uid) {
     const rest = state.hand.filter(c => c.uid !== uid);
     state.mageKeepPending = false;
     if (rest.length) log(`${rest.length} carte(s) défaussée(s) (le Mage en garde 1).`, 'sys');
     discardThenAdvance(rest);
+  }
+
+  // Le Pouvoir de Classe du Mage est une option, pas une obligation : le joueur peut renoncer à garder une carte.
+  function resolveMageKeepNone() {
+    state.mageKeepPending = false;
+    if (state.hand.length) log(`${state.hand.length} carte(s) défaussée(s) (le Mage ne garde rien).`, 'sys');
+    discardThenAdvance(state.hand.slice());
   }
 
   function endTurnClicked() {
@@ -672,19 +1108,66 @@
     setTimeout(advanceAfterDiscard, 1000);
   }
 
-  function advanceAfterDiscard() {
+  // Les ennemis agissent séquentiellement, gauche à droite, avec une pause d'1s entre chacun.
+  function resolveEnemyAttack(e, amount, brut) {
+    const target = heroById(e.targetHeroId);
+    if (!target || target.hp <= 0) return;
+    if (target.esquive > 0) {
+      target.esquive -= 1;
+      log(`${e.name} utilise ${e.nextMove.name} sur ${target.name}… esquivé !`, 'sys');
+      return;
+    }
+    dealDamage(null, target, amount, 'physique', null, { brut }); // déclenche la secousse elle-même
+    if (target.hp <= 0) tryPaladinRevive(target);
+  }
+
+  async function advanceAfterDiscard() {
     state.enemies.forEach(e => {
       if (e.hp <= 0) return;
       if (e.saignements > 0) { const dmg = e.saignements; e.hp -= dmg; log(`${e.name} saigne : ${dmg} dégâts.`, 'sys'); e.saignements -= 1; }
     });
-    state.enemies.forEach(e => {
-      if (e.hp <= 0 || !e.nextMove) return;
-      if (e.nextMove.heal) { e.hp = Math.min(e.maxHp, e.hp + e.nextMove.heal); log(`${e.name} se régénère de ${e.nextMove.heal} PV.`, 'heal'); return; }
-      const target = heroById(e.targetHeroId);
-      if (!target || target.hp <= 0) return;
-      if (target.esquive > 0) { target.esquive -= 1; log(`${e.name} utilise ${e.nextMove.name} sur ${target.name}… esquivé !`, 'sys'); return; }
-      dealDamage(null, target, e.nextMove.dmg, 'physique', null);
+    state.heroes.forEach(h => {
+      if (h.hp <= 0) return;
+      if (h.saignements > 0) { const dmg = h.saignements; h.hp -= dmg; log(`${h.name} saigne : ${dmg} dégâts.`, 'foe'); h.saignements -= 1; triggerShake(h); }
     });
+    render();
+    checkDefeat();
+    if (state.over) return;
+    checkVictory(); // le Saignement peut achever le dernier ennemi avant même la résolution des actions
+    if (state.over) return;
+
+    for (const e of state.enemies) {
+      if (e.hp <= 0 || !e.nextMove) continue;
+      await pulseEnemy(e.id);
+      const move = e.nextMove;
+
+      if (e.templateId === 'troll' && move.kind === 'heal-self' && e.tookFireDamageThisTurn) {
+        log(`${e.name} tente de se régénérer, mais les flammes empêchent la guérison !`, 'sys');
+      } else if (e.templateId === 'golem') {
+        if (e.tookDamageThisTurn) resolveEnemyAttack(e, move.amount, false);
+        else log(`${e.name} reste immobile, intact.`, 'sys');
+      } else if (move.kind === 'heal-self') {
+        e.hp = Math.min(e.maxHp, e.hp + move.amount);
+        log(`${e.name} se régénère de ${move.amount} PV.`, 'heal');
+      } else if (move.kind === 'heal-ally') {
+        const ally = state.enemies.find(o => o.id === move.healTargetId);
+        if (ally && ally.hp > 0) { ally.hp = Math.min(ally.maxHp, ally.hp + move.amount); log(`${e.name} soigne ${ally.name} de ${move.amount} PV.`, 'heal'); }
+      } else if (move.kind === 'debuff') {
+        const target = heroById(e.targetHeroId);
+        if (target && target.hp > 0) { target[move.statusKey] = (target[move.statusKey] || 0) + move.amount; log(`${e.name} inflige ${STATUS_LABELS[move.statusKey] || move.statusKey} ${move.amount} à ${target.name}.`, 'foe'); }
+      } else if (move.kind === 'dmg') {
+        resolveEnemyAttack(e, move.amount, move.brut);
+        if (move.bleed) {
+          const target = heroById(e.targetHeroId);
+          if (target && target.hp > 0) target.saignements = (target.saignements || 0) + move.bleed;
+        }
+      }
+      render();
+      checkDefeat();
+      if (state.over) return;
+      await sleep(1000);
+    }
+
     state.heroes.forEach(h => { if (h.incapacite) h.incapacite = Math.max(0, h.incapacite - 1); });
     state.enemies.forEach(e => { if (e.incapacite) e.incapacite = Math.max(0, e.incapacite - 1); if (e.vulnerabilite) e.vulnerabilite = Math.max(0, e.vulnerabilite - 1); });
 
@@ -696,7 +1179,7 @@
 
   function startTurn() {
     if (state.over) return;
-    state.heroes.forEach(h => { if (h.hp > 0) { h.energy += 1; h.defense = 0; h.hasActed = false; } });
+    state.heroes.forEach(h => { if (h.hp > 0) { h.energy += 1; h.defense = 0; h.hasActed = false; if (h.puissance > 0) h.puissance -= 1; } });
     log(`— Tour ${state.turn} : +1 énergie, pioche à ${HAND_SIZE} —`, 'sys');
 
     // Pouvoir de Classe Guerrier : coup gratuit par carte de mêlée offensive en main
@@ -704,7 +1187,7 @@
     rollEnemyTelegraphs();
     const drawn = fillHand();
     if (guerrier && guerrier.hp > 0) {
-      const meleeCount = state.hand.filter(c => c.def.cats.includes('melee') && c.def.cats.includes('degats')).length;
+      const meleeCount = state.hand.filter(c => cardKeywordsPresent(c.def.desc).some(g => g.key === 'epee')).length;
       for (let i = 0; i < meleeCount; i++) {
         const targets = livingEnemies();
         if (!targets.length) break;
@@ -717,23 +1200,164 @@
     animateDrawnCards(drawn);
   }
 
-  function endGame(won) {
+  function endGame() {
     state.over = true;
     render();
-    el.overlayTitle.textContent = won ? 'Victoire !' : 'Défaite…';
-    el.overlayText.textContent = won ? `Ennemis vaincus en ${state.turn} tour(s).` : 'Toute la troupe est tombée au combat.';
+    const combatsWon = Math.max(0, state.run.combatIndex - 1);
+    el.overlayTitle.textContent = 'Défaite…';
+    el.overlayText.textContent = `Le run s'arrête après ${combatsWon} combat(s) remporté(s).`;
     el.overlay.classList.add('show');
   }
 
-  function resetGame() {
-    state.heroes = HERO_DEFS.map(h => ({ ...h, hp: h.maxHp, energy: 0, defense: 0, esquive: 0, camoufle: false, incapacite: 0, hasActed: false, line: h.classId === 'paladin' ? 'front' : 'back' }));
-    state.enemies = ENEMY_DEFS.map(e => ({ ...e, hp: e.maxHp, defense: 0, saignements: 0, incapacite: 0, vulnerabilite: 0, defending: false, nextMove: null, targetHeroId: null }));
-    state.deck = buildDeck();
+  // ---- Run Infini : écran de fin de combat (draft de carte) ----
+  // Règles : pool = génériques + classes présentes ; une carte Départ n'apparaît que si c'est déjà
+  // celle du deck de départ ; probabilité de doublon par slot 100% / 25% / 50% ; jamais deux fois
+  // la même carte parmi les 3 propositions ; si le pool de cartes inédites est épuisé, retombe
+  // silencieusement sur un doublon.
+  const DRAFT_DUP_CHANCES = [1, 0.25, 0.5];
+
+  function pickDraftCards() {
+    const presentClasses = new Set(HERO_DEFS.map(h => h.classId));
+    const eligible = CARDS.filter(def => def.classId === 'generic' || presentClasses.has(def.classId));
+    const ownedCodes = new Set([...state.deck, ...state.hand, ...state.discard].map(c => c.def.code));
+    const isOwned = def => ownedCodes.has(def.code);
+    const usedCodes = new Set();
+    const picks = [];
+    DRAFT_DUP_CHANCES.forEach(chance => {
+      let pool = eligible.filter(d => !usedCodes.has(d.code));
+      if (!pool.length) pool = eligible; // filet de sécurité si le pool éligible est plus petit que 3
+      const dupPool = pool.filter(isOwned);
+      const newPool = pool.filter(d => !isOwned(d));
+      let chosen;
+      if (Math.random() < chance && dupPool.length) chosen = dupPool[Math.floor(Math.random() * dupPool.length)];
+      else if (newPool.length) chosen = newPool[Math.floor(Math.random() * newPool.length)];
+      else if (dupPool.length) chosen = dupPool[Math.floor(Math.random() * dupPool.length)];
+      else chosen = pool[Math.floor(Math.random() * pool.length)];
+      picks.push(chosen);
+      usedCodes.add(chosen.code);
+    });
+    return picks;
+  }
+
+  function renderDraftCards(picks) {
+    el.draftCards.innerHTML = '';
+    picks.forEach(def => {
+      const wrap = document.createElement('div');
+      wrap.className = 'draft-card';
+      wrap.innerHTML = `
+        <div class="draft-card-inner">
+          <div class="draft-card-face draft-card-back">🂠</div>
+          <div class="draft-card-face draft-card-front card">
+            <div class="cost">${def.cost}</div>
+            <div class="tier">${def.tier === 'avance' ? 'Av.' : 'Dép.'}</div>
+            <div class="icon">${{generic:'⚪',guerrier:'⚔️',paladin:'🛡️',mage:'🔮',assassin:'🗡️'}[def.classId]}</div>
+            <div class="cname">${def.name}</div>
+            <div class="cclass">${def.classId === 'generic' ? 'Générique' : def.classId[0].toUpperCase()+def.classId.slice(1)}</div>
+            <div class="cdesc">${renderCardText(def.desc)}</div>
+            <div class="hover-tip">${cardTooltipHtml(def)}</div>
+          </div>
+        </div>`;
+      el.draftCards.appendChild(wrap);
+    });
+  }
+
+  let draftResolved = false;
+  function showDraftScreen() {
+    draftResolved = false;
+    const picks = pickDraftCards();
+    state.draftPicks = picks;
+    el.draftSubtitle.textContent = `Combat ${state.run.combatIndex} remporté ! Choisis une carte à ajouter à ton deck.`;
+    renderDraftCards(picks);
+    el.draftScreen.classList.add('show');
+    picks.forEach((_, i) => {
+      setTimeout(() => {
+        const cardEl = el.draftCards.children[i];
+        if (!cardEl) return;
+        cardEl.classList.add('flipped');
+        cardEl.addEventListener('click', () => chooseDraftCard(i));
+      }, 2000 + i * 300);
+    });
+  }
+
+  function chooseDraftCard(index) {
+    if (draftResolved) return;
+    draftResolved = true;
+    const chosen = state.draftPicks[index];
+    state.deck.push({ uid: uidCounter++, def: chosen });
+    log(`${chosen.name} ajoutée au deck.`, 'sys');
+    Array.from(el.draftCards.children).forEach((cardEl, i) => {
+      cardEl.classList.add(i === index ? 'chosen' : 'destroyed');
+    });
+    setTimeout(() => {
+      el.draftScreen.classList.remove('show');
+      state.over = false;
+      startNextCombat();
+    }, 700);
+  }
+
+  // ---- Sauvegarde du début de combat, pour que "Recommencer" rejoue le combat en cours
+  // (pas toute la run) : mêmes ennemis (mêmes PV/niveaux déjà tirés), même deck, héros à neuf. ----
+  function snapshotCombat() {
+    state.combatSnapshot = {
+      heroes: state.heroes.map(h => ({ ...h })),
+      enemies: state.enemies.map(e => ({ ...e })),
+      deck: state.deck.slice(),
+      combatIndex: state.run.combatIndex,
+      paladinReviveUsed: state.paladinReviveUsed,
+    };
+  }
+
+  function restoreCombatSnapshot() {
+    const snap = state.combatSnapshot;
+    if (!snap) { resetGame(); return; }
+    state.heroes = snap.heroes.map(h => ({ ...h }));
+    state.enemies = snap.enemies.map(e => ({ ...e }));
+    state.deck = snap.deck.slice();
+    state.run.combatIndex = snap.combatIndex;
+    state.paladinReviveUsed = snap.paladinReviveUsed;
     state.hand = []; state.discard = []; state.pending = null; state.mageKeepPending = false;
     state.turn = 1; state.over = false;
     el.log.innerHTML = '';
     el.overlay.classList.remove('show');
-    log('Un Gobelin Maraudeur et un Troll des Marais bloquent le chemin !', 'sys');
+    el.draftScreen.classList.remove('show');
+    log(`Combat ${state.run.combatIndex} relancé depuis le début.`, 'sys');
+    startTurn();
+  }
+
+  // Entre deux combats d'un même run, le deck (composition accumulée par le draft) et les PV des aventuriers
+  // persistent (blessures non soignées) ; tout le reste repart à zéro (énergie, Défense, Esquive, Camouflage,
+  // Incapacité, Puissance, Saignements).
+  function startNextCombat() {
+    state.run.combatIndex += 1;
+    const budget = budgetForCombat(state.run.combatIndex);
+    // Seuls les PV des aventuriers persistent d'un combat à l'autre (blessures non soignées entre deux combats) ;
+    // tout le reste (énergie, Défense, Esquive, Camouflage, Incapacité, Puissance, Saignements) repart à zéro.
+    state.heroes = state.heroes.map(h => ({ ...h, energy: 0, defense: 0, esquive: 0, camoufle: false, incapacite: 0, puissance: 0, saignements: 0, hasActed: false }));
+    state.paladinReviveUsed = false;
+    state.enemies = generateEncounter(budget).map(i => instantiateEnemy(i.template, i.level));
+    state.deck = shuffle([...state.deck, ...state.hand, ...state.discard]);
+    state.hand = []; state.discard = []; state.pending = null; state.mageKeepPending = false;
+    state.turn = 1;
+    el.log.innerHTML = '';
+    log(`Combat ${state.run.combatIndex} (budget ${budget}) : ${encounterSummary(state.enemies)}`, 'sys');
+    snapshotCombat();
+    startTurn();
+  }
+
+  function resetGame() {
+    state.heroes = HERO_DEFS.map(h => ({ ...h, hp: h.maxHp, energy: 0, defense: 0, esquive: 0, camoufle: false, incapacite: 0, puissance: 0, saignements: 0, hasActed: false }));
+    state.paladinReviveUsed = false;
+    state.run = { combatIndex: 1 };
+    const budget = budgetForCombat(1);
+    state.enemies = generateEncounter(budget).map(i => instantiateEnemy(i.template, i.level));
+    state.deck = buildStartingDeck();
+    state.hand = []; state.discard = []; state.pending = null; state.mageKeepPending = false;
+    state.turn = 1; state.over = false;
+    el.log.innerHTML = '';
+    el.overlay.classList.remove('show');
+    el.draftScreen.classList.remove('show');
+    log(`Run Infini — Combat 1 (budget ${budget}) : ${encounterSummary(state.enemies)}`, 'sys');
+    snapshotCombat();
     startTurn();
   }
 
@@ -741,7 +1365,7 @@
   el.playConcentrate.addEventListener('click', () => { if (state.pending) { state.pending.mode = 'concentrate'; render(); } });
   el.cancelPending.addEventListener('click', () => { state.pending = null; render(); });
   el.endTurn.addEventListener('click', endTurnClicked);
-  el.restart.addEventListener('click', resetGame);
+  el.restart.addEventListener('click', restoreCombatSnapshot);
   el.overlayRestart.addEventListener('click', resetGame);
 
   resetGame();

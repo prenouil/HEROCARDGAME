@@ -10,29 +10,29 @@ Résumé et séquence : voir `gdd.md` → Development Epics. Détail par epic ci
 ## Epic 1 — Boucle de combat centrale
 
 **Sert les piliers :** 1 (énergie individuelle), 2 (télégraphie ennemie).
-**Statut :** déjà prototypé sur 3 itérations de code (`prototype/mini-proto-2-cartes`, `prototype/proto-4-heros-2-ennemis`, `prototype/proto-deck-main-defausse`) — le modèle du 3ᵉ prototype est le modèle canonique retenu pour le GDD.
+**Statut :** prototypé sur 4 itérations de code (`prototype/mini-proto-2-cartes`, `prototype/proto-4-heros-2-ennemis`, `prototype/proto-deck-main-defausse`, `prototype/proto-cartes-completes`) — `proto-cartes-completes` est désormais le modèle canonique retenu, aligné sur le GDD ; les 3 prototypes précédents sont conservés comme jalons historiques et ne sont plus mis à jour.
 
-Stories de haut niveau :
-- Système d'énergie individuelle par héros (0 de départ, +1/tour, **sans plafond** — les 3 prototypes actuels plafonnent à 3 et doivent être corrigés pour matcher le canon).
-- Deck de run (2 cartes génériques coût 0 + 2 cartes de classe "Départ" par héros, "Avancé" débloquées séparément — liste complète des 18 cartes dans `gdd.md` → Card Types and Effects), pioche jusqu'à 5, défausse de fin de tour, remélange à vide.
-- Ressource Défense (pool qui absorbe les dégâts) et statuts (Saignements, Esquive en stacks, Incapacité, Vulnérabilité, Camouflé) — aucun des 3 prototypes ne les implémente actuellement.
-- Résolution de télégraphie ennemie : tirage pondéré de l'action + de la cible, affichage avant la phase joueur.
+Stories de haut niveau (implémentées dans `proto-cartes-completes`) :
+- Système d'énergie individuelle par héros (0 de départ, +1/tour, **sans plafond**).
+- Deck de départ Run Infini (10 cartes : 3 Coup direct, 3 Encaisser, 1 carte Départ par classe), qui grossit par draft de fin de combat (liste complète des 18 cartes dans `gdd.md` → Card Types and Effects), pioche jusqu'à 5, défausse de fin de tour, remélange à vide.
+- Ressource Défense (pool qui absorbe les dégâts) et statuts (Saignements — désormais aussi sur les héros —, Esquive en stacks, Incapacité, Vulnérabilité, Camouflage, Puissance) implémentés.
+- **Mode Run Infini** (2026-08-06) : budget de difficulté par combat (croissance linéaire, placeholder), bestiaire à 10 ennemis avec comportements fixes et valeurs scalables (+20 %/niveau) et variance aléatoire ±20 %, écran de draft de fin de combat (3 cartes face cachée → flip → choix), seul le deck persiste entre combats d'un même run (aventuriers remis à neuf à chaque combat : PV max, énergie 0, tous états supprimés), écran de défaite avec nombre de combats remportés. Détail complet dans `gdd.md` → Run Infini.
+- Résolution de télégraphie ennemie : tirage de l'action + de la cible (pondéré ou conditionnel selon l'ennemi), résolution séquentielle ennemi par ennemi (gauche à droite, 1s entre chaque) avec animation.
 - Séquence d'interaction à 3 temps : carte → héros → cible, avec surbrillances d'éligibilité.
 - Conditions de victoire/défaite de combat.
+- Infobulles au survol (1s de délai) pour héros, ennemis et cartes, avec système de glossaire de mots-clés (icônes inline + explications).
 
 ## Epic 2 — Identité de classe (MVP : 4 héros)
 
 **Sert le pilier :** 4 (troupe à identité individuelle).
-**Statut :** prototypé partiellement, désormais en divergence sur plusieurs points avec le canon — `proto-4-heros-2-ennemis` et `proto-deck-main-defausse` couvrent Guerrier/Mage/Voleur/Clerc avec verrouillage strict des cartes ; le canon MVP est Guerrier/Paladin/Mage/Assassin (Paladin remplace Clerc ; "Voleur" doit être renommé "Assassin"), avec cartes de classe librement assignables.
+**Statut :** prototypé et aligné sur le canon dans `proto-cartes-completes` (Guerrier/Paladin/Mage/Assassin, cartes de classe librement assignables, Pouvoir de Classe + Transcendance implémentés) ; `proto-4-heros-2-ennemis` et `proto-deck-main-defausse` restent en divergence (Guerrier/Mage/Voleur/Clerc, verrouillage strict des cartes) mais sont conservés comme jalons historiques, non mis à jour.
 
-Stories de haut niveau :
-- 2 cartes de base communes (Coup direct, Esquive) partagées par tous les héros — inchangé.
-- 1 carte de classe par héros, jouable par n'importe quel héros ayant l'énergie requise (retirer le verrouillage `owner` actuel du prototype). Carte du Paladin encore à concevoir (celle du Clerc, "Soin", n'a pas d'équivalent confirmé).
-- **Pouvoir de Classe** par classe (Guerrier, Paladin, Mage, Assassin — chiffré dans `gdd.md` → Character Selection). Deux commandes UI restent à définir (changement de ligne du Paladin, sélection de carte gardée du Mage).
-- **Transcendance** par héros (chiffrée dans `gdd.md`), avec sa condition de déclenchement (généralement : jouer une carte de classe sur son propre aventurier). La condition exacte du bonus Camouflé de l'Assassin reste ambiguë dans la source — à clarifier avant implémentation.
-- 1 skin par héros avec animations idle (2 frames), action, coup reçu, KO.
-
-`[NOTE FOR DESIGNER]` Cet epic a grossi significativement depuis sa première estimation (verrouillage simple → Pouvoir de Classe + Transcendance + déverrouillage) — revoir le découpage en stories/sprints en conséquence plutôt que de garder l'ancienne estimation implicite.
+Stories de haut niveau (implémentées dans `proto-cartes-completes`) :
+- 2 cartes de base communes (Coup direct, Encaisser) partagées par tous les héros.
+- Cartes de classe (3 à 5 par classe selon le palier) librement assignables à tout héros ayant l'énergie requise ; la Transcendance récompense le fait de les jouer sur son propre aventurier plutôt que de restreindre l'accès.
+- **Pouvoir de Classe** par classe (Guerrier : dégâts gratuits sur "épée", Paladin : réanimation une fois par combat, Mage : garde 1 carte en fin de tour, Assassin : Puissance +2 en Concentration — chiffré dans `gdd.md` → Character Selection).
+- **Transcendance** par héros (chiffrée dans `gdd.md`) : Guerrier (bonus Coup mortel), Paladin (+50% défense et soin sur Rempart/Lumière divine), Mage (-2 coût sur tout sort), Assassin (bonus Camouflé sur Assassinat).
+- 1 skin par héros avec animations idle (2 frames), action, coup reçu, KO — non prototypé (hors scope du prototype code, réservé à la production d'assets).
 
 ## Epic 3 — Lisibilité du premier combat / onboarding
 
@@ -46,13 +46,19 @@ Stories de haut niveau :
 ## Epic 4 — Structure de run et déblocage garanti
 
 **Sert le pilier :** 3 (déblocage significatif à chaque run).
-**Statut :** non démarré, cible Mois 2.
+**Statut :** non démarré, cible Mois 2. Un premier squelette de run (budget de difficulté croissant, deck qui grossit par combat, persistance entre combats) est prototypé sous le nom **Run Infini** dans l'Epic 1 — volontairement sans carte de quêtes, sans boss, sans récompense de fin de run ; à absorber/étendre par cet epic plutôt que dupliqué.
 
 Stories de haut niveau :
 - Carte de quêtes à embranchements (génération à spécifier — `[NOTE FOR DESIGNER]`).
 - 4 types de quêtes : classe (chef de groupe imposé, 3 autres libres), narrative (héros imposés selon la narration), spéciale (composition totalement libre), multiple (coordination de plusieurs groupes sur plusieurs runs).
+- Événements de run (1 à 3 entre chaque combat) : rencontre narrative avec choix bonus/malus, gain de loot, bénédiction/malédiction.
+- Malédictions (cartes négatives ajoutées au deck, ou passifs modifiant une règle de combat) et règles spécifiques par quête (façon *Final Fantasy 8* Triple Triad).
+- Difficulté de quête ajustable (sauf quête principale), impact loot méta uniquement ; Challenge hard débloquant des skins cosmétiques de cartes/héros/villageois (voir `gdd.md` → Difficulty Modifiers).
+- Biomes (bestiaire, règles de déplacement et de combat dédiées) et encyclopédie associée.
+- Mission Secours optionnelle en cas de défaite (voir `gdd.md` → Win/Loss Conditions).
 - Combat de boss de fin de run (durée non chiffrée, plus long qu'un combat normal).
 - Récompense de déblocage permanent et significatif à la victoire du boss.
+- Retour au village automatique (Pierre de Foyer) avec perte des éléments temporaires du run (deck, potions, objets) — seules les ressources de village sont ramenées.
 
 ## Epic 5 — Village (hub, économie, upgrades)
 
@@ -61,7 +67,9 @@ Stories de haut niveau :
 
 Stories de haut niveau :
 - Déplacement physique actif d'un héros dans le hub village (pas de point-and-click).
+- Mécanique de chef de groupe : désigné par quête, contrôlable librement au village après le run, changeable en parlant à un autre aventurier (voir `gdd.md` → Village).
 - Maisons de villageois : état délabré/vide par défaut, débloquées et upgradables.
+- Aventuriers non actifs visibles au village, chacun sur un lieu dédié à sa classe avec un dialogue le plus souvent générique.
 - Ressources : métaux (forgeron), plantes (herboriste), pierres précieuses (magicien), argent, autres non nommées.
 - Dépenses : amélioration de deck, possibilités de deckbuilding (système à détailler — `[NOTE FOR DESIGNER]`), avantages de début de run, bonus rencontrables en run.
 
@@ -81,7 +89,8 @@ Stories de haut niveau :
 **Statut :** post-MVP ; **bloqué** tant que la justification narrative du retour au village après défaite n'est pas tranchée (question explicitement laissée ouverte par le porteur de projet).
 
 Stories de haut niveau :
-- Dialogues entre personnages uniquement (pas de narrateur, pas de narration environnementale), non bloquants et skippables.
+- Dialogues entre personnages uniquement (pas de narrateur, pas de narration environnementale), non bloquants et skippables — aucune pénalité de progression pour un joueur qui saute tout.
 - Montée en présence avec la progression du joueur (peu présente au début, plus présente ensuite).
+- Déclenchement par compteur d'événements caché, sur 5 contextes possibles : PNJ générique au village, PNJ lié à un aventurier spécifique, zone de dialogue entre 2 personnages, événement/combat spécifique en run, résolution de quête (voir `gdd.md` → Narrative Delivery).
 - Suivi via un journal PNJ, déclenché par des compteurs d'événements.
 - Prérequis : décision sur la justification narrative de la résurrection — recommandé de passer par `gds-create-narrative` une fois cette décision prise.
