@@ -46,7 +46,13 @@ src/
     sequencer.lua   -- remplace les chaînes async/await + setTimeout du JS
 tests/              -- specs busted (moteur de règles uniquement)
 libs/               -- vide pour l'instant — voir "Dépendances" ci-dessous
-assets/             -- vide — pas d'art pour le moment, rendu en rectangles/texte
+assets/             -- illustrations pixel art générées par IA (2026-08-07, voir
+                          tools/generate-batch.js) : characters/heroes,
+                          characters/enemies, icons/keywords, icons/status.
+                          Chargées par src/ui/sprites.lua (filtre "nearest"
+                          obligatoire), avec repli automatique sur les
+                          silhouettes vectorielles de src/ui/icons.lua si un
+                          fichier manque.
 ```
 
 `src/rules` et `src/data` ne font jamais `require("love")` ni n'appellent

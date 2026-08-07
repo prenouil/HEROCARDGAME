@@ -8,6 +8,8 @@
 local Theme = require("src.ui.theme")
 local Fonts = require("src.ui.fonts")
 local Icons = require("src.ui.icons")
+local Sprites = require("src.ui.sprites")
+local RichText = require("src.ui.richtext")
 local Glossary = require("src.data.glossary")
 local Heroes = require("src.data.heroes")
 local Enemies = require("src.data.enemies")
@@ -194,10 +196,10 @@ local function draw_hero(controller, h, r)
   love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
 
   set(Theme.text, dead and 0.45 or 1)
-  draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, 20, Theme.text)
-  text(h.name, 0, 24, r.w, 12)
-  bar(8, 46, r.w - 16, 7, h.hp / h.max_hp, Theme.hp)
-  text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV — " .. h.energy .. " NRJ", 0, 55, r.w, 9, Theme.muted)
+  draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, 40, Theme.text)
+  text(h.name, 0, 44, r.w, 12)
+  bar(8, 66, r.w - 16, 7, h.hp / h.max_hp, Theme.hp)
+  text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV — " .. h.energy .. " NRJ", 0, 75, r.w, 9, Theme.muted)
 
   local badges = {}
   if h.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = h.defense } end
@@ -205,13 +207,13 @@ local function draw_hero(controller, h, r)
   if h.camoufle then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
   if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
   if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
-  draw_badge_row(badges, 0, 68, r.w, 16, Theme.status)
+  draw_badge_row(badges, 0, 88, r.w, 16, Theme.status)
 
   local pip_row = ""
   for i = 1, math.max(h.energy, 6) do pip_row = pip_row .. (i <= h.energy and "*" or "-") end
-  text(pip_row, 0, 82, r.w, 11, Theme.energy)
+  text(pip_row, 0, 102, r.w, 11, Theme.energy)
 
-  if not dead and h.has_acted then text("a agi ce tour", 0, 98, r.w, 8, Theme.muted) end
+  if not dead and h.has_acted then text("a agi ce tour", 0, 118, r.w, 8, Theme.muted) end
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setLineWidth(1)
@@ -260,19 +262,19 @@ local function draw_enemy(controller, e, r)
   love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
 
   set(Theme.text, dead and 0.45 or 1)
-  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 4, r.w, 20, Theme.text)
-  text(e.name .. " Nv." .. e.level, 0, 24, r.w, 9)
+  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 4, r.w, 40, Theme.text)
+  text(e.name .. " Nv." .. e.level, 0, 44, r.w, 9)
   if not dead then
-    bar(8, 46, r.w - 16, 7, e.hp / e.max_hp, Theme.hp)
-    text(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 55, r.w, 9, Theme.muted)
+    bar(8, 66, r.w - 16, 7, e.hp / e.max_hp, Theme.hp)
+    text(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 75, r.w, 9, Theme.muted)
     local badges = {}
     if e.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = e.defense } end
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
     if (e.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = e.vulnerabilite } end
-    draw_badge_row(badges, 0, 68, r.w, 16, Theme.status)
+    draw_badge_row(badges, 0, 88, r.w, 16, Theme.status)
   end
-  text(enemy_telegraph_text(e), 0, 84, r.w, 8, Theme.accent)
+  text(enemy_telegraph_text(e), 0, 104, r.w, 8, Theme.accent)
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setLineWidth(1)
@@ -310,7 +312,7 @@ local function draw_hand(controller)
     text(def.tier == "avance" and "Av." or "Dép.", r.x, r.y + 2, r.w - 4, 8, Theme.muted, "right")
     draw_class_icon(def.class_id, Heroes.class_icon[def.class_id], Heroes.class_label[def.class_id] or "?", r.x, r.y + 18, r.w, 16, Theme.text)
     text(def.name, r.x + 2, r.y + 42, r.w - 4, 9, Theme.text)
-    text(Glossary.render_card_text(def.desc), r.x + 3, r.y + 60, r.w - 6, 8, Theme.muted)
+    RichText.draw(def.desc, r.x + 3, r.y + 60, r.w - 6, 8, Theme.muted)
   end
   return rects
 end
@@ -371,7 +373,10 @@ local function tooltip_lines(controller)
     for _, g in ipairs(terms) do
       local label = g.has_icon and ((g.label or g.key) .. " (" .. g.key .. ")") or g.key
       local related = g.related ~= "" and (" — " .. g.related) or ""
-      lines[#lines + 1] = label .. related .. (g.explain ~= "" and (" : " .. g.explain) or "")
+      local line_text = label .. related .. (g.explain ~= "" and (" : " .. g.explain) or "")
+      -- table plutôt que string brute quand une icône existe : permet à draw_tooltip
+      -- de la dessiner en préfixe de la ligne (voir Sprites.keyword).
+      lines[#lines + 1] = g.has_icon and { text = line_text, icon = Sprites.keyword(g.key) } or line_text
     end
     return def.name .. " — mots-clés", lines
   end
@@ -393,7 +398,17 @@ local function draw_tooltip(controller)
   text(title, x + 8, y + 6, w - 16, 10, Theme.status, "left")
   local ly = y + 20
   for _, line in ipairs(lines) do
-    text(line, x + 8, ly, w - 16, 9, Theme.text, "left")
+    if type(line) == "table" then
+      local text_x = x + 8
+      if line.icon then
+        love.graphics.setColor(1, 1, 1, 1)
+        Sprites.draw_centered(line.icon, x + 14, ly + 5, 7)
+        text_x = x + 24
+      end
+      text(line.text, text_x, ly, w - (text_x - x) - 8, 9, Theme.text, "left")
+    else
+      text(line, x + 8, ly, w - 16, 9, Theme.text, "left")
+    end
     ly = ly + 14
   end
 end
@@ -462,7 +477,7 @@ function View.draw(controller)
         set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), r.x + 6, r.y + 7, 20, "center")
         draw_class_icon(def.class_id, Heroes.class_icon[def.class_id], Heroes.class_label[def.class_id] or "?", r.x, r.y + 22, r.w, 18, Theme.text)
         text(def.name, r.x + 4, r.y + 50, r.w - 8, 11, Theme.text)
-        text(Glossary.render_card_text(def.desc), r.x + 4, r.y + 72, r.w - 8, 9, Theme.muted)
+        RichText.draw(def.desc, r.x + 4, r.y + 72, r.w - 8, 9, Theme.muted)
       else
         panel(r.x, r.y, r.w, r.h, Theme.panel_light)
         text("?", r.x, r.y + r.h / 2 - 12, r.w, 26, Theme.muted)

@@ -4,7 +4,15 @@
 -- du tout. Ce sont des silhouettes simples, pas de l'art final — un repère
 -- visuel en attendant de vraies illustrations (voir README du dossier game/).
 
+local Sprites = require("src.ui.sprites")
+
 local Icons = {}
+
+-- En dessous de ce rayon, l'illustration générée par IA (voir src/ui/sprites.lua)
+-- est trop petite pour être lisible (icône de coin de carte, badge de statut) --
+-- on garde la silhouette vectorielle. Au-dessus, on préfère la vraie illustration
+-- quand elle existe (portrait de héros/ennemi).
+local SPRITE_MIN_RADIUS = 15
 
 local function set(c, a)
   love.graphics.setColor(c[1], c[2], c[3], a or 1)
@@ -82,6 +90,14 @@ local DRAW_BY_CLASS = {
 -- Retourne false si class_id n'est pas reconnu (rien dessiné, l'appelant
 -- garde son repli texte).
 function Icons.draw_class(class_id, cx, cy, r, color)
+  if r >= SPRITE_MIN_RADIUS then
+    local img = Sprites.hero(class_id)
+    if img then
+      love.graphics.setColor(1, 1, 1, 1)
+      Sprites.draw_centered(img, cx, cy, r)
+      return true
+    end
+  end
   local fn = DRAW_BY_CLASS[class_id]
   if not fn then return false end
   fn(cx, cy, r, color)
@@ -186,6 +202,14 @@ local DRAW_BY_ENEMY = {
 --- Dessine la silhouette de l'ennemi (template_id, ex. "gobelin") centrée en
 -- (cx, cy). Retourne false si non reconnu (repli texte côté appelant).
 function Icons.draw_enemy(template_id, cx, cy, r, color)
+  if r >= SPRITE_MIN_RADIUS then
+    local img = Sprites.enemy(template_id)
+    if img then
+      love.graphics.setColor(1, 1, 1, 1)
+      Sprites.draw_centered(img, cx, cy, r)
+      return true
+    end
+  end
   local fn = DRAW_BY_ENEMY[template_id]
   if not fn then return false end
   fn(cx, cy, r, color)
@@ -253,6 +277,12 @@ local DRAW_BY_STATUS = {
 --- Dessine l'icône d'un statut (clé Lua, ex. "defense", "esquive"...) centrée
 -- en (cx, cy). Retourne false si non reconnu.
 function Icons.draw_status(status_key, cx, cy, r, color)
+  local img = Sprites.status(status_key)
+  if img then
+    love.graphics.setColor(1, 1, 1, 1)
+    Sprites.draw_centered(img, cx, cy, r)
+    return true
+  end
   local fn = DRAW_BY_STATUS[status_key]
   if not fn then return false end
   fn(cx, cy, r, color)

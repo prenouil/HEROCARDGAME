@@ -12,3 +12,7 @@ node_modules/
 
 # Local Claude Code settings (machine-specific permissions)
 .claude/settings.local.json
+
+# Secrets (clés API, etc. - jamais commit)
+.env
+.env.*
