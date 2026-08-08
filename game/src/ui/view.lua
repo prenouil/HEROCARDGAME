@@ -11,6 +11,7 @@ local Icons = require("src.ui.icons")
 local Sprites = require("src.ui.sprites")
 local RichText = require("src.ui.richtext")
 local Glossary = require("src.data.glossary")
+local SCALE = require("src.ui.layout_scale")
 local Heroes = require("src.data.heroes")
 local Enemies = require("src.data.enemies")
 local Combat = require("src.rules.combat")
@@ -24,7 +25,7 @@ end
 local W, H = 960, 700
 View.W, View.H = W, H
 
-local UNIT_W, UNIT_H = 150, 128
+local UNIT_W, UNIT_H = 150, 156 -- +28 (2026-08-08) pour l'affichage d'énergie agrandi ci-dessous
 local CARD_W, CARD_H = 92, 138
 local ROW_GAP = 12
 
@@ -48,18 +49,28 @@ function View.enemy_rects(state)
   return out
 end
 
+local HERO_ROW_Y = 238 -- espace troupe/ennemis agrandi (2026-08-08) : 56px de marge sous les cartes ennemies (54+128=182), au lieu de 0 avant
+
 function View.hero_rects(state)
-  local rects = centered_row(#state.heroes, UNIT_W, UNIT_H, 182)
+  local rects = centered_row(#state.heroes, UNIT_W, UNIT_H, HERO_ROW_Y)
   local out = {}
   for i, h in ipairs(state.heroes) do out[h.id] = rects[i] end
   return out
 end
 
-function View.hand_rects(state)
-  local rects = centered_row(#state.hand, CARD_W, CARD_H, 404)
+-- Calcule les rects de la main à partir d'une LISTE de cartes explicite plutôt
+-- que de `state.hand` directement -- permet de rejouer la mise en page d'une
+-- main passée (avant une défausse, par ex.) même après que `state.hand` a déjà
+-- changé, pour les animations de vol de carte (voir controller.lua).
+function View.hand_rects_for(cards)
+  local rects = centered_row(#cards, CARD_W, CARD_H, 404)
   local out = {}
-  for i, c in ipairs(state.hand) do out[c.uid] = rects[i] end
+  for i, c in ipairs(cards) do out[c.uid] = rects[i] end
   return out
+end
+
+function View.hand_rects(state)
+  return View.hand_rects_for(state.hand)
 end
 
 View.deck_pile_rect = { x = 20, y = 404, w = 64, h = CARD_H }
@@ -198,8 +209,13 @@ local function draw_hero(controller, h, r)
   set(Theme.text, dead and 0.45 or 1)
   draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, 40, Theme.text)
   text(h.name, 0, 44, r.w, 12)
-  bar(8, 66, r.w - 16, 7, h.hp / h.max_hp, Theme.hp)
-  text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV — " .. h.energy .. " NRJ", 0, 75, r.w, 9, Theme.muted)
+  bar(8, 58, r.w - 16, 7, h.hp / h.max_hp, Theme.hp)
+  text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 67, r.w, 9, Theme.muted)
+
+  -- Énergie : nombre précis + icône, en gros (2026-08-08, doublement de taille sur
+  -- retour du porteur de projet) plutôt que 6 pastilles -- réutilise RichText comme
+  -- pour le texte de carte, juste avec un `size` bien plus grand.
+  RichText.draw(h.energy .. ' "energie"', 0, 80, r.w, 24, Theme.energy)
 
   local badges = {}
   if h.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = h.defense } end
@@ -207,13 +223,9 @@ local function draw_hero(controller, h, r)
   if h.camoufle then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
   if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
   if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
-  draw_badge_row(badges, 0, 88, r.w, 16, Theme.status)
+  draw_badge_row(badges, 0, 112, r.w, 16, Theme.status)
 
-  local pip_row = ""
-  for i = 1, math.max(h.energy, 6) do pip_row = pip_row .. (i <= h.energy and "*" or "-") end
-  text(pip_row, 0, 102, r.w, 11, Theme.energy)
-
-  if not dead and h.has_acted then text("a agi ce tour", 0, 118, r.w, 8, Theme.muted) end
+  if not dead and h.has_acted then text("a agi ce tour", 0, 134, r.w, 8, Theme.muted) end
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setLineWidth(1)
@@ -310,9 +322,10 @@ local function draw_hand(controller)
     love.graphics.setFont(Fonts.get(11)); love.graphics.printf(tostring(def.cost), r.x + 4, r.y + 6, 20, "center")
 
     text(def.tier == "avance" and "Av." or "Dép.", r.x, r.y + 2, r.w - 4, 8, Theme.muted, "right")
-    draw_class_icon(def.class_id, Heroes.class_icon[def.class_id], Heroes.class_label[def.class_id] or "?", r.x, r.y + 18, r.w, 16, Theme.text)
-    text(def.name, r.x + 2, r.y + 42, r.w - 4, 9, Theme.text)
-    RichText.draw(def.desc, r.x + 3, r.y + 60, r.w - 6, 8, Theme.muted)
+    -- Icône de classe retirée (2026-08-08, jugée inutile) : plus de place pour le
+    -- texte de la carte, la chose la plus importante à lire vite en jeu.
+    text(def.name, r.x + 2, r.y + 22, r.w - 4, 9, Theme.text)
+    RichText.draw(def.desc, r.x + 3, r.y + 40, r.w - 6, 10, Theme.muted)
   end
   return rects
 end
@@ -383,13 +396,68 @@ local function tooltip_lines(controller)
   return nil
 end
 
+-- Nombre de lignes VISUELLES (après retour à la ligne automatique de printf)
+-- qu'occupera `str` dans une largeur `avail_w` -- indispensable pour ne pas
+-- superposer deux entrées du tooltip quand l'une d'elles est longue et wrap.
+local function wrapped_line_count(str, avail_w, size)
+  local _, wrapped = Fonts.get(size):getWrap(str, avail_w)
+  return math.max(1, #wrapped)
+end
+
+-- Cartes "fantômes" qui volent de la pioche vers la main (arrivée) ou de la
+-- main vers la défausse (départ) -- port de flyGhost()/animateDrawnCards()/
+-- animateDiscardedCards() depuis proto-cartes-completes/index.html. Chaque
+-- entrée de `controller.card_anims` (voir controller.lua) porte son rect de
+-- départ/arrivée déjà calculés -- cette fonction ne fait qu'interpoler et
+-- dessiner, jamais de logique de jeu.
+local function draw_card_flights(controller)
+  for _, a in ipairs(controller.card_anims) do
+    if a.elapsed >= a.delay then
+      local p = math.min(1, (a.elapsed - a.delay) / a.duration)
+      local ease = 1 - (1 - p) ^ 2 -- easeOutQuad, approxime le cubic-bezier CSS du prototype
+      local x = a.from.x + (a.to.x - a.from.x) * ease
+      local y = a.from.y + (a.to.y - a.from.y) * ease
+      local w = a.from.w + (a.to.w - a.from.w) * ease
+      local h = a.from.h + (a.to.h - a.from.h) * ease
+      local alpha = a.fade_in and math.min(1, p * 1.6) or (1 - p * 0.8)
+      set(Theme.panel_light, alpha)
+      love.graphics.rectangle("fill", x, y, w, h, 8, 8)
+      set(Theme.accent, alpha); love.graphics.setLineWidth(1)
+      love.graphics.rectangle("line", x, y, w, h, 8, 8)
+      if a.name then
+        set(Theme.text, alpha)
+        love.graphics.setFont(Fonts.get(9))
+        love.graphics.printf(a.name, x + 3, y + h / 2 - 6, w - 6, "center")
+      end
+    end
+  end
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.setLineWidth(1)
+end
+
 local function draw_tooltip(controller)
   if not controller:hover_ready() then return end
   local title, lines = tooltip_lines(controller)
   if not title then return end
   local mx, my = love.mouse.getPosition()
+  mx, my = mx / SCALE, my / SCALE
   local w = 240
-  local h = 20 + 14 * #lines
+  local line_h = 14
+
+  local wrapped_counts = {}
+  for i, line in ipairs(lines) do
+    local str, avail_w
+    if type(line) == "table" then
+      str, avail_w = line.text, w - (line.icon and 24 or 8) - 8
+    else
+      str, avail_w = line, w - 16
+    end
+    wrapped_counts[i] = wrapped_line_count(str, avail_w, 9)
+  end
+  local total_lines = 0
+  for _, c in ipairs(wrapped_counts) do total_lines = total_lines + c end
+
+  local h = 20 + line_h * total_lines
   local x = math.min(mx + 14, W - w - 8)
   local y = math.max(8, my - h - 10)
   panel(x, y, w, h, Theme.panel_light)
@@ -397,7 +465,7 @@ local function draw_tooltip(controller)
   love.graphics.rectangle("line", x, y, w, h, 8, 8)
   text(title, x + 8, y + 6, w - 16, 10, Theme.status, "left")
   local ly = y + 20
-  for _, line in ipairs(lines) do
+  for i, line in ipairs(lines) do
     if type(line) == "table" then
       local text_x = x + 8
       if line.icon then
@@ -409,7 +477,7 @@ local function draw_tooltip(controller)
     else
       text(line, x + 8, ly, w - 16, 9, Theme.text, "left")
     end
-    ly = ly + 14
+    ly = ly + line_h * wrapped_counts[i]
   end
 end
 
@@ -423,26 +491,12 @@ function View.draw(controller)
   text("Ennemis", 20, 40, 200, 10, Theme.muted, "left")
   for _, e in ipairs(state.enemies) do draw_enemy(controller, e, View.enemy_rects(state)[e.id]) end
 
-  text("Ta troupe", 20, 168, 200, 10, Theme.muted, "left")
+  text("Ta troupe", 20, HERO_ROW_Y - 14, 200, 10, Theme.muted, "left")
   for _, h in ipairs(state.heroes) do draw_hero(controller, h, View.hero_rects(state)[h.id]) end
 
-  -- journal (5 dernières lignes)
-  panel(20, 322, W - 40, 70, { 0, 0, 0 })
-  local log = state.log
-  local n = #log
-  local first = math.max(1, n - 5)
-  local y = 326
-  for i = first, n do
-    local entry = log[i]
-    local color = Theme.muted
-    if entry.cls == "you" then color = Theme.energy
-    elseif entry.cls == "foe" then color = Theme.hp
-    elseif entry.cls == "sys" then color = Theme.accent
-    elseif entry.cls == "heal" then color = Theme.heal
-    elseif entry.cls == "power" then color = Theme.status end
-    text(entry.text, 26, y, W - 52, 10, color, "left")
-    y = y + 12
-  end
+  -- Fenêtre de log retirée pour l'instant (2026-08-08, demande explicite -- l'espace
+  -- gagné sert à séparer visuellement la troupe des ennemis, voir HERO_ROW_Y ci-dessus).
+  -- `state.log` continue d'être alimenté côté règles, juste plus affiché ici.
 
   draw_hand(controller)
   draw_mode_buttons(controller)
@@ -475,9 +529,8 @@ function View.draw(controller)
         panel(r.x, r.y, r.w, r.h, Theme.panel_light)
         set(Theme.energy); love.graphics.circle("fill", r.x + 16, r.y + 14, 10)
         set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), r.x + 6, r.y + 7, 20, "center")
-        draw_class_icon(def.class_id, Heroes.class_icon[def.class_id], Heroes.class_label[def.class_id] or "?", r.x, r.y + 22, r.w, 18, Theme.text)
-        text(def.name, r.x + 4, r.y + 50, r.w - 8, 11, Theme.text)
-        RichText.draw(def.desc, r.x + 4, r.y + 72, r.w - 8, 9, Theme.muted)
+        text(def.name, r.x + 4, r.y + 26, r.w - 8, 11, Theme.text)
+        RichText.draw(def.desc, r.x + 4, r.y + 46, r.w - 8, 11, Theme.muted)
       else
         panel(r.x, r.y, r.w, r.h, Theme.panel_light)
         text("?", r.x, r.y + r.h / 2 - 12, r.w, 26, Theme.muted)
@@ -485,6 +538,7 @@ function View.draw(controller)
     end
   end
 
+  draw_card_flights(controller)
   if controller.screen == "playing" then draw_tooltip(controller) end
 
   love.graphics.setColor(1, 1, 1, 1)

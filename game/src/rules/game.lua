@@ -80,7 +80,9 @@ function Game.restore_combat_snapshot(state)
   for i, e in ipairs(snap.enemies) do enemies[i] = shallow_copy(e) end
   state.heroes = heroes
   state.enemies = enemies
-  state.deck = { table.unpack(snap.deck) }
+  local deck = {}
+  for i, c in ipairs(snap.deck) do deck[i] = c end
+  state.deck = deck
   state.run.combat_index = snap.combat_index
   state.paladin_revive_used = snap.paladin_revive_used
   state.hand = {}; state.discard = {}; state.pending = nil; state.mage_keep_pending = false

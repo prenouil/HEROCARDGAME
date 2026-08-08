@@ -6,6 +6,10 @@ local Game = require("src.rules.game")
 local Combat = require("src.rules.combat")
 local Draft = require("src.rules.draft")
 local Sequencer = require("src.util.sequencer")
+-- Dépendance à la UI (rects de layout, purs -- aucun appel love.graphics dedans)
+-- nécessaire pour savoir D'OÙ une carte part visuellement quand elle est piochée
+-- ou défaussée ; voir View.hand_rects_for/deck_pile_rect/discard_pile_rect.
+local View = require("src.ui.view")
 
 local Controller = {}
 Controller.__index = Controller
@@ -14,6 +18,9 @@ local ANIM_PULSE = 0.38 -- s, calque sur les 380ms de pulseUp/pulseDown du proto
 local ANIM_SHAKE = 1.0  -- s, calque sur les 1000ms de shakeUnit
 local HOVER_DELAY = 1.0 -- s, calque sur le délai d'infobulle du prototype
 local ENEMY_STEP_WAIT = 1.0 -- s, calque sur le sleep(1000) entre chaque ennemi
+local FLIGHT_DURATION = 0.38 -- s, calque sur FLIGHT_MS (380ms) du prototype
+local DRAW_STAGGER = 0.07 -- s entre deux cartes piochées, calque sur i*70ms
+local DISCARD_STAGGER = 0.06 -- s entre deux cartes défaussées, calque sur i*60ms
 
 function Controller.new()
   local self = setmetatable({}, Controller)
@@ -23,6 +30,7 @@ function Controller.new()
   self.draft_picks = nil
   self.draft_revealed = {}
   self.anim = {} -- [unit_id] = { kind = "pulse-up"|"pulse-down"|"shake", t = elapsed }
+  self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, name } -- voir View.draw
   self.hover = { target = nil, kind = nil, t = 0 } -- kind: "hero"|"enemy"|"card"
   self:reset_run()
   return self
@@ -33,20 +41,96 @@ function Controller:reset_run()
   self.draft_picks = nil
   self.seq:clear()
   self.anim = {}
+  self.card_anims = {}
   Game.reset_run(self.state)
+  self:consume_drawn_animation()
 end
 
 function Controller:restart_combat()
   self.screen = "playing"
   self.seq:clear()
   self.anim = {}
+  self.card_anims = {}
   Game.restore_combat_snapshot(self.state)
+  self:consume_drawn_animation()
 end
 
 -- ---------- cosmétique ----------
 
 function Controller:pulse(unit_id, kind)
   self.anim[unit_id] = { kind = kind, t = 0 }
+end
+
+-- ---------- vol de cartes (pioche <-> main <-> défausse) ----------
+
+--- Anime les cartes dont les uids sont donnés depuis la pioche vers leur
+-- emplacement ACTUEL dans state.hand (appelé APRÈS que la pioche a eu lieu :
+-- les cartes sont déjà dans state.hand, donc View.hand_rects reflète leur
+-- position d'arrivée directement).
+function Controller:animate_draw(drawn_uids)
+  if not drawn_uids or #drawn_uids == 0 then return end
+  local hand_rects = View.hand_rects(self.state)
+  local origin = View.deck_pile_rect
+  for i, uid in ipairs(drawn_uids) do
+    local dest = hand_rects[uid]
+    if dest then
+      local name
+      for _, c in ipairs(self.state.hand) do if c.uid == uid then name = c.def.name break end end
+      self.card_anims[#self.card_anims + 1] = {
+        from = origin, to = dest, elapsed = 0, delay = (i - 1) * DRAW_STAGGER,
+        duration = FLIGHT_DURATION, fade_in = true, name = name,
+      }
+    end
+  end
+end
+
+--- Lit state.last_drawn_uids (posé par Deck.draw_cards/fill_hand, voir
+-- src/rules/deck.lua) et lance l'animation correspondante, puis le vide --
+-- point d'accroche unique pour tous les chemins de pioche (début de tour,
+-- Clairvoyance en cours de tour), sans dupliquer l'appel dans chacun.
+function Controller:consume_drawn_animation()
+  local drawn = self.state.last_drawn_uids
+  self.state.last_drawn_uids = nil
+  if drawn then self:animate_draw(drawn) end
+end
+
+--- Anime `cards` (liste de {uid, def, ...}, une COPIE de state.hand prise
+-- AVANT la défausse -- voir View.hand_rects_for) depuis leur position d'ORIGINE
+-- dans cette main-là vers la défausse. `exclude_uid` (optionnel) : carte à ne
+-- pas animer (celle que le Mage garde).
+function Controller:animate_discard_snapshot(cards, exclude_uid)
+  if not cards or #cards == 0 then return end
+  local hand_rects = View.hand_rects_for(cards)
+  local dest = View.discard_pile_rect
+  local i = 0
+  for _, c in ipairs(cards) do
+    if c.uid ~= exclude_uid then
+      i = i + 1
+      local origin = hand_rects[c.uid]
+      if origin then
+        self.card_anims[#self.card_anims + 1] = {
+          from = origin, to = dest, elapsed = 0, delay = (i - 1) * DISCARD_STAGGER,
+          duration = FLIGHT_DURATION, fade_in = false, name = c.def.name,
+        }
+      end
+    end
+  end
+end
+
+--- Anime une seule carte (celle qui vient d'être jouée, si elle a bien fini en
+-- défausse -- pas si elle est restée en main ou retournée au sommet du deck)
+-- depuis son rect dans `hand_before` (capturé avant l'appel qui la résout).
+function Controller:maybe_animate_played_discard(played_uid, hand_before)
+  if not played_uid then return end
+  local last = self.state.discard[#self.state.discard]
+  if not last or last.uid ~= played_uid then return end -- pas parti en défausse (main/dessus du deck/pas encore résolu)
+  local hand_rects = View.hand_rects_for(hand_before)
+  local origin = hand_rects[played_uid]
+  if not origin then return end
+  self.card_anims[#self.card_anims + 1] = {
+    from = origin, to = View.discard_pile_rect, elapsed = 0, delay = 0,
+    duration = FLIGHT_DURATION, fade_in = false, name = last.def.name,
+  }
 end
 
 function Controller:snapshot_hp()
@@ -76,6 +160,11 @@ function Controller:update(dt)
     local limit = (a.kind == "shake") and ANIM_SHAKE or ANIM_PULSE
     if a.t >= limit then self.anim[id] = nil end
   end
+  for i = #self.card_anims, 1, -1 do
+    local a = self.card_anims[i]
+    a.elapsed = a.elapsed + dt
+    if a.elapsed >= a.delay + a.duration then table.remove(self.card_anims, i) end
+  end
   if self.hover.target then self.hover.t = self.hover.t + dt end
 end
 
@@ -95,7 +184,9 @@ end
 function Controller:select_card(uid)
   if self.screen ~= "playing" or self.state.over then return end
   if self.state.mage_keep_pending then
+    local hand_before = Game.shallow_copy(self.state.hand)
     Game.resolve_mage_keep(self.state, uid)
+    self:animate_discard_snapshot(hand_before, uid)
     self:advance_after_discard_sequenced()
     return
   end
@@ -113,19 +204,25 @@ end
 function Controller:assign_hero(hero_id)
   local pending = self.state.pending
   if not pending then return end
+  local played_uid, hand_before = pending.uid, Game.shallow_copy(self.state.hand)
   self:pulse(hero_id, "pulse-up")
   local before = self:snapshot_hp()
   local resolved = Game.assign_hero(self.state, hero_id)
   self:shake_from_diff(before)
+  self:maybe_animate_played_discard(played_uid, hand_before)
+  self:consume_drawn_animation() -- Clairvoyance : le mode "concentrate" ne pioche jamais, mais "play" le peut
   if resolved then self:after_card_resolved() end
 end
 
 function Controller:resolve_target(kind, target_id)
   local pending = self.state.pending
   if not pending or not pending.hero_id then return end
+  local played_uid, hand_before = pending.uid, Game.shallow_copy(self.state.hand)
   local before = self:snapshot_hp()
   Game.resolve_pending(self.state, kind, target_id)
   self:shake_from_diff(before)
+  self:maybe_animate_played_discard(played_uid, hand_before)
+  self:consume_drawn_animation() -- Clairvoyance pioche 1 carte dans son effet
   self:after_card_resolved()
 end
 
@@ -136,13 +233,19 @@ end
 -- ---------- fin de tour ----------
 
 function Controller:end_turn()
+  local hand_before = Game.shallow_copy(self.state.hand)
   local result = Game.end_turn_requested(self.state)
-  if result == "discarded" then self:advance_after_discard_sequenced() end
+  if result == "discarded" then
+    self:animate_discard_snapshot(hand_before)
+    self:advance_after_discard_sequenced()
+  end
   -- result == "mage-keep" : la UI affiche déjà le bandeau via state.mage_keep_pending.
 end
 
 function Controller:choose_mage_keep_none()
+  local hand_before = Game.shallow_copy(self.state.hand)
   Game.resolve_mage_keep_none(self.state)
+  self:animate_discard_snapshot(hand_before)
   self:advance_after_discard_sequenced()
 end
 
@@ -178,6 +281,7 @@ function Controller:advance_after_discard_sequenced()
       if Game.check_defeat(self_.state) then self_:enter_defeat_screen(); return end
       self_.state.turn = self_.state.turn + 1
       Game.start_turn(self_.state)
+      self_:consume_drawn_animation()
     end)
   end)
 end
@@ -208,7 +312,9 @@ function Controller:choose_draft_card(index)
   self.draft_picks = nil
   self.screen = "playing"
   self.state.over = false
+  self.card_anims = {}
   Game.start_next_combat(self.state)
+  self:consume_drawn_animation()
 end
 
 return Controller

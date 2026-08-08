@@ -53,6 +53,11 @@ function Deck.draw_cards(state, n)
     state.hand[#state.hand + 1] = c
     drawn[#drawn + 1] = c.uid
   end
+  -- Rangé sur `state` (pas seulement retourné) : Clairvoyance appelle draw_cards
+  -- directement depuis un effet de carte (src/data/cards.lua) sans relayer la
+  -- valeur de retour -- la UI (controller.lua) lit ce champ après coup pour
+  -- savoir quoi animer, quel que soit le chemin d'appel.
+  state.last_drawn_uids = drawn
   return drawn
 end
 
@@ -69,6 +74,7 @@ function Deck.fill_hand(state)
     state.hand[#state.hand + 1] = c
     drawn[#drawn + 1] = c.uid
   end
+  state.last_drawn_uids = drawn
   return drawn
 end
 
