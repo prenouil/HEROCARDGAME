@@ -20,7 +20,7 @@ Heroes.class_powers = {
   guerrier = { transcendance = "Transcendance — +50% dégâts \"épée\" (mêlée physique)." },
   paladin = { transcendance = "Transcendance — +50% sur le bouclier gagné ET sur le soin prodigué." },
   mage = { transcendance = "Transcendance — -2 coût en énergie sur tout \"sort\", pas seulement les sorts offensifs." },
-  assassin = { transcendance = "Transcendance — Les attaques de mêlée infligent Incapacité 1 et Vulnérabilité 1." },
+  assassin = { transcendance = "Transcendance — Double la quantité de tout statut qu'il applique." },
 }
 
 Heroes.defs = {

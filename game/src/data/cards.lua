@@ -107,38 +107,40 @@ Cards.list = {
   },
   {
     code = "lumiere-divine", name = "Lumière divine", class_id = "paladin", tier = "avance", cost = 2,
-    cats = { "defense", "soin", "magie" }, dmg_type = nil, target = "self",
-    desc = 'Gagne 4 "bouclier". "soin" 2 à tous les alliés (+50% pour le bouclier ET le soin si joué par le Paladin).',
+    cats = { "defense", "soin", "sort" }, dmg_type = nil, target = "self",
+    desc = 'Tous les alliés gagnent 4 "bouclier". "soin" 4 à tous les alliés (+50% pour le bouclier ET le soin si joué par le Paladin).',
     effect = function(ctx)
-      Combat.grant_defense(ctx.hero, 4, ctx)
-      for _, h in ipairs(living_heroes(ctx)) do Combat.grant_heal(h, 2, ctx) end
+      for _, h in ipairs(living_heroes(ctx)) do
+        Combat.grant_defense(h, 4, ctx)
+        Combat.grant_heal(h, 4, ctx)
+      end
     end,
   },
   {
-    code = "missile-magique", name = "Missile magique", class_id = "mage", tier = "depart", cost = 2,
+    code = "missile-magique", name = "Missile magique", class_id = "mage", tier = "depart", cost = 3,
     cats = { "sort", "distance", "degats" }, dmg_type = "magique", target = "enemy",
-    desc = 'Inflige 5 "etincelle".',
-    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 5, "magique", ctx) end,
+    desc = 'Inflige 8 "etincelle".',
+    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 8, "magique", ctx) end,
   },
   {
     code = "image-miroir", name = "Image miroir", class_id = "mage", tier = "avance", cost = 3,
     cats = { "sort", "defense" }, dmg_type = "magique", target = "self",
     desc = 'Gagne "Esquive" 2.',
-    effect = function(ctx) ctx.hero.esquive = (ctx.hero.esquive or 0) + 2 end,
+    effect = function(ctx) Combat.apply_status(ctx, ctx.hero, "esquive", 2) end,
   },
   {
     code = "tornade-feu", name = "Tornade de feu", class_id = "mage", tier = "avance", cost = 6,
     cats = { "sort", "distance", "degats", "feu" }, dmg_type = "magique", target = "all-enemies",
-    desc = 'Inflige 5 "fireball" à tous les ennemis.',
+    desc = 'Inflige 8 "fireball" à tous les ennemis.',
     effect = function(ctx)
-      for _, e in ipairs(living_enemies(ctx)) do Combat.deal_damage(ctx.state, ctx.hero, e, 5, "magique", ctx) end
+      for _, e in ipairs(living_enemies(ctx)) do Combat.deal_damage(ctx.state, ctx.hero, e, 8, "magique", ctx) end
     end,
   },
   {
     code = "boule-feu", name = "Boule de feu", class_id = "mage", tier = "avance", cost = 8,
     cats = { "sort", "distance", "degats", "feu" }, dmg_type = "magique", target = "enemy",
-    desc = 'Inflige 15 "fireball".',
-    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 15, "magique", ctx) end,
+    desc = 'Inflige 20 "fireball".',
+    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 20, "magique", ctx) end,
   },
   {
     code = "strategie", name = "Stratégie", class_id = "assassin", tier = "depart", cost = 0,
@@ -159,37 +161,33 @@ Cards.list = {
     desc = 'Inflige 6 "epee" et "Saignements" 3.',
     effect = function(ctx)
       Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "physique", ctx)
-      ctx.target.saignements = (ctx.target.saignements or 0) + 3
+      Combat.apply_status(ctx, ctx.target, "saignements", 3)
     end,
   },
   {
     code = "assassinat", name = "Assassinat", class_id = "assassin", tier = "avance", cost = 4,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
-    desc = 'Si Camouflé, inflige 10 "epee", sinon se "concentre" et Assassinat va sur le dessus du deck.',
+    desc = 'Si Camouflé, inflige 12 "epee", sinon gagne Camouflé 1, Puissance 1 et Assassinat va sur le dessus du deck.',
     effect = function(ctx)
-      if ctx.hero.camoufle then
-        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 10, "physique", ctx)
-        ctx.hero.camoufle = false
+      if (ctx.hero.camoufle or 0) > 0 then
+        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 12, "physique", ctx)
+        ctx.hero.camoufle = 0
       else
-        ctx.hero.energy = ctx.hero.energy + 1
+        Combat.apply_status(ctx, ctx.hero, "camoufle", 1)
+        Combat.apply_status(ctx, ctx.hero, "puissance", 1)
         ctx.return_to_deck_top = true
-        Combat.log(ctx.state, ctx.hero.name .. " n'est pas Camouflé : Assassinat se concentre (+1 énergie) et retourne au sommet du deck.", "you")
+        Combat.log(ctx.state, ctx.hero.name .. " n'est pas Camouflé : Assassinat le rend Camouflé et Puissant, puis retourne au sommet du deck.", "you")
       end
     end,
   },
   {
-    code = "lachete", name = "Lâcheté", class_id = "assassin", tier = "avance", cost = 1,
-    cats = {}, dmg_type = nil, target = "enemy",
-    desc = 'Si "cibleennemi", change vers "alliecible". L\'ennemi gagne Incapacité 1.',
+    code = "dans-les-ombres", name = "Dans les ombres", class_id = "assassin", tier = "avance", cost = 1,
+    cats = { "defense" }, dmg_type = nil, target = "self",
+    desc = 'Gagne 4 "bouclier", 1 "energie" et gagne Camouflé 1.',
     effect = function(ctx)
-      local others = {}
-      for _, h in ipairs(living_heroes(ctx)) do
-        if h.id ~= ctx.hero.id then others[#others + 1] = h end
-      end
-      if #others > 0 and ctx.target.next_move and Combat.TARGETABLE_MOVE_KINDS[ctx.target.next_move.kind] then
-        ctx.target.target_hero_id = others[math.random(#others)].id
-      end
-      ctx.target.incapacite = (ctx.target.incapacite or 0) + 1
+      Combat.grant_defense(ctx.hero, 4, ctx)
+      ctx.hero.energy = ctx.hero.energy + 1
+      Combat.apply_status(ctx, ctx.hero, "camoufle", 1)
     end,
   },
 }

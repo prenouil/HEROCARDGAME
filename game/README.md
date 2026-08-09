@@ -74,7 +74,7 @@ l'écran, la souris ou le temps réel vit dans `src/ui`.
   plutôt que corrigées silencieusement :
   - Coup mortel inflige 4 dégâts dans le code (gdd.md dit encore 3).
   - Provocation est palier "Avancé" dans le code (gdd.md dit "Départ").
-  - Assassinat (10 dégâts si Camouflé) n'est pas marqué "brut" dans le code
+  - Assassinat (12 dégâts si Camouflé) n'est pas marqué "brut" dans le code
     (gdd.md dit qu'il l'est — la Défense l'absorbe donc actuellement).
   - Le système "Run Infini" complet (bestiaire à 10 ennemis, scaling par
     niveau, budget de rencontre croissant, draft de carte après victoire,

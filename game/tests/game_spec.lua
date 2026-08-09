@@ -28,7 +28,7 @@ describe("Flux de jeu : jouer une carte", function()
     local state = Game.new_state()
     local hero = {
       id = "guerrier", class_id = "guerrier", name = "Guerrier", icon = "", hp = 18, max_hp = 18,
-      energy = 1, defense = 0, esquive = 0, camoufle = false, incapacite = 0, vulnerabilite = 0,
+      energy = 1, defense = 0, esquive = 0, camoufle = 0, incapacite = 0, vulnerabilite = 0,
       puissance = 0, saignements = 0, has_acted = false,
     }
     state.heroes = { hero }
@@ -56,7 +56,7 @@ describe("Flux de jeu : jouer une carte", function()
     local state = Game.new_state()
     local hero = {
       id = "mage", class_id = "mage", name = "Mage", icon = "", hp = 10, max_hp = 10,
-      energy = 0, defense = 0, esquive = 0, camoufle = false, incapacite = 0, vulnerabilite = 0,
+      energy = 0, defense = 0, esquive = 0, camoufle = 0, incapacite = 0, vulnerabilite = 0,
       puissance = 0, saignements = 0, has_acted = false,
     }
     state.heroes = { hero }
@@ -79,7 +79,7 @@ describe("Flux de jeu : fin de tour et résolution ennemie", function()
     local state = Game.new_state()
     state.heroes = {
       { id = "guerrier", class_id = "guerrier", name = "Guerrier", icon = "", hp = 18, max_hp = 18,
-        energy = 0, defense = 0, esquive = 0, camoufle = false, incapacite = 0, vulnerabilite = 0,
+        energy = 0, defense = 0, esquive = 0, camoufle = 0, incapacite = 0, vulnerabilite = 0,
         puissance = 0, saignements = 0, has_acted = true },
     }
     local enemy = Encounter.instantiate_enemy(Enemies.by_id("gobelin"), 1, function() return 1 end)

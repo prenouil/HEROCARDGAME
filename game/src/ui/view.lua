@@ -450,7 +450,7 @@ local function draw_hero(controller, h, r)
     local badges = {}
     if h.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = h.defense } end
     if (h.esquive or 0) > 0 then badges[#badges + 1] = { key = "esquive", abbr = "ESQ", value = h.esquive } end
-    if h.camoufle then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
+    if (h.camoufle or 0) > 0 then badges[#badges + 1] = { key = "camoufle", abbr = "CAM", value = h.camoufle } end
     if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
     if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
     draw_badge_row(badges, 0, 112, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
@@ -769,7 +769,7 @@ end
 local STATUS_TOOLTIP_FIELDS = {
   { field = "defense", glossary_key = "bouclier", label = "Bouclier", explain = "Absorbe les prochains dégâts avant les PV." },
   { field = "esquive", glossary_key = "esquive" },
-  { field = "camoufle", glossary_key = "camoufle", boolean = true },
+  { field = "camoufle", glossary_key = "camoufle" },
   { field = "puissance", glossary_key = "puissance" },
   { field = "saignements", glossary_key = "saignement" },
   { field = "incapacite", glossary_key = "incapacite" },

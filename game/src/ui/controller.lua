@@ -46,9 +46,8 @@ local PARTICLE_DURATION = 0.45 -- s -- petit burst de pixels à l'impact
 local PARTICLE_COUNT = 6
 local STATUS_POP_DURATION = 0.35 -- s -- pop d'échelle d'un badge de statut à son application
 local SHIELD_FX_DURATION = 1.0 -- s -- gros bouclier en fondu sur un gain de Défense
--- Champs de statut comparés avant/après pour déclencher le pop -- `camoufle`
--- (booléen) traité séparément juste en dessous.
-local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance" }
+-- Champs de statut comparés avant/après pour déclencher le pop.
+local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "camoufle" }
 
 function Controller.new()
   local self = setmetatable({}, Controller)
@@ -225,7 +224,7 @@ function Controller:snapshot_units()
   local out = {}
   local function capture(list)
     for _, u in ipairs(list) do
-      local snap = { hp = u.hp, camoufle = u.camoufle or false }
+      local snap = { hp = u.hp }
       for _, k in ipairs(STATUS_KEYS) do snap[k] = u[k] or 0 end
       out[u.id] = snap
     end
@@ -270,7 +269,7 @@ end
 -- retours visuels ET sonores : secousse + nombre flottant + burst de pixels +
 -- "plarf"/"waof" sur une perte de PV (selon `opts.dmg_type`, "physique" par
 -- défaut), nombre flottant vert sur un soin, pop d'un badge sur toute valeur
--- de statut qui vient d'augmenter (ou Camouflage qui s'active), gros bouclier
+-- de statut qui vient d'augmenter (Camouflage compris), gros bouclier
 -- + "shting" sur un gain de Défense OU des dégâts intégralement absorbés
 -- (défense qui baisse sans perte de PV -- voir Combat.deal_damage). Le son
 -- d'impact/bouclier ne joue qu'une fois par appel, même si plusieurs unités
@@ -303,7 +302,6 @@ function Controller:react_to_diff(before, opts)
     elseif not opts.skip_shield_sfx and defense_now < b.defense and u.hp == b.hp then
       if not shield_played then Sfx.play("shield"); shield_played = true end
     end
-    if u.camoufle and not b.camoufle then self:pop_status(u.id, "camoufle") end
   end
   for _, h in ipairs(self.state.heroes) do react(h) end
   for _, e in ipairs(self.state.enemies) do react(e) end

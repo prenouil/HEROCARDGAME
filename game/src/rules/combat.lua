@@ -137,14 +137,6 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
     end
   end
 
-  -- Transcendance Assassin : toute carte "epee" jouée PAR l'Assassin inflige
-  -- Incapacité 1 + Vulnérabilité 1, même principe que le Guerrier ci-dessus.
-  if ctx and source_hero and source_hero.class_id == "assassin" and Glossary.has_keyword(ctx.card_def.desc, "epee") and target_unit.hp > 0 then
-    target_unit.incapacite = (target_unit.incapacite or 0) + 1
-    target_unit.vulnerabilite = (target_unit.vulnerabilite or 0) + 1
-    Combat.log(state, "Transcendance de l'Assassin : Incapacité 1 et Vulnérabilité 1 sur " .. target_unit.name .. ".", "power")
-  end
-
   return shook
 end
 
@@ -169,6 +161,19 @@ function Combat.grant_heal(target_unit, base, ctx)
   amount = round(amount)
   target_unit.hp = math.min(target_unit.max_hp, target_unit.hp + amount)
   return amount
+end
+
+-- Transcendance Assassin : double la quantité de tout statut empilable (esquive,
+-- saignements, incapacite, vulnerabilite, camoufle, puissance) qu'il applique --
+-- à lui-même ou à sa cible, quelle que soit la classe d'origine de la carte
+-- jouée -- même principe que Guerrier/Paladin/Mage ci-dessus. Seule porte
+-- d'entrée pour poser un statut depuis un effet de carte : ne jamais écrire
+-- `unit.champ = (unit.champ or 0) + n` directement dans cards.lua.
+function Combat.apply_status(ctx, unit, field, amount)
+  local mult = (ctx and ctx.hero and ctx.hero.class_id == "assassin") and 2 or 1
+  local applied = amount * mult
+  unit[field] = (unit[field] or 0) + applied
+  return applied
 end
 
 -- Transcendance Mage : -2 sur tout sort joué PAR le Mage, quelle que soit sa
@@ -196,7 +201,7 @@ end
 function Combat.can_play(hero, pending)
   if not pending or hero.hp <= 0 or hero.has_acted then return false end
   if hero.energy < Combat.effective_cost(hero, pending.def) then return false end
-  if pending.def.requires_camouflage and not hero.camoufle then return false end
+  if pending.def.requires_camouflage and (hero.camoufle or 0) <= 0 then return false end
   return true
 end
 

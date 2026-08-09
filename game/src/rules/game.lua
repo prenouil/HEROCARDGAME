@@ -31,7 +31,7 @@ end
 local function fresh_hero(def)
   return {
     id = def.id, class_id = def.class_id, name = def.name, icon = def.icon, label = def.label, max_hp = def.max_hp,
-    hp = def.max_hp, energy = 0, defense = 0, esquive = 0, camoufle = false,
+    hp = def.max_hp, energy = 0, defense = 0, esquive = 0, camoufle = 0,
     incapacite = 0, vulnerabilite = 0, puissance = 0, saignements = 0, has_acted = false,
   }
 end
@@ -40,7 +40,7 @@ local function carried_hero(h)
   -- Entre deux combats d'un même run, seuls les PV persistent (blessures non
   -- soignées) ; tout le reste repart à zéro.
   local n = shallow_copy(h)
-  n.energy = 0; n.defense = 0; n.esquive = 0; n.camoufle = false
+  n.energy = 0; n.defense = 0; n.esquive = 0; n.camoufle = 0
   n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.saignements = 0; n.has_acted = false
   return n
 end
@@ -210,7 +210,7 @@ function Game.assign_hero(state, hero_id)
   if not hero or hero.hp <= 0 then return false end
   if hero.has_acted then return false end
   if hero.energy < Combat.required_cost(hero, pending) then return false end
-  if def.requires_camouflage and not hero.camoufle then return false end
+  if def.requires_camouflage and (hero.camoufle or 0) <= 0 then return false end
 
   pending.hero_id = hero_id
   hero.has_acted = true
