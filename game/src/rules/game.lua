@@ -175,6 +175,10 @@ function Game.start_turn(state)
       Combat.log(state, "Pouvoir de Classe du Guerrier : coup gratuit sur " .. t.name .. ".", "power")
       Combat.deal_damage(state, guerrier, t, Heroes.GUERRIER_FREE_HIT_DMG, "physique", nil)
     end
+    -- Contrairement à resolve_pending, ces dégâts ne passent pas par un
+    -- pending de carte -- rien d'autre ne vérifie la victoire si ce coup
+    -- gratuit achève le dernier ennemi.
+    Game.check_victory(state)
   end
 
   return drawn

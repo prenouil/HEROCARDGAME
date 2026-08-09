@@ -512,6 +512,16 @@ local function draw_hand(controller)
   local arrow_mode = controller.input_mode == "arrow"
   local special_uid = arrow_mode and ((state.pending and state.pending.uid) or controller.arrow_hand_hover_uid) or nil
 
+  -- Le fantôme de vol pioche->main est un fondu qui part de rien ; s'il
+  -- survole une carte déjà dessinée à pleine opacité à sa position d'arrivée,
+  -- on voit la carte "déjà là" pendant que le fantôme la rejoint. Le vrai
+  -- rendu de la carte reste donc masqué tant que SON vol d'arrivée n'est pas
+  -- terminé (voir Controller:animate_draw, qui pose `uid` sur ces entrées).
+  local hiding_uids = {}
+  for _, a in ipairs(controller.card_anims) do
+    if a.fade_in and a.uid then hiding_uids[a.uid] = true end
+  end
+
   local function draw_one(c, popped)
     local r = rects[c.uid]
     local def = c.def
@@ -544,9 +554,9 @@ local function draw_hand(controller)
   end
 
   for _, c in ipairs(state.hand) do
-    if c.uid ~= special_uid then draw_one(c, false) end
+    if c.uid ~= special_uid and not hiding_uids[c.uid] then draw_one(c, false) end
   end
-  if special_uid then
+  if special_uid and not hiding_uids[special_uid] then
     for _, c in ipairs(state.hand) do
       if c.uid == special_uid then draw_one(c, true); break end
     end

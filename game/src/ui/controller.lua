@@ -51,9 +51,10 @@ function Controller.new()
   self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, name } -- voir View.draw
   self.hover = { target = nil, kind = nil, t = 0 } -- kind: "hero"|"enemy"|"card"
   -- Mode d'entrée alterné (2026-08-09, spike) : "tap" = séquence à 3 clics
-  -- (existant, reste le défaut) ; "arrow" = sélection au survol + flèche
-  -- dynamique façon Slay the Spire, testée en parallèle sans remplacer l'existant.
-  self.input_mode = "tap"
+  -- (existant) ; "arrow" = sélection au survol + flèche dynamique façon Slay
+  -- the Spire -- devenu le défaut (2026-08-09, retour positif du porteur de
+  -- projet après playtest), "tap" reste disponible via le bouton de bascule.
+  self.input_mode = "arrow"
   self.arrow_hand_hover_uid = nil -- carte de la main survolée en mode "arrow" (agrandissement immédiat, sans délai de tooltip)
   self:reset_run()
   return self
@@ -79,6 +80,9 @@ function Controller:reset_run()
   self.card_anims = {}
   Game.reset_run(self.state)
   self:consume_drawn_animation()
+  -- Game.start_turn (appelé par reset_run) peut déclencher la victoire via le
+  -- Pouvoir de Classe du Guerrier (coups gratuits) -- même garde qu'ailleurs.
+  if self.state.over then self:enter_draft_screen() end
 end
 
 function Controller:restart_combat()
@@ -88,6 +92,7 @@ function Controller:restart_combat()
   self.card_anims = {}
   Game.restore_combat_snapshot(self.state)
   self:consume_drawn_animation()
+  if self.state.over then self:enter_draft_screen() end
 end
 
 --- Outil de test (2026-08-08) : termine le combat en cours par une victoire
@@ -124,7 +129,7 @@ function Controller:animate_draw(drawn_uids)
       for _, c in ipairs(self.state.hand) do if c.uid == uid then name = c.def.name break end end
       self.card_anims[#self.card_anims + 1] = {
         from = origin, to = dest, elapsed = 0, delay = (i - 1) * DRAW_STAGGER,
-        duration = FLIGHT_DURATION, fade_in = true, name = name,
+        duration = FLIGHT_DURATION, fade_in = true, name = name, uid = uid,
       }
     end
   end
@@ -349,6 +354,10 @@ function Controller:advance_after_discard_sequenced()
       self_.state.turn = self_.state.turn + 1
       Game.start_turn(self_.state)
       self_:consume_drawn_animation()
+      -- Le Pouvoir de Classe du Guerrier (coups gratuits) peut achever le
+      -- dernier ennemi dès Game.start_turn, avant même qu'une carte ne soit
+      -- jouée -- rien d'autre dans cette séquence ne vérifierait la victoire.
+      if self_.state.over then self_:enter_draft_screen() end
     end)
   end)
 end
@@ -394,6 +403,7 @@ function Controller:choose_draft_card(index)
   self.card_anims = {}
   Game.start_next_combat(self.state)
   self:consume_drawn_animation()
+  if self.state.over then self:enter_draft_screen() end
 end
 
 return Controller

@@ -16,3 +16,6 @@ node_modules/
 # Secrets (clés API, etc. - jamais commit)
 .env
 .env.*
+
+# Builds distribuables (générés à la demande, pas du code source)
+dist/
