@@ -161,7 +161,6 @@ View.instant_victory_button = { x = View.restart_button.x + View.restart_button.
 -- d'entrée du test, pas un outil de debug caché.
 View.mode_toggle_button = { x = View.instant_victory_button.x + View.instant_victory_button.w + 10, y = 600, w = 124, h = 32 }
 View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
-View.mage_discard_all_button = { x = W / 2 + 150, y = 396, w = 110, h = 22, label = "tout défausser" }
 
 local function point_in(r, x, y)
   return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h
@@ -472,14 +471,23 @@ local function draw_hero(controller, h, r)
   love.graphics.setLineWidth(1)
 end
 
-local function enemy_telegraph_text(e)
+local function enemy_telegraph_text(state, e)
   if e.hp <= 0 then return "Vaincu." end
   local move = e.next_move
   if not move then return "" end
+  -- Montant réellement ajusté (2026-08-09, demande explicite) : la propre
+  -- Incapacité de l'ennemi ET la Vulnérabilité de sa cible (déjà fixée pour
+  -- tout le tour, pas besoin de survol) -- même calcul que la résolution
+  -- réelle (Combat.deal_damage, via resolve_enemy_attack), jamais une
+  -- deuxième formule dupliquée ici.
+  local target = e.target_hero_id and Combat.hero_by_id(state, e.target_hero_id)
+  local function adjusted(amount)
+    return Combat.round(amount * Combat.damage_multiplier(e, target, "physique", false))
+  end
   if move.kind == "dmg" or move.kind == "debuff" then
     local amount_text
     if move.kind == "dmg" then
-      amount_text = move.amount .. " dégâts" .. (move.brut and " brut" or "")
+      amount_text = adjusted(move.amount) .. " dégâts" .. (move.brut and " brut" or "")
     else
       amount_text = (Enemies.status_labels[move.status_key] or move.status_key) .. " " .. move.amount
     end
@@ -490,7 +498,16 @@ local function enemy_telegraph_text(e)
   elseif move.kind == "heal-ally" then
     return move.name .. " — soigne un allié de " .. move.amount .. " PV"
   elseif move.kind == "conditional-retaliate" then
-    return move.name .. " — riposte si touché (" .. move.amount .. ")"
+    -- Bug signalé (2026-08-09) : contrairement à dmg/debuff juste au-dessus,
+    -- cette branche n'affichait jamais la cible (`e.target_hero_id`, pourtant
+    -- déjà tirée par Encounter.roll_telegraphs -- voir Combat.TARGETABLE_MOVE_KINDS)
+    -- ni le fait que le Golem VA riposter une fois qu'il a déjà encaissé un coup
+    -- ce tour (`e.took_damage_this_turn`, lu par Game.resolve_enemy_action).
+    local vise = e.target_hero_id and ("\nvise " .. e.target_hero_id) or ""
+    if e.took_damage_this_turn then
+      return "Riposte (touché) — " .. adjusted(move.amount) .. " dégâts" .. vise
+    end
+    return move.name .. " — " .. adjusted(move.amount) .. " si touché" .. vise
   end
   return ""
 end
@@ -542,7 +559,7 @@ local function draw_enemy(controller, e, r)
     if (e.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = e.vulnerabilite } end
     draw_badge_row(badges, 0, 88, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
   end
-  text(enemy_telegraph_text(e), 0, 104, r.w, 8, Theme.accent)
+  text(enemy_telegraph_text(controller.state, e), 0, 104, r.w, 8, Theme.accent)
   draw_shield_fx(controller, e.id, r)
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
@@ -550,6 +567,65 @@ local function draw_enemy(controller, e, r)
 end
 
 -- ---------- main ----------
+
+-- Aperçu dynamique de Transcendance (2026-08-09, demande explicite) : au
+-- survol d'un héros pendant qu'une carte est sélectionnée, ses valeurs
+-- affichent ce qu'elles VONT valoir si CE héros la joue -- ex. Coup direct
+-- affiche 6 au lieu de 4 en survolant le Guerrier. Dérivé des mêmes règles
+-- que Combat.deal_damage/grant_defense/grant_heal/effective_cost (classe du
+-- héros + mot-clé de la carte) : jamais une deuxième copie de la logique de
+-- jeu, seule la substitution dans le texte affiché est propre à la vue.
+local function scale_near_keyword(text, keyword, factor)
+  local out = text
+  -- nombre AVANT le mot-clé, ex. `4 "epee"` (Coup direct)
+  out = out:gsub('(%d+)(%s+"' .. keyword .. '")', function(num, rest)
+    return tostring(Combat.round(tonumber(num) * factor)) .. rest
+  end)
+  -- nombre APRÈS le mot-clé, ex. `"soin" 2` (Lumière divine)
+  out = out:gsub('("' .. keyword .. '"%s+)(%d+)', function(pre, num)
+    return pre .. tostring(Combat.round(tonumber(num) * factor))
+  end)
+  return out
+end
+
+-- Mots-clés qui portent un montant de DÉGÂTS (par opposition à "bouclier"/
+-- "soin", qui suivent une règle de Transcendance à part -- Paladin +50%
+-- uniquement, jamais de cumul Puissance/Incapacité/Vulnérabilité dessus).
+local DAMAGE_KEYWORDS = { epee = true, etincelle = true, fireball = true }
+
+--- Aperçu du texte d'une carte si `hero` la joue (et, une fois la cible
+-- choisie/survolée, `target`) -- réutilise Combat.damage_multiplier (voir
+-- combat.lua : Puissance/Incapacité de l'attaquant + Vulnérabilité de la
+-- cible additionnés AVANT d'être appliqués, jamais composés en chaîne) pour
+-- que l'aperçu et la résolution réelle ne puissent jamais donner un nombre
+-- différent. `target` peut être nil (héros pas encore assigné à une cible) --
+-- la Vulnérabilité n'entre alors simplement pas encore en compte.
+local function preview_desc(def, hero, target)
+  local text = def.desc
+  local guerrier_epee_bonus = hero.class_id == "guerrier" and Glossary.has_keyword(def.desc, "epee")
+  local dmg_mult = Combat.damage_multiplier(hero, target, def.dmg_type, guerrier_epee_bonus)
+  if dmg_mult ~= 1 then
+    for kw in pairs(DAMAGE_KEYWORDS) do
+      if Glossary.has_keyword(def.desc, kw) then text = scale_near_keyword(text, kw, dmg_mult) end
+    end
+  end
+  if hero.class_id == "paladin" then
+    if Glossary.has_keyword(def.desc, "bouclier") then text = scale_near_keyword(text, "bouclier", 1.5) end
+    if Glossary.has_keyword(def.desc, "soin") then text = scale_near_keyword(text, "soin", 1.5) end
+  elseif hero.class_id == "assassin" and Glossary.has_keyword(def.desc, "epee") then
+    -- Pas un nombre existant à l'échelle -- la Transcendance Assassin AJOUTE
+    -- un effet absent du texte de base, donc une phrase en plus plutôt qu'une
+    -- substitution.
+    text = text .. " (Transcendance : Incapacité 1, Vulnérabilité 1.)"
+  end
+  return text
+end
+
+-- Coût effectif : réutilise directement Combat.effective_cost (le -2 Mage sur
+-- "sort"), jamais recalculé séparément ici.
+local function preview_cost(def, hero)
+  return Combat.effective_cost(hero, def)
+end
 
 local function draw_hand(controller)
   local state = controller.state
@@ -586,6 +662,27 @@ local function draw_hand(controller)
     local r = rects[c.uid]
     local def = c.def
     local is_pending = state.pending and state.pending.uid == c.uid
+    -- Aperçu de Transcendance (voir preview_desc/preview_cost ci-dessus) :
+    -- seulement sur LA carte sélectionnée. Deux étapes : héros pas encore
+    -- assigné -> on prévisualise celui survolé (pas de cible connue, la
+    -- Vulnérabilité n'entre pas encore en compte) ; héros déjà assigné et en
+    -- attente d'une cible -> le héros est fixé (pending.hero_id), et survoler
+    -- l'ennemi visé complète l'aperçu avec SA Vulnérabilité.
+    local previewing_hero, previewing_target = nil, nil
+    if is_pending and state.pending then
+      if state.pending.hero_id then
+        previewing_hero = Combat.hero_by_id(state, state.pending.hero_id)
+        if controller.hover.kind == "enemy" then previewing_target = Combat.enemy_by_id(state, controller.hover.target) end
+      elseif controller.hover.kind == "hero" then
+        previewing_hero = Combat.hero_by_id(state, controller.hover.target)
+      end
+    end
+    local desc_text, cost_text, has_bonus = def.desc, def.cost, false
+    if previewing_hero then
+      desc_text, cost_text = preview_desc(def, previewing_hero, previewing_target), preview_cost(def, previewing_hero)
+      has_bonus = desc_text ~= def.desc or cost_text ~= def.cost
+    end
+    cost_text = tostring(cost_text)
     local scale, lift = 1, 0
     if popped then
       if is_pending then scale, lift = 1.16, 18 else scale, lift = 1.1, 10 end
@@ -603,13 +700,13 @@ local function draw_hand(controller)
 
     set(Theme.energy); love.graphics.circle("fill", 14, 12, 9)
     set(Theme.bg or { 0.05, 0.1, 0.1 })
-    love.graphics.setFont(Fonts.get(11)); love.graphics.printf(tostring(def.cost), 4, 6, 20, "center")
+    love.graphics.setFont(Fonts.get(11)); love.graphics.printf(cost_text, 4, 6, 20, "center")
 
     text(def.tier == "avance" and "Av." or "Dép.", 0, 2, r.w - 4, 8, Theme.muted, "right")
     -- Icône de classe retirée (2026-08-08, jugée inutile) : plus de place pour le
     -- texte de la carte, la chose la plus importante à lire vite en jeu.
-    text(def.name, 2, 22, r.w - 4, 9, Theme.text)
-    RichText.draw(def.desc, 3, 40, r.w - 6, 10, Theme.muted)
+    text(def.name, 2, 22, r.w - 4, 9, has_bonus and Theme.heal or Theme.text)
+    RichText.draw(desc_text, 3, 40, r.w - 6, 10, has_bonus and Theme.heal or Theme.muted)
     love.graphics.pop()
   end
 
@@ -651,7 +748,6 @@ local function hint_text(controller)
   local state = controller.state
   local pending = state.pending
   local arrow_mode = controller.input_mode == "arrow"
-  if state.mage_keep_pending then return "Fin de tour : clique la carte que le Mage garde, ou \"tout défausser\"." end
   if not pending then return "Clique une carte de ta main pour commencer." end
   if not pending.mode then
     if arrow_mode then return pending.def.name .. " sélectionnée — vise le haut (Jouer) ou le bas (Concentrer) d'un aventurier." end
@@ -664,13 +760,51 @@ end
 
 -- ---------- infobulle au survol (1s de délai, comme le prototype) ----------
 
+-- Statuts actifs à lister dans l'infobulle héros/ennemi (2026-08-09, demande
+-- explicite : "ajouter l'explication des statuts"). Mêmes champs que les
+-- badges déjà affichés (draw_badge_row) -- réutilise les explications déjà
+-- écrites dans le glossaire plutôt que d'en dupliquer le texte ; `defense`
+-- n'a pas d'entrée dédiée dans le glossaire (seulement le mot-clé de carte
+-- "bouclier"), d'où l'explication propre ci-dessous.
+local STATUS_TOOLTIP_FIELDS = {
+  { field = "defense", glossary_key = "bouclier", label = "Bouclier", explain = "Absorbe les prochains dégâts avant les PV." },
+  { field = "esquive", glossary_key = "esquive" },
+  { field = "camoufle", glossary_key = "camoufle", boolean = true },
+  { field = "puissance", glossary_key = "puissance" },
+  { field = "saignements", glossary_key = "saignement" },
+  { field = "incapacite", glossary_key = "incapacite" },
+  { field = "vulnerabilite", glossary_key = "vulnerabilite" },
+}
+
+local function active_status_lines(unit)
+  local lines = {}
+  for _, spec in ipairs(STATUS_TOOLTIP_FIELDS) do
+    local value = unit[spec.field]
+    local active = spec.boolean and value or (type(value) == "number" and value > 0)
+    if active then
+      local g = Glossary.find_term(spec.glossary_key)
+      local label = spec.label or (g and (g.label or g.icon)) or spec.field
+      local explain = spec.explain or (g and g.explain ~= "" and g.explain) or ""
+      local line_text = label .. (spec.boolean and "" or (" " .. value)) .. (explain ~= "" and (" — " .. explain) or "")
+      -- Sprites.status (pas Sprites.keyword/le has_icon du glossaire, qui ne
+      -- couvre que le texte de carte) -- ce sont les mêmes icônes déjà visibles
+      -- sur les badges de statut de l'encart, pas de nouvel asset à générer.
+      local icon = Sprites.status(spec.field)
+      lines[#lines + 1] = icon and { text = line_text, icon = icon } or line_text
+    end
+  end
+  return lines
+end
+
 local function tooltip_lines(controller)
   local h = controller.hover
   if h.kind == "hero" then
     local hero = Combat.hero_by_id(controller.state, h.target)
     if not hero then return nil end
     local p = Heroes.class_powers[hero.class_id]
-    return hero.name, { p.pouvoir, p.transcendance }
+    local lines = { p.transcendance }
+    for _, l in ipairs(active_status_lines(hero)) do lines[#lines + 1] = l end
+    return hero.name, lines
   elseif h.kind == "enemy" then
     local e = Combat.enemy_by_id(controller.state, h.target)
     if not e then return nil end
@@ -679,6 +813,7 @@ local function tooltip_lines(controller)
     for _, m in ipairs(template.moves_info(e.level)) do
       lines[#lines + 1] = m.name .. " — " .. m.text
     end
+    for _, l in ipairs(active_status_lines(e)) do lines[#lines + 1] = l end
     lines[#lines + 1] = "Niveau " .. e.level .. " · PV max " .. e.max_hp
     return e.name, lines
   elseif h.kind == "card" then
@@ -983,14 +1118,6 @@ function View.draw(controller)
   draw_mode_toggle(controller)
   text(hint_text(controller), 0, 632, W, 10, Theme.muted)
 
-  if state.mage_keep_pending then
-    panel(W / 2 - 300, 394, 600, 26, Theme.panel_light)
-    text("Pouvoir de Classe du Mage : clique une carte à GARDER.", W / 2 - 300, 400, 480, 10, Theme.status)
-    local b = View.mage_discard_all_button
-    set(Theme.muted); love.graphics.rectangle("line", b.x, b.y, b.w, b.h, 6, 6)
-    text(b.label, b.x, b.y + 5, b.w, 9, Theme.text)
-  end
-
   if controller.screen == "defeat" then
     set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
     text("Défaite…", 0, H / 2 - 40, W, 26, Theme.text)
@@ -1057,7 +1184,7 @@ function View.draw(controller)
   draw_card_flights(controller)
   draw_particles(controller)
   draw_floaters(controller)
-  if controller.screen == "playing" then draw_tooltip(controller) end
+  if controller.screen == "playing" or controller.screen == "draft" then draw_tooltip(controller) end
 
   love.graphics.setColor(1, 1, 1, 1)
 end

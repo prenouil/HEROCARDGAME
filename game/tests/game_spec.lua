@@ -23,28 +23,6 @@ describe("Game.reset_run", function()
   end)
 end)
 
-describe("Game.start_turn — Pouvoir de Classe du Guerrier", function()
-  it("inflige 2 dégâts gratuits par carte 'epee' en main, sur un ennemi vivant", function()
-    local state = Game.new_state()
-    state.heroes = {
-      { id = "guerrier", class_id = "guerrier", name = "Guerrier", icon = "", hp = 18, max_hp = 18,
-        energy = 0, defense = 0, esquive = 0, camoufle = false, incapacite = 0, vulnerabilite = 0,
-        puissance = 0, saignements = 0, has_acted = false },
-    }
-    local coup_estoc = Cards.by_code("coup-estoc") -- carte "epee"
-    state.deck = {}
-    for i = 1, 5 do state.deck[i] = { uid = i, def = coup_estoc } end
-    local enemy = Encounter.instantiate_enemy(Enemies.by_id("gobelin"), 1, function() return 1 end)
-    enemy.hp = 100; enemy.max_hp = 100
-    state.enemies = { enemy }
-
-    Game.start_turn(state)
-
-    assert.equal(5, #state.hand) -- les 5 cartes "epee" piochées
-    assert.equal(80, enemy.hp) -- 100 - 5*2 (GUERRIER_FREE_HIT_DMG)
-  end)
-end)
-
 describe("Flux de jeu : jouer une carte", function()
   it("dépense l'énergie, applique l'effet, et défausse la carte", function()
     local state = Game.new_state()
@@ -114,7 +92,7 @@ describe("Flux de jeu : fin de tour et résolution ennemie", function()
     state.deck = {}
 
     local result = Game.end_turn_requested(state)
-    assert.equal("discarded", result)
+    assert.is_true(result)
     assert.equal(0, #state.hand)
     assert.equal(1, #state.discard)
 

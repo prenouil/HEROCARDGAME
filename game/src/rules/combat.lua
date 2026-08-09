@@ -60,34 +60,52 @@ function Combat.log(state, text, cls)
   state.log[#state.log + 1] = { text = text, cls = cls }
 end
 
+--- Multiplicateur total de dégâts pour un coup donné : Puissance/Incapacité de
+-- l'unité qui frappe, Vulnérabilité de l'unité qui encaisse, et le bonus de
+-- Transcendance Guerrier le cas échéant. TOUS les pourcentages sont additionnés
+-- D'ABORD puis appliqués une seule fois -- jamais composés en chaîne (8 dégâts
+-- +50% et +25% => +75% => 14, PAS 8×1.5×1.25=15 -- règle explicite du porteur
+-- de projet, 2026-08-09). Pure, aucun effet de bord -- réutilisée telle quelle
+-- par Combat.deal_damage (résolution réelle) et par l'aperçu au survol
+-- (voir view.lua), pour que les deux ne puissent jamais diverger.
+-- `source_unit` : hero OU enemy table (les deux partagent puissance/incapacite) --
+-- PAS forcément le `source_hero` passé à deal_damage, voir opts.source_unit
+-- ci-dessous (une attaque ennemie n'a pas de source_hero, mais l'ennemi qui
+-- frappe doit quand même voir SA PROPRE Incapacité réduire SES dégâts).
+function Combat.damage_multiplier(source_unit, target_unit, dmg_type, guerrier_epee_bonus)
+  local pct = 0
+  if guerrier_epee_bonus then pct = pct + 0.5 end
+  if source_unit and (source_unit.puissance or 0) > 0 and dmg_type == "physique" then
+    pct = pct + 0.25 * source_unit.puissance -- Puissance (Assassin, via Concentration) : par stack
+  end
+  if source_unit and (source_unit.incapacite or 0) > 0 then
+    pct = pct - 0.25 -- Incapacité : -25% flat, peu importe le nombre de stacks (comme Vulnérabilité)
+  end
+  if target_unit and (target_unit.vulnerabilite or 0) > 0 then
+    pct = pct + 0.25 -- Vulnérabilité : +25% flat
+  end
+  return 1 + pct
+end
+
 --- Inflige des dégâts, avec tous les modificateurs de Transcendance/statuts.
--- source_hero: hero table ou nil (attaque ennemie / dégâts sans source).
+-- source_hero: hero table ou nil (attaque ennemie / dégâts sans source) --
+-- conditionne aussi le texte/la couleur du log, ne PAS renommer en "source_unit"
+-- partout pour autant (voir opts.source_unit).
 -- target_unit: hero ou enemy table (les deux partagent hp/defense/incapacite/vulnerabilite).
 -- ctx: {state, hero, target, card_def} ou nil — nécessaire pour les bonus liés au texte de la carte jouée.
--- opts: { brut = bool } — brut ignore la Défense.
+-- opts: { brut = bool, source_unit = unit } — brut ignore la Défense ; source_unit
+-- (optionnel) précise QUI porte Puissance/Incapacité pour le calcul du multiplicateur
+-- quand ce n'est pas source_hero (une attaque ennemie passe l'ennemi qui frappe ici,
+-- sans changer source_hero=nil et donc sans changer le texte/la couleur du log).
 function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx, opts)
   opts = opts or {}
-  local amount = base
+  local source_unit = opts.source_unit or source_hero
 
   -- Transcendance Guerrier : +50% sur toute carte "epee" jouée PAR le Guerrier,
   -- quelle que soit sa classe d'origine (Coup direct générique, Blessure ouverte
   -- de l'Assassin, etc.) — pas seulement les cartes de la classe Guerrier.
-  if ctx and source_hero and source_hero.class_id == "guerrier" and Glossary.has_keyword(ctx.card_def.desc, "epee") then
-    amount = amount * 1.5
-  end
-  if source_hero and (source_hero.puissance or 0) > 0 and dmg_type == "physique" then
-    amount = amount * (1 + 0.25 * source_hero.puissance) -- Puissance (Assassin, via Concentration)
-  end
-  if (target_unit.incapacite or 0) > 0 and not source_hero then
-    amount = amount * 0.75 -- Incapacité n'est jamais posée que sur des ennemis dans ce jeu de cartes
-  end
-  if source_hero and (source_hero.incapacite or 0) > 0 then
-    amount = amount * 0.75
-  end
-  if (target_unit.vulnerabilite or 0) > 0 then
-    amount = amount * 1.25
-  end
-  amount = round(amount)
+  local guerrier_epee_bonus = ctx and source_hero and source_hero.class_id == "guerrier" and Glossary.has_keyword(ctx.card_def.desc, "epee")
+  local amount = round(base * Combat.damage_multiplier(source_unit, target_unit, dmg_type, guerrier_epee_bonus))
 
   local absorbed = 0
   if not opts.brut then

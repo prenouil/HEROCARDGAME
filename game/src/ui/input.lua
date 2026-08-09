@@ -1,7 +1,7 @@
 -- Traduit les clics/survol souris en appels au Controller. Toute la logique de
--- "qui est cliquable maintenant" est dérivée de state.pending / state.mage_keep_pending,
--- jamais dupliquée : on relit les mêmes conditions que la séquence à 3 temps du
--- prototype (carte -> héros -> cible).
+-- "qui est cliquable maintenant" est dérivée de state.pending, jamais dupliquée :
+-- on relit les mêmes conditions que la séquence à 3 temps du prototype
+-- (carte -> héros -> cible).
 
 local View = require("src.ui.view")
 local Combat = require("src.rules.combat")
@@ -33,16 +33,6 @@ local function mousepressed_tap(controller, x, y, button)
   end
 
   -- screen == "playing"
-  if state.mage_keep_pending then
-    if View.point_in(View.mage_discard_all_button, x, y) then
-      controller:choose_mage_keep_none()
-      return
-    end
-    local hand_id = find_rect(View.hand_rects(state), x, y)
-    if hand_id then controller:select_card(hand_id) end
-    return
-  end
-
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
@@ -111,16 +101,6 @@ local function mousepressed_arrow(controller, x, y, button)
   end
 
   -- screen == "playing"
-  if state.mage_keep_pending then
-    if View.point_in(View.mage_discard_all_button, x, y) then
-      controller:choose_mage_keep_none()
-      return
-    end
-    local hand_id = find_rect(View.hand_rects(state), x, y)
-    if hand_id then controller:select_card(hand_id) end
-    return
-  end
-
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
@@ -200,11 +180,6 @@ local function is_hovering_clickable_tap(controller, x, y)
     return false
   end
 
-  if state.mage_keep_pending then
-    if View.point_in(View.mage_discard_all_button, x, y) then return true end
-    return find_rect(View.hand_rects(state), x, y) ~= nil
-  end
-
   if View.point_in(View.end_turn_button, x, y) then return true end
   if View.point_in(View.restart_button, x, y) then return true end
   if View.point_in(View.instant_victory_button, x, y) then return true end
@@ -252,11 +227,6 @@ local function is_hovering_clickable_arrow(controller, x, y)
     return false
   end
 
-  if state.mage_keep_pending then
-    if View.point_in(View.mage_discard_all_button, x, y) then return true end
-    return find_rect(View.hand_rects(state), x, y) ~= nil
-  end
-
   if View.point_in(View.end_turn_button, x, y) then return true end
   if View.point_in(View.restart_button, x, y) then return true end
   if View.point_in(View.instant_victory_button, x, y) then return true end
@@ -295,6 +265,22 @@ function Input.is_hovering_clickable(controller, x, y)
 end
 
 function Input.mousemoved(controller, x, y)
+  -- Écran de draft (2026-08-09, bug signalé) : aucune infobulle mot-clé sur les
+  -- 3 cartes de loot, parce que cette fonction s'arrêtait net hors "playing".
+  -- Gardé par draft_card_ready comme le clic -- pas de survol tant que la carte
+  -- est encore de dos.
+  if controller.screen == "draft" then
+    local rects = View.draft_rects(controller)
+    for i, r in ipairs(rects) do
+      if View.point_in(r, x, y) and controller:draft_card_ready(i) then
+        controller:set_hover("card", controller.draft_picks[i])
+        return
+      end
+    end
+    controller:set_hover(nil, nil)
+    return
+  end
+
   if controller.screen ~= "playing" then controller:set_hover(nil, nil); return end
   local state = controller.state
 

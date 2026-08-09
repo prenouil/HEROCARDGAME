@@ -106,8 +106,8 @@ function Controller:reset_run()
   self.shield_fx = {}
   Game.reset_run(self.state)
   self:consume_drawn_animation()
-  -- Game.start_turn (appelé par reset_run) peut déclencher la victoire via le
-  -- Pouvoir de Classe du Guerrier (coups gratuits) -- même garde qu'ailleurs.
+  -- Game.start_turn (appelé par reset_run) ne peut plus infliger de dégâts à
+  -- ce jour -- garde-fou conservé par précaution, voir advance_after_discard_sequenced.
   if self.state.over then self:enter_draft_screen() end
 end
 
@@ -361,13 +361,6 @@ end
 
 function Controller:select_card(uid)
   if self.screen ~= "playing" or self.state.over then return end
-  if self.state.mage_keep_pending then
-    local hand_before = Game.shallow_copy(self.state.hand)
-    Game.resolve_mage_keep(self.state, uid)
-    self:animate_discard_snapshot(hand_before, uid)
-    self:advance_after_discard_sequenced()
-    return
-  end
   Game.select_card(self.state, uid)
 end
 
@@ -434,19 +427,10 @@ end
 
 function Controller:end_turn()
   local hand_before = Game.shallow_copy(self.state.hand)
-  local result = Game.end_turn_requested(self.state)
-  if result == "discarded" then
+  if Game.end_turn_requested(self.state) then
     self:animate_discard_snapshot(hand_before)
     self:advance_after_discard_sequenced()
   end
-  -- result == "mage-keep" : la UI affiche déjà le bandeau via state.mage_keep_pending.
-end
-
-function Controller:choose_mage_keep_none()
-  local hand_before = Game.shallow_copy(self.state.hand)
-  Game.resolve_mage_keep_none(self.state)
-  self:animate_discard_snapshot(hand_before)
-  self:advance_after_discard_sequenced()
 end
 
 --- Équivalent discardThenAdvance + advanceAfterDiscard, paceé sur le séquenceur :
@@ -486,11 +470,12 @@ function Controller:advance_after_discard_sequenced()
       -- skip_shield_sfx : la Défense de chaque héros retombe à 0 ici (reset de
       -- tour, pas un blocage de dégâts) -- sans cette garde, "shting" jouerait
       -- à chaque tour pour quiconque avait de la Défense restante.
-      self_:react_to_diff(turn_before, { skip_shield_sfx = true }) -- coups gratuits du Pouvoir de Classe du Guerrier compris
+      self_:react_to_diff(turn_before, { skip_shield_sfx = true })
       self_:consume_drawn_animation()
-      -- Le Pouvoir de Classe du Guerrier (coups gratuits) peut achever le
-      -- dernier ennemi dès Game.start_turn, avant même qu'une carte ne soit
-      -- jouée -- rien d'autre dans cette séquence ne vérifierait la victoire.
+      -- Game.start_turn ne peut plus, à ce jour, infliger de dégâts (les
+      -- Pouvoirs de Classe qui le faisaient ont été retirés) -- ce garde-fou
+      -- reste par précaution si un futur pouvoir redonnait ce pouvoir à
+      -- start_turn, plutôt que d'être supprimé puis oublié le jour venu.
       if self_.state.over then self_:enter_draft_screen() end
     end)
   end)

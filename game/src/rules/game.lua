@@ -9,7 +9,6 @@
 -- moins tout ce qui est rendu DOM/animation (déplacé en src/ui).
 
 local Heroes = require("src.data.heroes")
-local Glossary = require("src.data.glossary")
 local Enemies = require("src.data.enemies")
 local Combat = require("src.rules.combat")
 local Deck = require("src.rules.deck")
@@ -50,8 +49,8 @@ end
 function Game.new_state()
   return {
     heroes = {}, enemies = {}, deck = {}, hand = {}, discard = {},
-    pending = nil, turn = 1, over = false, mage_keep_pending = false,
-    paladin_revive_used = false, run = { combat_index = 1 }, draft_picks = nil,
+    pending = nil, turn = 1, over = false,
+    run = { combat_index = 1 }, draft_picks = nil,
     combat_snapshot = nil, uid_counter = 0, log = {},
   }
 end
@@ -66,7 +65,7 @@ function Game.snapshot_combat(state)
   for i, c in ipairs(state.deck) do deck[i] = c end
   state.combat_snapshot = {
     heroes = heroes, enemies = enemies, deck = deck,
-    combat_index = state.run.combat_index, paladin_revive_used = state.paladin_revive_used,
+    combat_index = state.run.combat_index,
   }
 end
 
@@ -84,8 +83,7 @@ function Game.restore_combat_snapshot(state)
   for i, c in ipairs(snap.deck) do deck[i] = c end
   state.deck = deck
   state.run.combat_index = snap.combat_index
-  state.paladin_revive_used = snap.paladin_revive_used
-  state.hand = {}; state.discard = {}; state.pending = nil; state.mage_keep_pending = false
+  state.hand = {}; state.discard = {}; state.pending = nil
   state.turn = 1; state.over = false
   state.log = {}
   Combat.log(state, "Combat " .. state.run.combat_index .. " relancé depuis le début.", "sys")
@@ -97,7 +95,6 @@ function Game.reset_run(state)
   local heroes = {}
   for i, def in ipairs(Heroes.defs) do heroes[i] = fresh_hero(def) end
   state.heroes = heroes
-  state.paladin_revive_used = false
   state.run = { combat_index = 1 }
   local budget = Encounter.budget_for_combat(1)
   local instances = Encounter.generate_encounter(budget)
@@ -107,7 +104,7 @@ function Game.reset_run(state)
   end
   state.enemies = enemies
   state.deck = Deck.build_starting_deck(function() return Game.next_uid(state) end)
-  state.hand = {}; state.discard = {}; state.pending = nil; state.mage_keep_pending = false
+  state.hand = {}; state.discard = {}; state.pending = nil
   state.turn = 1; state.over = false
   state.log = {}
   Combat.log(state, "Run Infini — Combat 1 (budget " .. budget .. ") : " .. Encounter.summary(state.enemies), "sys")
@@ -122,7 +119,6 @@ function Game.start_next_combat(state)
   local heroes = {}
   for i, h in ipairs(state.heroes) do heroes[i] = carried_hero(h) end
   state.heroes = heroes
-  state.paladin_revive_used = false
   local instances = Encounter.generate_encounter(budget)
   local enemies = {}
   for i, inst in ipairs(instances) do
@@ -134,7 +130,7 @@ function Game.start_next_combat(state)
   for _, c in ipairs(state.hand) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.discard) do reclaimed[#reclaimed + 1] = c end
   state.deck = Deck.shuffle(reclaimed)
-  state.hand = {}; state.discard = {}; state.pending = nil; state.mage_keep_pending = false
+  state.hand = {}; state.discard = {}; state.pending = nil
   state.turn = 1
   state.log = {}
   Combat.log(state, "Combat " .. state.run.combat_index .. " (budget " .. budget .. ") : " .. Encounter.summary(state.enemies), "sys")
@@ -145,7 +141,7 @@ end
 -- ---------- début de tour ----------
 
 --- Équivalent startTurn : +1 énergie, statuts qui décroissent, télégraphie
--- ennemie, pioche à HAND_SIZE, coups gratuits du Pouvoir de Classe Guerrier.
+-- ennemie, pioche à HAND_SIZE.
 -- Retourne la liste des uids piochés (pour que la UI puisse les animer).
 function Game.start_turn(state)
   if state.over then return {} end
@@ -159,27 +155,8 @@ function Game.start_turn(state)
   end
   Combat.log(state, "— Tour " .. state.turn .. " : +1 énergie, pioche à " .. Deck.HAND_SIZE .. " —", "sys")
 
-  local guerrier = Combat.hero_by_id(state, "guerrier")
   Encounter.roll_telegraphs(state)
   local drawn = Deck.fill_hand(state)
-
-  if guerrier and guerrier.hp > 0 then
-    local melee_count = 0
-    for _, c in ipairs(state.hand) do
-      if Glossary.has_keyword(c.def.desc, "epee") then melee_count = melee_count + 1 end
-    end
-    for _ = 1, melee_count do
-      local targets = Combat.living_enemies(state)
-      if #targets == 0 then break end
-      local t = targets[math.random(#targets)]
-      Combat.log(state, "Pouvoir de Classe du Guerrier : coup gratuit sur " .. t.name .. ".", "power")
-      Combat.deal_damage(state, guerrier, t, Heroes.GUERRIER_FREE_HIT_DMG, "physique", nil)
-    end
-    -- Contrairement à resolve_pending, ces dégâts ne passent pas par un
-    -- pending de carte -- rien d'autre ne vérifie la victoire si ce coup
-    -- gratuit achève le dernier ennemi.
-    Game.check_victory(state)
-  end
 
   return drawn
 end
@@ -198,8 +175,7 @@ local function revert_pending_hero_lock(state)
   end
 end
 
---- Sélectionne/désélectionne une carte de la main (équivalent onHandCardClicked,
--- moins la branche "Pouvoir de Classe du Mage" traitée séparément par la UI).
+--- Sélectionne/désélectionne une carte de la main (équivalent onHandCardClicked).
 function Game.select_card(state, uid)
   if state.pending and state.pending.uid == uid then
     revert_pending_hero_lock(state)
@@ -242,11 +218,6 @@ function Game.assign_hero(state, hero_id)
   if pending.mode == "concentrate" then
     hero.energy = hero.energy + 1
     Combat.log(state, hero.name .. " se concentre avec " .. def.name .. " (+1 énergie).", "you")
-    if hero.class_id == "assassin" then
-      hero.camoufle = true
-      hero.puissance = (hero.puissance or 0) + 2
-      Combat.log(state, hero.name .. " devient Camouflé et gagne Puissance 2 !", "power")
-    end
     Game.finish_card(state, pending)
     return true
   end
@@ -311,40 +282,18 @@ function Game.finish_card(state, pending, ctx)
   state.pending = nil
 end
 
--- ---------- fin de tour / pouvoir de classe du Mage ----------
+-- ---------- fin de tour ----------
 
+--- Retourne true si la main a bien été défaussée (rien à faire si la partie
+-- est déjà terminée).
 function Game.end_turn_requested(state)
-  -- Retourne "mage-keep" si la UI doit demander au joueur quelle carte garder,
-  -- sinon défausse tout de suite et renvoie "discarded".
-  if state.over or state.mage_keep_pending then return nil end
+  if state.over then return false end
   state.pending = nil
-  local mage = Combat.hero_by_id(state, "mage")
-  if mage and mage.hp > 0 and #state.hand > 0 then
-    state.mage_keep_pending = true
-    return "mage-keep"
-  end
   if #state.hand > 0 then
     Combat.log(state, #state.hand .. " carte(s) non jouée(s) défaussée(s).", "sys")
   end
   Game.discard_cards(state, Game.shallow_copy(state.hand))
-  return "discarded"
-end
-
-function Game.resolve_mage_keep(state, uid)
-  local rest = {}
-  for _, c in ipairs(state.hand) do
-    if c.uid ~= uid then rest[#rest + 1] = c end
-  end
-  state.mage_keep_pending = false
-  if #rest > 0 then Combat.log(state, #rest .. " carte(s) défaussée(s) (le Mage en garde 1).", "sys") end
-  Game.discard_cards(state, rest)
-end
-
--- Le Pouvoir de Classe du Mage est une option, pas une obligation.
-function Game.resolve_mage_keep_none(state)
-  state.mage_keep_pending = false
-  if #state.hand > 0 then Combat.log(state, #state.hand .. " carte(s) défaussée(s) (le Mage ne garde rien).", "sys") end
-  Game.discard_cards(state, Game.shallow_copy(state.hand))
+  return true
 end
 
 --- Déplace les cartes données de la main vers la défausse (pure — la UI gère
@@ -381,15 +330,6 @@ function Game.tick_bleed(state)
   end
 end
 
-local function try_paladin_revive(state, hero)
-  if state.paladin_revive_used then return end
-  local paladin = Combat.hero_by_id(state, "paladin")
-  if not paladin or paladin.hp <= 0 then return end
-  hero.hp = 1
-  state.paladin_revive_used = true
-  Combat.log(state, "Pouvoir de Classe du Paladin : " .. hero.name .. " se relève avec 1 PV !", "power")
-end
-
 local function resolve_enemy_attack(state, e, amount, brut)
   local target = Combat.hero_by_id(state, e.target_hero_id)
   if not target or target.hp <= 0 then return end
@@ -398,8 +338,12 @@ local function resolve_enemy_attack(state, e, amount, brut)
     Combat.log(state, e.name .. " utilise " .. e.next_move.name .. " sur " .. target.name .. "… esquivé !", "sys")
     return
   end
-  Combat.deal_damage(state, nil, target, amount, "physique", nil, { brut = brut })
-  if target.hp <= 0 then try_paladin_revive(state, target) end
+  -- source_unit = e (pas source_hero, qui reste nil pour garder le texte/la
+  -- couleur "foe" du journal) : la propre Incapacité de l'ennemi qui frappe
+  -- doit réduire SES dégâts -- jusqu'ici jamais lue nulle part (bug signalé,
+  -- 2026-08-09 -- Lâcheté pose bien Incapacité sur un ennemi, mais rien n'en
+  -- tenait compte à la résolution).
+  Combat.deal_damage(state, nil, target, amount, "physique", nil, { brut = brut, source_unit = e })
 end
 
 --- Résout l'action télégraphiée d'un seul ennemi (équivalent d'une itération
