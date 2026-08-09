@@ -58,6 +58,13 @@ function View.hero_rects(state)
   return out
 end
 
+-- Point d'ancrage unique héros-ou-ennemi (2026-08-09) : utilisé par les VFX
+-- qui n'ont besoin que "où est cette unité à l'écran" (nombre flottant, burst
+-- d'impact), sans savoir de quel côté elle est.
+function View.unit_rect(state, unit_id)
+  return View.hero_rects(state)[unit_id] or View.enemy_rects(state)[unit_id]
+end
+
 -- Boutons "Jouer"/"Se concentrer" par héros (2026-08-08) : un clic choisit à
 -- la fois le mode ET le héros en un seul geste, ancré au bas de chaque
 -- encart. Coords locales (relatives au coin haut-gauche de la carte) --
@@ -210,24 +217,39 @@ end
 
 --- Icône de statut (voir src/ui/icons.lua) avec sa valeur numérique à côté
 -- (value peut être nil, ex. Camouflage qui n'a pas de compteur) ; repli texte
--- "ABBR valeur" si la clé n'a pas d'icône dessinée.
-local function status_badge(status_key, abbr, value, x, y, w, size, color)
-  local drawn = Icons.draw_status(status_key, x + size * 0.55, y + size / 2, size * 0.42, color or Theme.status)
+-- "ABBR valeur" si la clé n'a pas d'icône dessinée. `pop_t`/`pop_duration`
+-- (2026-08-09, optionnels) : le badge part agrandi et retombe à sa taille
+-- normale pendant `pop_duration` -- signale visuellement qu'il vient d'être
+-- appliqué, sans rien changer quand ils sont absents (statut déjà présent).
+local function status_badge(status_key, abbr, value, x, y, w, size, color, pop_t, pop_duration)
+  local cx, cy = x + size * 0.55, y + size / 2
+  local scale = 1
+  if pop_t and pop_duration then
+    scale = 1 + 0.5 * (1 - math.min(1, pop_t / pop_duration))
+  end
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.scale(scale, scale)
+  love.graphics.translate(-cx, -cy)
+  local drawn = Icons.draw_status(status_key, cx, cy, size * 0.42, color or Theme.status)
   if drawn then
     if value then text(tostring(value), x + size * 0.85, y + size * 0.18, w - size * 0.85, size * 0.72, color, "left") end
   else
     text(abbr .. (value and (" " .. value) or ""), x, y, w, size, color)
   end
+  love.graphics.pop()
 end
 
 --- Une ligne de badges de statut, chacun avec son icône dessinée + valeur (ou
 -- son repli texte), répartis à parts égales sur la largeur donnée. `items` :
 -- liste de { key = "defense", abbr = "DEF", value = 3 } (value optionnelle).
-local function draw_badge_row(items, x, y, w, size, color)
+-- `pop_lookup` (optionnel) : table [status_key] = elapsed, voir Controller.status_pop.
+local function draw_badge_row(items, x, y, w, size, color, pop_lookup, pop_duration)
   if #items == 0 then return end
   local slot = w / #items
   for i, it in ipairs(items) do
-    status_badge(it.key, it.abbr, it.value, x + (i - 1) * slot, y, slot, size, color)
+    local pop_t = pop_lookup and pop_lookup[it.key]
+    status_badge(it.key, it.abbr, it.value, x + (i - 1) * slot, y, slot, size, color, pop_t, pop_duration)
   end
 end
 
@@ -270,6 +292,41 @@ end
 local function flip_scale_x(t, duration)
   local p = math.min(1, math.max(0, t / duration))
   return math.abs(math.cos(p * math.pi))
+end
+
+--- Silhouette de bouclier indépendante de celle d'Icons.draw_shield -- celle-ci
+-- ignore l'alpha qu'on lui passe (`set(color)` interne y fixe toujours 1, pensé
+-- pour des badges toujours à pleine opacité) ; ici il faut un vrai fondu, d'où
+-- cette petite copie plutôt qu'un module partagé à retoucher pour un seul usage.
+local function draw_big_shield(cx, cy, r, color, alpha)
+  set(color, alpha)
+  local hw, hh = r * 0.65, r * 0.85
+  love.graphics.polygon("fill",
+    cx - hw, cy - hh, cx + hw, cy - hh, cx + hw, cy - hh * 0.15,
+    cx, cy + hh, cx - hw, cy - hh * 0.15)
+end
+
+--- Gros bouclier en fondu (2026-08-09, retour du porteur de projet) sur un
+-- gain de Défense : 1s, fondu entrant/sortant, `r` = rect LOCAL de la carte
+-- (déjà dans l'espace translaté de draw_hero/draw_enemy).
+local function draw_shield_fx(controller, unit_id, r)
+  local s = controller.shield_fx[unit_id]
+  if not s then return end
+  local dur = controller.shield_fx_duration
+  local t = s.t
+  local alpha
+  if t < dur * 0.2 then
+    alpha = t / (dur * 0.2)
+  elseif t > dur * 0.7 then
+    alpha = 1 - (t - dur * 0.7) / (dur * 0.3)
+  else
+    alpha = 1
+  end
+  -- Theme.def existe dans la palette mais n'était utilisé nulle part -- couleur
+  -- dédiée à la Défense plutôt que de recycler Theme.energy (déjà pris par
+  -- l'affichage d'énergie et le ciblage en mode flèche).
+  draw_big_shield(r.w / 2, r.h / 2, r.w * 0.4, Theme.def, alpha * 0.9)
+  love.graphics.setColor(1, 1, 1, 1)
 end
 
 -- ---------- unités (héros/ennemis) ----------
@@ -397,7 +454,7 @@ local function draw_hero(controller, h, r)
     if h.camoufle then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
     if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
     if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
-    draw_badge_row(badges, 0, 112, r.w, 16, Theme.status)
+    draw_badge_row(badges, 0, 112, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
   end
 
   -- Voile gris par-dessus tout le contenu déjà dessiné (cadre compris) quand
@@ -407,6 +464,8 @@ local function draw_hero(controller, h, r)
     set(Theme.black, 0.55)
     love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
   end
+
+  draw_shield_fx(controller, h.id, r)
 
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
@@ -481,9 +540,10 @@ local function draw_enemy(controller, e, r)
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
     if (e.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = e.vulnerabilite } end
-    draw_badge_row(badges, 0, 88, r.w, 16, Theme.status)
+    draw_badge_row(badges, 0, 88, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
   end
   text(enemy_telegraph_text(e), 0, 104, r.w, 8, Theme.accent)
+  draw_shield_fx(controller, e.id, r)
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setLineWidth(1)
@@ -678,7 +738,66 @@ local function draw_card_flights(controller)
   love.graphics.setLineWidth(1)
 end
 
+-- Nombre de dégâts/soin flottant (2026-08-09, party "amélioration des
+-- visuels") : monte et s'estompe depuis Controller:spawn_floater, couleur
+-- selon le sens (dégâts/soin) -- pas de logique de jeu ici, juste l'interpolation.
+local FLOATER_RISE = 34
+local FLOATER_COLOR = { damage = "hp", heal = "heal" }
+-- Retour du porteur de projet (2026-08-09) : les dégâts doivent taper plus
+-- fort visuellement -- police nettement plus grosse + un zoom qui dépasse puis
+-- se stabilise (ease_out_back, déjà utilisé pour le titre "Victoire !", pas
+-- une nouvelle courbe). Le soin garde le traitement d'origine, plus discret.
+local DAMAGE_FLOATER_SIZE = 26
+local HEAL_FLOATER_SIZE = 15
+local DAMAGE_ZOOM_DURATION = 0.22
+
+local function draw_floaters(controller)
+  for _, f in ipairs(controller.floaters) do
+    local p = math.min(1, f.t / controller.floater_duration)
+    local ease = 1 - (1 - p) ^ 2
+    local y = f.y - ease * FLOATER_RISE
+    local alpha = 1 - p * p
+    set(Theme[FLOATER_COLOR[f.kind]] or Theme.text, alpha)
+    if f.kind == "damage" then
+      local zoom = ease_out_back(f.t, DAMAGE_ZOOM_DURATION)
+      love.graphics.setFont(Fonts.get(DAMAGE_FLOATER_SIZE))
+      love.graphics.push()
+      love.graphics.translate(f.x, y)
+      love.graphics.scale(zoom, zoom)
+      love.graphics.printf(f.text, -40, -DAMAGE_FLOATER_SIZE / 2, 80, "center")
+      love.graphics.pop()
+    else
+      love.graphics.setFont(Fonts.get(HEAL_FLOATER_SIZE))
+      love.graphics.printf(f.text, f.x - 40, y, 80, "center")
+    end
+  end
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
+-- Petit burst de pixels à l'impact (2026-08-09) : quelques carrés qui giclent
+-- et retombent légèrement avant de s'estomper -- volontairement fait à la
+-- main (pas de love.graphics.ParticleSystem, pas de nouvel asset), pour
+-- rester dans l'esprit pixel art plutôt que d'y superposer un vrai système de
+-- particules (garde-fou explicite : rester simple, ne pas noyer le style).
+local PARTICLE_GRAVITY = 160
+
+local function draw_particles(controller)
+  for _, pt in ipairs(controller.particles) do
+    local p = math.min(1, pt.t / controller.particle_duration)
+    local x = pt.x + pt.vx * pt.t
+    local y = pt.y + pt.vy * pt.t + 0.5 * PARTICLE_GRAVITY * pt.t * pt.t
+    set(Theme.hp, 1 - p)
+    love.graphics.rectangle("fill", x - 2, y - 2, 4, 4)
+  end
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
 local function draw_tooltip(controller)
+  -- Retour du porteur de projet (2026-08-09) : la fenêtre d'infobulle gâchait
+  -- la lecture du combat pendant le ciblage -- une carte sélectionnée (choix de
+  -- l'aventurier ou de la cible en cours) suspend l'infobulle entièrement,
+  -- quel que soit le mode d'entrée (tap ou flèche).
+  if controller.state.pending then return end
   if not controller:hover_ready() then return end
   local title, lines = tooltip_lines(controller)
   if not title then return end
@@ -739,18 +858,57 @@ end
 -- carte en a besoin -- couleur dérivée des mêmes conditions d'éligibilité que
 -- les cadres verts/bleus déjà en place (Combat.can_play/can_concentrate, cible
 -- vivante), jamais une logique de validité dupliquée.
+local function quad_bezier(t, x0, y0, cx, cy, x1, y1)
+  local mt = 1 - t
+  return mt * mt * x0 + 2 * mt * t * cx + t * t * x1,
+    mt * mt * y0 + 2 * mt * t * cy + t * t * y1
+end
+
+local function quad_bezier_tangent(t, x0, y0, cx, cy, x1, y1)
+  local mt = 1 - t
+  return 2 * mt * (cx - x0) + 2 * t * (x1 - cx),
+    2 * mt * (cy - y0) + 2 * t * (y1 - cy)
+end
+
+--- Chaîne courbe de petits maillons plutôt qu'un trait droit (2026-08-09,
+-- retour esthétique du porteur de projet, référence visuelle façon Slay the
+-- Spire) : courbe de Bézier quadratique (cambrure + léger balancement dans le
+-- temps pour un effet "vivant"), maillons = petits rectangles arrondis
+-- orientés sur la tangente locale de la courbe, pointe à l'arrivée orientée
+-- pareil (pas sur le segment droit origine->souris).
 local function draw_arrow(x1, y1, x2, y2, color)
+  local dx, dy = x2 - x1, y2 - y1
+  local dist = math.sqrt(dx * dx + dy * dy)
+  if dist < 1 then return end
+
+  local mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+  local nx, ny = -dy / dist, dx / dist
+  local bow = math.min(dist * 0.22, 70) + math.sin(love.timer.getTime() * 3) * math.min(dist * 0.03, 8)
+  local cx, cy = mx + nx * bow, my + ny * bow
+
   set(color)
-  love.graphics.setLineWidth(3)
-  love.graphics.line(x1, y1, x2, y2)
-  local angle = math.atan(y2 - y1, x2 - x1)
-  local size = 11
-  local a1, a2 = angle + math.rad(150), angle - math.rad(150)
+  local link_size = 9
+  local steps = math.max(4, math.floor(dist / 16))
+  for i = 0, steps do
+    local t = i / steps
+    local px, py = quad_bezier(t, x1, y1, cx, cy, x2, y2)
+    local tx, ty = quad_bezier_tangent(t, x1, y1, cx, cy, x2, y2)
+    local scale = 0.55 + 0.45 * t -- maillons plus petits près de l'origine, comme une queue
+    love.graphics.push()
+    love.graphics.translate(px, py)
+    love.graphics.rotate(math.atan(ty, tx))
+    love.graphics.rectangle("fill", -link_size * scale / 2, -link_size * scale * 0.35, link_size * scale, link_size * scale * 0.7, 3, 3)
+    love.graphics.pop()
+  end
+
+  local etx, ety = quad_bezier_tangent(1, x1, y1, cx, cy, x2, y2)
+  local end_angle = math.atan(ety, etx)
+  local size = 12
+  local a1, a2 = end_angle + math.rad(150), end_angle - math.rad(150)
   love.graphics.polygon("fill",
     x2, y2,
     x2 + size * math.cos(a1), y2 + size * math.sin(a1),
     x2 + size * math.cos(a2), y2 + size * math.sin(a2))
-  love.graphics.setLineWidth(1)
 end
 
 local function draw_targeting_arrow(controller)
@@ -874,6 +1032,14 @@ function View.draw(controller)
         love.graphics.translate(-r.w / 2, -r.h / 2)
         if show_front then
           panel(0, 0, r.w, r.h, Theme.panel_light)
+          -- Bordure dorée sur les cartes "Avancé" (2026-08-09) : les distingue
+          -- d'un coup d'œil des "Départ" pendant le draft, au lieu du seul
+          -- petit "Av." en coin -- Theme.accent est déjà cette teinte or/ambre.
+          if def.tier == "avance" then
+            set(Theme.accent); love.graphics.setLineWidth(2)
+            love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
+            love.graphics.setLineWidth(1)
+          end
           set(Theme.energy); love.graphics.circle("fill", 16, 14, 10)
           set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), 6, 7, 20, "center")
           text(def.name, 4, 26, r.w - 8, 11, Theme.text)
@@ -889,6 +1055,8 @@ function View.draw(controller)
 
   draw_targeting_arrow(controller)
   draw_card_flights(controller)
+  draw_particles(controller)
+  draw_floaters(controller)
   if controller.screen == "playing" then draw_tooltip(controller) end
 
   love.graphics.setColor(1, 1, 1, 1)
