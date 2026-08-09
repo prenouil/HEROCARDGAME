@@ -91,6 +91,37 @@ function View.hero_action_rects(state)
   return out
 end
 
+-- Mode "flèche" (2026-08-09, spike) : chaque encart héros porte deux zones de
+-- clic à la place des boutons -- 3/4 haut = jouer la carte, 1/4 bas = se
+-- concentrer, tel que spécifié par le porteur de projet. Layout et
+-- hit-testing partagent la même fonction, même discipline que hero_action_rects.
+local HERO_ZONE_SPLIT = 0.75
+
+local function hero_zone_local_rects(r)
+  local action_h = r.h * HERO_ZONE_SPLIT
+  return {
+    play = { x = 0, y = 0, w = r.w, h = action_h },
+    concentrate = { x = 0, y = action_h, w = r.w, h = r.h - action_h },
+  }
+end
+View.hero_zone_local_rects = hero_zone_local_rects
+
+function View.hero_zone_rects(state)
+  local rects = View.hero_rects(state)
+  local out = {}
+  for _, h in ipairs(state.heroes) do
+    local r = rects[h.id]
+    if r then
+      local lr = hero_zone_local_rects(r)
+      out[h.id] = {
+        play = { x = r.x + lr.play.x, y = r.y + lr.play.y, w = lr.play.w, h = lr.play.h },
+        concentrate = { x = r.x + lr.concentrate.x, y = r.y + lr.concentrate.y, w = lr.concentrate.w, h = lr.concentrate.h },
+      }
+    end
+  end
+  return out
+end
+
 -- Calcule les rects de la main à partir d'une LISTE de cartes explicite plutôt
 -- que de `state.hand` directement -- permet de rejouer la mise en page d'une
 -- main passée (avant une défausse, par ex.) même après que `state.hand` a déjà
@@ -118,6 +149,10 @@ View.restart_button = { x = W / 2 + 10, y = 600, w = 180, h = 32, label = "Recom
 -- Outil de test discret (2026-08-08) : termine le combat en cours par une
 -- victoire immédiate, sans passer par la résolution réelle des ennemis.
 View.instant_victory_button = { x = View.restart_button.x + View.restart_button.w + 10, y = 604, w = 140, h = 24, label = "victoire instantanée" }
+-- Bascule 3-clics / flèche (2026-08-09, spike de ciblage dynamique) : visible et
+-- cliquable à dessein (contrairement à "victoire instantanée") -- c'est le point
+-- d'entrée du test, pas un outil de debug caché.
+View.mode_toggle_button = { x = View.instant_victory_button.x + View.instant_victory_button.w + 10, y = 600, w = 124, h = 32 }
 View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
 View.mage_discard_all_button = { x = W / 2 + 150, y = 396, w = 110, h = 22, label = "tout défausser" }
 
@@ -241,11 +276,6 @@ end
 
 local function draw_hero(controller, h, r)
   local dead = h.hp <= 0
-  local dx, dy, scale = unit_anim_transform(controller, h.id)
-  love.graphics.push()
-  love.graphics.translate(r.x + r.w / 2 + dx, r.y + r.h / 2 + dy)
-  love.graphics.scale(scale, scale)
-  love.graphics.translate(-r.w / 2, -r.h / 2)
 
   local pending = controller.state.pending
   -- Fenêtre de décision "quel héros, quel mode" (2026-08-08) : les boutons
@@ -280,6 +310,40 @@ local function draw_hero(controller, h, r)
     border, border_w = Theme.muted, 1
   end
 
+  -- Survol des deux zones (mode "flèche", 2026-08-09) : calculé sur le rect
+  -- ABSOLU, avant toute translation d'animation -- doit rester en phase avec
+  -- le hit-test réel d'input.lua, qui lit le même View.hero_zone_rects.
+  local arrow_mode = controller.input_mode == "arrow"
+  local hovering_play, hovering_concentrate = false, false
+  if arrow_mode and showing_action_buttons then
+    local mx, my = love.mouse.getPosition()
+    mx, my = mx / SCALE, my / SCALE
+    local z = hero_zone_local_rects(r)
+    hovering_play = point_in({ x = r.x + z.play.x, y = r.y + z.play.y, w = z.play.w, h = z.play.h }, mx, my)
+    hovering_concentrate = not hovering_play
+      and point_in({ x = r.x + z.concentrate.x, y = r.y + z.concentrate.y, w = z.concentrate.w, h = z.concentrate.h }, mx, my)
+  end
+
+  local dx, dy, scale = unit_anim_transform(controller, h.id)
+  -- Petit rebond continu quand la zone survolée est valide : le "VFX clair" +
+  -- "anim simple" demandés pour distinguer Jouer/Concentrer au survol. Même
+  -- rebond quand ce héros est la cible finale survolée (carte à cible alliée,
+  -- ex. Rempart) -- cohérent avec le pulse ajouté côté ennemis (draw_enemy).
+  local hovering_as_ally_target = false
+  if arrow_mode and eligible_target then
+    local mx, my = love.mouse.getPosition()
+    mx, my = mx / SCALE, my / SCALE
+    hovering_as_ally_target = point_in(r, mx, my)
+  end
+  if (hovering_play and can_play) or (hovering_concentrate and can_concentrate) or hovering_as_ally_target then
+    scale = scale * (1 + 0.035 * math.sin(love.timer.getTime() * 8))
+  end
+
+  love.graphics.push()
+  love.graphics.translate(r.x + r.w / 2 + dx, r.y + r.h / 2 + dy)
+  love.graphics.scale(scale, scale)
+  love.graphics.translate(-r.w / 2, -r.h / 2)
+
   set(Theme.panel, dead and 0.5 or 1)
   love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
   set(border); love.graphics.setLineWidth(border_w)
@@ -296,7 +360,26 @@ local function draw_hero(controller, h, r)
   -- pour le texte de carte, juste avec un `size` bien plus grand.
   RichText.draw(h.energy .. ' "energie"', 0, 80, r.w, 24, Theme.energy)
 
-  if showing_action_buttons then
+  if showing_action_buttons and arrow_mode then
+    -- Mode "flèche" : pas de boutons texte -- un halo coloré + libellé
+    -- apparaît uniquement sous le curseur, sur la zone survolée (rouge/`Theme.hp`
+    -- si cette zone précise n'est pas jouable, jamais un bouton grisé permanent).
+    local z = hero_zone_local_rects(r)
+    local function zone_vfx(zone, enabled, hovering, label, base_color)
+      if not hovering then return end
+      local tint = enabled and base_color or Theme.hp
+      set(tint, 0.28)
+      love.graphics.rectangle("fill", zone.x, zone.y, zone.w, zone.h, 8, 8)
+      set(tint); love.graphics.setLineWidth(2)
+      love.graphics.rectangle("line", zone.x, zone.y, zone.w, zone.h, 8, 8)
+      love.graphics.setLineWidth(1)
+      set(Theme.text)
+      love.graphics.setFont(Fonts.get(9))
+      love.graphics.printf(label, zone.x, zone.y + zone.h / 2 - 5, zone.w, "center")
+    end
+    zone_vfx(z.play, can_play, hovering_play, "Jouer", Theme.heal)
+    zone_vfx(z.concentrate, can_concentrate, hovering_concentrate, "Concentrer", Theme.energy)
+  elseif showing_action_buttons then
     local ar = hero_action_local_rects(r)
     local function action_button(rect, label, enabled, base_color)
       set(enabled and base_color or Theme.muted, enabled and 1 or 0.35)
@@ -355,16 +438,28 @@ end
 
 local function draw_enemy(controller, e, r)
   local dead = e.hp <= 0
-  local dx, dy, scale = unit_anim_transform(controller, e.id)
-  love.graphics.push()
-  love.graphics.translate(r.x + r.w / 2 + dx, r.y + r.h / 2 + dy)
-  love.graphics.scale(scale, scale)
-  love.graphics.translate(-r.w / 2, -r.h / 2)
 
   local pending = controller.state.pending
   local hero = pending and pending.hero_id and Combat.hero_by_id(controller.state, pending.hero_id)
   local awaiting_enemy_target = pending and pending.hero_id and not dead
     and (pending.def.target == "enemy" or (pending.def.target == "conditional" and hero and not Combat.enemy_targeting(controller.state, hero)))
+
+  -- Même rebond que côté héros (2026-08-09, mode "flèche") quand cet ennemi
+  -- précis est une cible valide ET survolé par la souris -- calculé sur le
+  -- rect ABSOLU, avant toute translation d'animation.
+  local dx, dy, scale = unit_anim_transform(controller, e.id)
+  if controller.input_mode == "arrow" and awaiting_enemy_target then
+    local mx, my = love.mouse.getPosition()
+    mx, my = mx / SCALE, my / SCALE
+    if point_in(r, mx, my) then
+      scale = scale * (1 + 0.035 * math.sin(love.timer.getTime() * 8))
+    end
+  end
+
+  love.graphics.push()
+  love.graphics.translate(r.x + r.w / 2 + dx, r.y + r.h / 2 + dy)
+  love.graphics.scale(scale, scale)
+  love.graphics.translate(-r.w / 2, -r.h / 2)
 
   -- Cadre bleu = cible possible pour la carte en attente de résolution
   -- (2026-08-08) -- même couleur que côté héros (voir eligible_target dans
@@ -409,25 +504,52 @@ local function draw_hand(controller)
   text("DEFAUSSE", View.discard_pile_rect.x, View.discard_pile_rect.y + 54, View.discard_pile_rect.w, 9, Theme.muted)
   text(tostring(#state.discard), View.discard_pile_rect.x, View.discard_pile_rect.y + View.discard_pile_rect.h + 4, View.discard_pile_rect.w, 12, Theme.text)
 
-  for _, c in ipairs(state.hand) do
+  -- Mode "flèche" (2026-08-09) : la carte sélectionnée reste posée en avant
+  -- tant qu'elle est en attente, et la carte survolée grossit immédiatement
+  -- (pas de délai -- contrairement au tooltip) -- inspiré de Slay the Spire.
+  -- Dessinée en deux passes pour que la carte "spéciale" reste au-dessus de
+  -- ses voisines une fois agrandie.
+  local arrow_mode = controller.input_mode == "arrow"
+  local special_uid = arrow_mode and ((state.pending and state.pending.uid) or controller.arrow_hand_hover_uid) or nil
+
+  local function draw_one(c, popped)
     local r = rects[c.uid]
     local def = c.def
     local is_pending = state.pending and state.pending.uid == c.uid
-    panel(r.x, r.y, r.w, r.h, Theme.panel_light)
+    local scale, lift = 1, 0
+    if popped then
+      if is_pending then scale, lift = 1.16, 18 else scale, lift = 1.1, 10 end
+    end
+    love.graphics.push()
+    love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift)
+    love.graphics.scale(scale, scale)
+    love.graphics.translate(-r.w / 2, -r.h / 2)
+
+    panel(0, 0, r.w, r.h, Theme.panel_light)
     set(is_pending and Theme.accent or Theme.panel_light)
     love.graphics.setLineWidth(is_pending and 3 or 1)
-    love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
+    love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
     love.graphics.setLineWidth(1)
 
-    set(Theme.energy); love.graphics.circle("fill", r.x + 14, r.y + 12, 9)
+    set(Theme.energy); love.graphics.circle("fill", 14, 12, 9)
     set(Theme.bg or { 0.05, 0.1, 0.1 })
-    love.graphics.setFont(Fonts.get(11)); love.graphics.printf(tostring(def.cost), r.x + 4, r.y + 6, 20, "center")
+    love.graphics.setFont(Fonts.get(11)); love.graphics.printf(tostring(def.cost), 4, 6, 20, "center")
 
-    text(def.tier == "avance" and "Av." or "Dép.", r.x, r.y + 2, r.w - 4, 8, Theme.muted, "right")
+    text(def.tier == "avance" and "Av." or "Dép.", 0, 2, r.w - 4, 8, Theme.muted, "right")
     -- Icône de classe retirée (2026-08-08, jugée inutile) : plus de place pour le
     -- texte de la carte, la chose la plus importante à lire vite en jeu.
-    text(def.name, r.x + 2, r.y + 22, r.w - 4, 9, Theme.text)
-    RichText.draw(def.desc, r.x + 3, r.y + 40, r.w - 6, 10, Theme.muted)
+    text(def.name, 2, 22, r.w - 4, 9, Theme.text)
+    RichText.draw(def.desc, 3, 40, r.w - 6, 10, Theme.muted)
+    love.graphics.pop()
+  end
+
+  for _, c in ipairs(state.hand) do
+    if c.uid ~= special_uid then draw_one(c, false) end
+  end
+  if special_uid then
+    for _, c in ipairs(state.hand) do
+      if c.uid == special_uid then draw_one(c, true); break end
+    end
   end
   return rects
 end
@@ -458,10 +580,15 @@ end
 local function hint_text(controller)
   local state = controller.state
   local pending = state.pending
+  local arrow_mode = controller.input_mode == "arrow"
   if state.mage_keep_pending then return "Fin de tour : clique la carte que le Mage garde, ou \"tout défausser\"." end
   if not pending then return "Clique une carte de ta main pour commencer." end
-  if not pending.mode then return pending.def.name .. " sélectionnée — clique \"Jouer\" ou \"Concentrer\" sur l'aventurier de ton choix." end
+  if not pending.mode then
+    if arrow_mode then return pending.def.name .. " sélectionnée — vise le haut (Jouer) ou le bas (Concentrer) d'un aventurier." end
+    return pending.def.name .. " sélectionnée — clique \"Jouer\" ou \"Concentrer\" sur l'aventurier de ton choix."
+  end
   if not pending.hero_id then return pending.def.name .. " — choisis quel aventurier." end
+  if arrow_mode then return pending.def.name .. " — vise la cible." end
   return pending.def.name .. " — choisis la cible."
 end
 
@@ -587,6 +714,84 @@ local function draw_tooltip(controller)
   end
 end
 
+local function draw_mode_toggle(controller)
+  local b = View.mode_toggle_button
+  local arrow_mode = controller.input_mode == "arrow"
+  set(arrow_mode and Theme.status or Theme.muted)
+  love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", b.x, b.y, b.w, b.h, 8, 8)
+  love.graphics.setLineWidth(1)
+  text(arrow_mode and "Mode : flèche" or "Mode : 3 clics", b.x, b.y + 10, b.w, 10, Theme.text)
+end
+
+-- Flèche dynamique (mode "flèche", 2026-08-09) : de la souris vers le héros
+-- pendant le choix de l'aventurier, puis du héros vers la cible finale si la
+-- carte en a besoin -- couleur dérivée des mêmes conditions d'éligibilité que
+-- les cadres verts/bleus déjà en place (Combat.can_play/can_concentrate, cible
+-- vivante), jamais une logique de validité dupliquée.
+local function draw_arrow(x1, y1, x2, y2, color)
+  set(color)
+  love.graphics.setLineWidth(3)
+  love.graphics.line(x1, y1, x2, y2)
+  local angle = math.atan(y2 - y1, x2 - x1)
+  local size = 11
+  local a1, a2 = angle + math.rad(150), angle - math.rad(150)
+  love.graphics.polygon("fill",
+    x2, y2,
+    x2 + size * math.cos(a1), y2 + size * math.sin(a1),
+    x2 + size * math.cos(a2), y2 + size * math.sin(a2))
+  love.graphics.setLineWidth(1)
+end
+
+local function draw_targeting_arrow(controller)
+  if controller.input_mode ~= "arrow" or controller.screen ~= "playing" then return end
+  local state = controller.state
+  local pending = state.pending
+  if not pending then return end
+
+  local mx, my = love.mouse.getPosition()
+  mx, my = mx / SCALE, my / SCALE
+
+  if not pending.mode then
+    local origin = View.hand_rects(state)[pending.uid]
+    if not origin then return end
+    local ox, oy = origin.x + origin.w / 2, origin.y
+    local color = Theme.energy
+    local zones = View.hero_zone_rects(state)
+    for _, h in ipairs(state.heroes) do
+      local z = zones[h.id]
+      if z then
+        if point_in(z.play, mx, my) then
+          color = Combat.can_play(h, pending) and Theme.heal or Theme.hp
+        elseif point_in(z.concentrate, mx, my) then
+          color = Combat.can_concentrate(h) and Theme.heal or Theme.hp
+        end
+      end
+    end
+    draw_arrow(ox, oy, mx, my, color)
+  elseif pending.hero_id and (pending.def.target == "enemy" or pending.def.target == "ally" or pending.def.target == "conditional") then
+    local origin = View.hero_rects(state)[pending.hero_id]
+    if not origin then return end
+    local ox, oy = origin.x + origin.w / 2, origin.y + origin.h / 2
+    local valid = false
+    if pending.def.target == "enemy" or pending.def.target == "conditional" then
+      for _, e in ipairs(state.enemies) do
+        local r = View.enemy_rects(state)[e.id]
+        if r and e.hp > 0 and point_in(r, mx, my) then valid = true end
+      end
+    end
+    if pending.def.target == "ally" then
+      for _, h in ipairs(state.heroes) do
+        if h.id ~= pending.hero_id then
+          local r = View.hero_rects(state)[h.id]
+          if r and h.hp > 0 and point_in(r, mx, my) then valid = true end
+        end
+      end
+    end
+    draw_arrow(ox, oy, mx, my, valid and Theme.heal or Theme.energy)
+  end
+end
+
 function View.draw(controller)
   local state = controller.state
   set(Theme.bg); love.graphics.rectangle("fill", 0, 0, W, H)
@@ -607,6 +812,7 @@ function View.draw(controller)
   draw_hand(controller)
   draw_cancel_button(controller)
   draw_bottom_controls(controller)
+  draw_mode_toggle(controller)
   text(hint_text(controller), 0, 632, W, 10, Theme.muted)
 
   if state.mage_keep_pending then
@@ -671,6 +877,7 @@ function View.draw(controller)
     end
   end
 
+  draw_targeting_arrow(controller)
   draw_card_flights(controller)
   if controller.screen == "playing" then draw_tooltip(controller) end
 

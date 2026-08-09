@@ -50,8 +50,22 @@ function Controller.new()
   self.anim = {} -- [unit_id] = { kind = "pulse-up"|"pulse-down"|"shake", t = elapsed }
   self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, name } -- voir View.draw
   self.hover = { target = nil, kind = nil, t = 0 } -- kind: "hero"|"enemy"|"card"
+  -- Mode d'entrée alterné (2026-08-09, spike) : "tap" = séquence à 3 clics
+  -- (existant, reste le défaut) ; "arrow" = sélection au survol + flèche
+  -- dynamique façon Slay the Spire, testée en parallèle sans remplacer l'existant.
+  self.input_mode = "tap"
+  self.arrow_hand_hover_uid = nil -- carte de la main survolée en mode "arrow" (agrandissement immédiat, sans délai de tooltip)
   self:reset_run()
   return self
+end
+
+function Controller:toggle_input_mode()
+  self.input_mode = (self.input_mode == "arrow") and "tap" or "arrow"
+  self.arrow_hand_hover_uid = nil
+end
+
+function Controller:set_arrow_hand_hover(uid)
+  self.arrow_hand_hover_uid = uid
 end
 
 function Controller:reset_run()
