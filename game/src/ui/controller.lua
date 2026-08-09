@@ -10,6 +10,7 @@ local Sequencer = require("src.util.sequencer")
 -- nécessaire pour savoir D'OÙ une carte part visuellement quand elle est piochée
 -- ou défaussée ; voir View.hand_rects_for/deck_pile_rect/discard_pile_rect.
 local View = require("src.ui.view")
+local Sfx = require("src.ui.sfx")
 
 local Controller = {}
 Controller.__index = Controller
@@ -171,7 +172,10 @@ end
 function Controller:consume_drawn_animation()
   local drawn = self.state.last_drawn_uids
   self.state.last_drawn_uids = nil
-  if drawn then self:animate_draw(drawn) end
+  if drawn then
+    self:animate_draw(drawn)
+    if #drawn > 0 then Sfx.play("flush") end
+  end
 end
 
 --- Anime `cards` (liste de {uid, def, ...}, une COPIE de state.hand prise
@@ -263,11 +267,21 @@ function Controller:spawn_shield_fx(unit_id)
 end
 
 --- Compare PV + statuts avant/après un appel de règles et en déduit tous les
--- retours visuels : secousse + nombre flottant + burst de pixels sur une
--- perte de PV, nombre flottant vert sur un soin, pop d'un badge sur toute
--- valeur de statut qui vient d'augmenter (ou Camouflage qui s'active).
+-- retours visuels ET sonores : secousse + nombre flottant + burst de pixels +
+-- "plarf"/"waof" sur une perte de PV (selon `opts.dmg_type`, "physique" par
+-- défaut), nombre flottant vert sur un soin, pop d'un badge sur toute valeur
+-- de statut qui vient d'augmenter (ou Camouflage qui s'active), gros bouclier
+-- + "shting" sur un gain de Défense OU des dégâts intégralement absorbés
+-- (défense qui baisse sans perte de PV -- voir Combat.deal_damage). Le son
+-- d'impact/bouclier ne joue qu'une fois par appel, même si plusieurs unités
+-- sont touchées (carte à zone) -- pas une salve de sons identiques superposés.
+-- `opts.skip_shield_sfx` : évite un faux "shting" quand la Défense retombe à
+-- 0 en début de tour (Game.start_turn), qui n'est pas un blocage de dégâts.
 -- Remplace l'ancien shake_from_diff, mêmes points d'appel.
-function Controller:react_to_diff(before)
+function Controller:react_to_diff(before, opts)
+  opts = opts or {}
+  local hit_sfx = (opts.dmg_type == "magique") and "hit_magic" or "hit_physical"
+  local hit_played, shield_played = false, false
   local function react(u)
     local b = before[u.id]
     if not b then return end
@@ -275,13 +289,20 @@ function Controller:react_to_diff(before)
       self:pulse(u.id, "shake")
       self:spawn_floater(u.id, u.hp - b.hp, "damage")
       self:spawn_impact(u.id)
+      if not hit_played then Sfx.play(hit_sfx); hit_played = true end
     elseif u.hp > b.hp then
       self:spawn_floater(u.id, u.hp - b.hp, "heal")
     end
     for _, k in ipairs(STATUS_KEYS) do
       if (u[k] or 0) > b[k] then self:pop_status(u.id, k) end
     end
-    if (u.defense or 0) > b.defense then self:spawn_shield_fx(u.id) end
+    local defense_now = u.defense or 0
+    if defense_now > b.defense then
+      self:spawn_shield_fx(u.id)
+      if not shield_played then Sfx.play("shield"); shield_played = true end
+    elseif not opts.skip_shield_sfx and defense_now < b.defense and u.hp == b.hp then
+      if not shield_played then Sfx.play("shield"); shield_played = true end
+    end
     if u.camoufle and not b.camoufle then self:pop_status(u.id, "camoufle") end
   end
   for _, h in ipairs(self.state.heroes) do react(h) end
@@ -380,10 +401,12 @@ function Controller:assign_hero(hero_id)
   local pending = self.state.pending
   if not pending then return end
   local played_uid, hand_before = pending.uid, Game.shallow_copy(self.state.hand)
+  local dmg_type, is_concentrate = pending.def.dmg_type, pending.mode == "concentrate"
   local before = self:snapshot_units()
   local resolved = Game.assign_hero(self.state, hero_id)
   if resolved then self:pulse(hero_id, "pulse-up") end
-  self:react_to_diff(before)
+  if resolved and is_concentrate then Sfx.play("concentrate") end
+  self:react_to_diff(before, { dmg_type = dmg_type })
   self:maybe_animate_played_discard(played_uid, hand_before)
   self:consume_drawn_animation() -- Clairvoyance : le mode "concentrate" ne pioche jamais, mais "play" le peut
   if resolved then self:after_card_resolved() end
@@ -393,10 +416,11 @@ function Controller:resolve_target(kind, target_id)
   local pending = self.state.pending
   if not pending or not pending.hero_id then return end
   local played_uid, hand_before = pending.uid, Game.shallow_copy(self.state.hand)
+  local dmg_type = pending.def.dmg_type
   self:pulse(pending.hero_id, "pulse-up")
   local before = self:snapshot_units()
   Game.resolve_pending(self.state, kind, target_id)
-  self:react_to_diff(before)
+  self:react_to_diff(before, { dmg_type = dmg_type })
   self:maybe_animate_played_discard(played_uid, hand_before)
   self:consume_drawn_animation() -- Clairvoyance pioche 1 carte dans son effet
   self:after_card_resolved()
@@ -443,6 +467,7 @@ function Controller:advance_after_discard_sequenced()
         self_.seq:push(function()
           if self_.state.over then return end
           self_:pulse(enemy_ref.id, "pulse-down")
+          Sfx.play("enemy_telegraph")
           local hp_before = self_:snapshot_units()
           Game.resolve_enemy_action(self_.state, enemy_ref)
           self_:react_to_diff(hp_before)
@@ -458,7 +483,10 @@ function Controller:advance_after_discard_sequenced()
       self_.state.turn = self_.state.turn + 1
       local turn_before = self_:snapshot_units()
       Game.start_turn(self_.state)
-      self_:react_to_diff(turn_before) -- coups gratuits du Pouvoir de Classe du Guerrier compris
+      -- skip_shield_sfx : la Défense de chaque héros retombe à 0 ici (reset de
+      -- tour, pas un blocage de dégâts) -- sans cette garde, "shting" jouerait
+      -- à chaque tour pour quiconque avait de la Défense restante.
+      self_:react_to_diff(turn_before, { skip_shield_sfx = true }) -- coups gratuits du Pouvoir de Classe du Guerrier compris
       self_:consume_drawn_animation()
       -- Le Pouvoir de Classe du Guerrier (coups gratuits) peut achever le
       -- dernier ennemi dès Game.start_turn, avant même qu'une carte ne soit
@@ -473,6 +501,7 @@ end
 function Controller:enter_defeat_screen()
   self.screen = "defeat"
   self.seq:clear() -- inutile de finir de dérouler les ennemis restants une fois la défaite actée
+  Sfx.play("defeat")
 end
 
 function Controller:enter_draft_screen()
@@ -481,12 +510,15 @@ function Controller:enter_draft_screen()
   self.draft_cards_shown = false
   self.draft_flip = {}
   self.victory_anim = { t = 0 }
+  Sfx.play("victory")
   local self_ = self
   self.seq:push(function() end, VICTORY_TITLE_DURATION)
   self.seq:push(function() self_.draft_cards_shown = true end, DRAFT_FACEDOWN_PAUSE)
   for i = 1, #self.draft_picks do
     local idx = i
-    self.seq:push(function() self_.draft_flip[idx] = { t = 0 } end, DRAFT_FLIP_DURATION + DRAFT_FLIP_GAP)
+    -- "flush" (même son que la pioche, demandé identique) au retournement de
+    -- CHAQUE carte, pas seulement au premier -- cohérent avec le "une par une".
+    self.seq:push(function() self_.draft_flip[idx] = { t = 0 }; Sfx.play("flush") end, DRAFT_FLIP_DURATION + DRAFT_FLIP_GAP)
   end
 end
 
