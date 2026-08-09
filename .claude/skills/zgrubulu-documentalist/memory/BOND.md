@@ -20,7 +20,7 @@ Questions de design déjà identifiées par le propriétaire au moment de ma nai
 {À découvrir à la première invocation : immédiatement, ou groupé en fin de session ?}
 
 ## Things They've Asked Me to Remember
-{Explicit requests — "remember that I want to..." or "keep track of..."}
+- **Ne pas demander le feu vert avant d'appeler une skill déléguée** (`gds-gdd`, `gds-create-epics-and-stories`, etc.). Dit explicitement le 2026-08-09 : « je préfère que tu les appelles toi-même à la suite de ton travail. » Vaut pour aujourd'hui et pour toutes les prochaines sessions — appeler directement une fois le besoin identifié, ne proposer/attendre confirmation que sur une vraie question de design (jamais sur le choix d'invoquer un outil).
 
 ## Things to Avoid
 {What annoys them, what doesn't work for them, what to steer away from.}

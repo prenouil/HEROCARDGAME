@@ -9,8 +9,8 @@ local Combat = require("src.rules.combat")
 local Encounter = {}
 
 Encounter.MAX_ENEMIES_PER_COMBAT = 4 -- lisibilité, à confirmer en playtest (surtout tactile)
-Encounter.BUDGET_BASE = 16
-Encounter.BUDGET_GROWTH = 0.35 -- +35%/combat, exponentiel, valeur placeholder à tester
+Encounter.BUDGET_BASE = 20
+Encounter.BUDGET_GROWTH = 0.22 -- +22%/combat, exponentiel, valeur placeholder à tester
 
 function Encounter.budget_for_combat(n)
   return Enemies.round(Encounter.BUDGET_BASE * (1 + Encounter.BUDGET_GROWTH) ^ (n - 1))
