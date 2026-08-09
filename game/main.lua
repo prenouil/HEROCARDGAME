@@ -7,15 +7,21 @@ local Input = require("src.ui.input")
 local SCALE = require("src.ui.layout_scale")
 
 local controller
+local hand_cursor, arrow_cursor
 
 function love.load()
   love.math.setRandomSeed(os.time())
   math.randomseed(os.time())
   controller = Controller.new()
+  hand_cursor = love.mouse.getSystemCursor("hand")
+  arrow_cursor = love.mouse.getSystemCursor("arrow")
 end
 
 function love.update(dt)
   controller:update(dt)
+  local mx, my = love.mouse.getPosition()
+  local hovering = Input.is_hovering_clickable(controller, mx / SCALE, my / SCALE)
+  love.mouse.setCursor(hovering and hand_cursor or arrow_cursor)
 end
 
 function love.draw()

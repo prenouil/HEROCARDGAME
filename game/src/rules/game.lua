@@ -182,10 +182,23 @@ end
 
 -- ---------- jouer une carte ----------
 
+--- `Game.assign_hero` verrouille le héros (`has_acted = true`) dès l'assignation,
+-- avant même la résolution de cible (enemy/ally en attente d'un clic) -- une
+-- carte abandonnée à ce stade (le joueur change d'avis, reclique la carte ou
+-- annule) ne l'a donc jamais réellement joué et doit rendre le verrou.
+local function revert_pending_hero_lock(state)
+  local pending = state.pending
+  if pending and pending.hero_id then
+    local hero = Combat.hero_by_id(state, pending.hero_id)
+    if hero then hero.has_acted = false end
+  end
+end
+
 --- Sélectionne/désélectionne une carte de la main (équivalent onHandCardClicked,
 -- moins la branche "Pouvoir de Classe du Mage" traitée séparément par la UI).
 function Game.select_card(state, uid)
   if state.pending and state.pending.uid == uid then
+    revert_pending_hero_lock(state)
     state.pending = nil
     return
   end
@@ -202,6 +215,7 @@ function Game.set_pending_mode(state, mode)
 end
 
 function Game.cancel_pending(state)
+  revert_pending_hero_lock(state)
   state.pending = nil
 end
 

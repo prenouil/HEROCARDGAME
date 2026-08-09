@@ -173,4 +173,19 @@ function Combat.required_cost(hero, pending)
   return Combat.effective_cost(hero, pending.def)
 end
 
+-- Éligibilité "Jouer" pour un héros donné, avant même que `pending.mode` ne
+-- soit choisi -- utilisé par les boutons d'action par héros (2026-08-08).
+function Combat.can_play(hero, pending)
+  if not pending or hero.hp <= 0 or hero.has_acted then return false end
+  if hero.energy < Combat.effective_cost(hero, pending.def) then return false end
+  if pending.def.requires_camouflage and not hero.camoufle then return false end
+  return true
+end
+
+-- Éligibilité "Se concentrer" : jamais de coût, seule la condition d'avoir
+-- déjà agi ce tour (ou être mort) désactive le bouton.
+function Combat.can_concentrate(hero)
+  return hero.hp > 0 and not hero.has_acted
+end
+
 return Combat

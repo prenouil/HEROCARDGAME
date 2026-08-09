@@ -22,13 +22,31 @@ local FLIGHT_DURATION = 0.38 -- s, calque sur FLIGHT_MS (380ms) du prototype
 local DRAW_STAGGER = 0.07 -- s entre deux cartes piochées, calque sur i*70ms
 local DISCARD_STAGGER = 0.06 -- s entre deux cartes défaussées, calque sur i*60ms
 
+-- Séquence d'entrée sur l'écran de draft (2026-08-08, demande explicite) :
+-- 1) titre "Victoire !" en zoom + bump (≤2s) -- rien d'autre à l'écran ;
+-- 2) SEULEMENT ENSUITE, les 3 cartes apparaissent de dos, toutes ensemble ;
+-- 3) 1s de pause cartes de dos ;
+-- 4) retournement une par une, lentement, avant de laisser la main au joueur
+--    (une carte n'est cliquable qu'une fois SON retournement terminé).
+-- Durées exposées sur `self` (pas de constante dupliquée côté view.lua, qui
+-- n'a pas accès à ce module -- controller.lua dépend déjà de view.lua, jamais
+-- l'inverse, voir note d'architecture sur les animations de vol de carte).
+local VICTORY_TITLE_DURATION = 1.4
+local DRAFT_FACEDOWN_PAUSE = 1.0
+local DRAFT_FLIP_DURATION = 0.5
+local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début du suivant
+
 function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
   self.screen = "playing" -- "playing" | "draft" | "defeat"
   self.draft_picks = nil
-  self.draft_revealed = {}
+  self.victory_anim = nil -- { t = elapsed } pendant le zoom+bump du titre "Victoire !"
+  self.victory_title_duration = VICTORY_TITLE_DURATION -- lu par view.lua pour l'easing
+  self.draft_cards_shown = false -- les 3 cartes (de dos) n'apparaissent qu'après le titre
+  self.draft_flip = {} -- [index] = { t = elapsed } une fois le retournement démarré
+  self.draft_flip_duration = DRAFT_FLIP_DURATION -- lu par view.lua pour l'easing
   self.anim = {} -- [unit_id] = { kind = "pulse-up"|"pulse-down"|"shake", t = elapsed }
   self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, name } -- voir View.draw
   self.hover = { target = nil, kind = nil, t = 0 } -- kind: "hero"|"enemy"|"card"
@@ -39,6 +57,9 @@ end
 function Controller:reset_run()
   self.screen = "playing"
   self.draft_picks = nil
+  self.victory_anim = nil
+  self.draft_cards_shown = false
+  self.draft_flip = {}
   self.seq:clear()
   self.anim = {}
   self.card_anims = {}
@@ -53,6 +74,17 @@ function Controller:restart_combat()
   self.card_anims = {}
   Game.restore_combat_snapshot(self.state)
   self:consume_drawn_animation()
+end
+
+--- Outil de test (2026-08-08) : termine le combat en cours par une victoire
+-- immédiate (tous les ennemis à 0 PV), sans passer par la résolution réelle --
+-- réutilise le même chemin que la victoire normale (`Game.check_victory` +
+-- `enter_draft_screen`) pour que l'écran de récompense se comporte à
+-- l'identique, seule la façon d'y arriver diffère.
+function Controller:trigger_instant_victory()
+  if self.screen ~= "playing" or self.state.over then return end
+  for _, e in ipairs(self.state.enemies) do e.hp = 0 end
+  if Game.check_victory(self.state) then self:enter_draft_screen() end
 end
 
 -- ---------- cosmétique ----------
@@ -166,6 +198,8 @@ function Controller:update(dt)
     if a.elapsed >= a.delay + a.duration then table.remove(self.card_anims, i) end
   end
   if self.hover.target then self.hover.t = self.hover.t + dt end
+  if self.victory_anim then self.victory_anim.t = self.victory_anim.t + dt end
+  for _, f in pairs(self.draft_flip) do f.t = f.t + dt end
 end
 
 function Controller:set_hover(kind, target)
@@ -201,13 +235,31 @@ function Controller:cancel_pending()
   Game.cancel_pending(self.state)
 end
 
+-- Boutons "Jouer"/"Se concentrer" par héros (2026-08-08) : choisit le mode et
+-- assigne le héros en un seul appel -- Input.lua a déjà vérifié l'éligibilité
+-- (Combat.can_play/can_concentrate) avant d'appeler ceci, mais on revérifie
+-- que rien n'a changé entre-temps (mode déjà choisi = clic ignoré).
+function Controller:choose_mode_and_assign(hero_id, mode)
+  local pending = self.state.pending
+  if not pending or pending.mode then return end
+  self:set_pending_mode(mode)
+  self:assign_hero(hero_id)
+end
+
+-- L'animation de pulsation du héros (et donc, indirectement, le voile gris
+-- "a agi" qui suit au prochain affichage) ne doit se déclencher qu'à la
+-- résolution RÉELLE de l'action -- pas à la simple assignation, qui peut
+-- encore attendre un clic de cible (ennemi/allié). D'où le `if resolved`
+-- ci-dessous : pour une carte auto-résolue (soi/tous les ennemis/concentration),
+-- `Game.assign_hero` résout tout en un seul appel et `resolved` est déjà vrai ;
+-- pour une carte à cible, le pulse est différé jusqu'à `resolve_target`.
 function Controller:assign_hero(hero_id)
   local pending = self.state.pending
   if not pending then return end
   local played_uid, hand_before = pending.uid, Game.shallow_copy(self.state.hand)
-  self:pulse(hero_id, "pulse-up")
   local before = self:snapshot_hp()
   local resolved = Game.assign_hero(self.state, hero_id)
+  if resolved then self:pulse(hero_id, "pulse-up") end
   self:shake_from_diff(before)
   self:maybe_animate_played_discard(played_uid, hand_before)
   self:consume_drawn_animation() -- Clairvoyance : le mode "concentrate" ne pioche jamais, mais "play" le peut
@@ -218,6 +270,7 @@ function Controller:resolve_target(kind, target_id)
   local pending = self.state.pending
   if not pending or not pending.hero_id then return end
   local played_uid, hand_before = pending.uid, Game.shallow_copy(self.state.hand)
+  self:pulse(pending.hero_id, "pulse-up")
   local before = self:snapshot_hp()
   Game.resolve_pending(self.state, kind, target_id)
   self:shake_from_diff(before)
@@ -296,16 +349,28 @@ end
 function Controller:enter_draft_screen()
   self.screen = "draft"
   self.draft_picks = Draft.pick_cards(self.state)
-  self.draft_revealed = {}
+  self.draft_cards_shown = false
+  self.draft_flip = {}
+  self.victory_anim = { t = 0 }
   local self_ = self
+  self.seq:push(function() end, VICTORY_TITLE_DURATION)
+  self.seq:push(function() self_.draft_cards_shown = true end, DRAFT_FACEDOWN_PAUSE)
   for i = 1, #self.draft_picks do
     local idx = i
-    self.seq:push(function() self_.draft_revealed[idx] = true end, 0.3)
+    self.seq:push(function() self_.draft_flip[idx] = { t = 0 } end, DRAFT_FLIP_DURATION + DRAFT_FLIP_GAP)
   end
 end
 
+--- Vrai une fois que LE retournement de cette carte (et lui seul) est
+-- terminé -- chaque carte devient cliquable dès la fin de SON animation,
+-- pas seulement une fois les 3 retournées (cohérent avec le "une par une").
+function Controller:draft_card_ready(index)
+  local f = self.draft_flip[index]
+  return f ~= nil and f.t >= DRAFT_FLIP_DURATION
+end
+
 function Controller:choose_draft_card(index)
-  if self.screen ~= "draft" or not self.draft_picks or not self.draft_revealed[index] then return end
+  if self.screen ~= "draft" or not self.draft_picks or not self:draft_card_ready(index) then return end
   local def = self.draft_picks[index]
   self.state.deck[#self.state.deck + 1] = { uid = Game.next_uid(self.state), def = def }
   Combat.log(self.state, def.name .. " ajoutée au deck.", "sys")

@@ -27,7 +27,7 @@ function Input.mousepressed(controller, x, y, button)
   if controller.screen == "draft" then
     local rects = View.draft_rects(controller)
     for i, r in ipairs(rects) do
-      if View.point_in(r, x, y) then controller:choose_draft_card(i); return end
+      if View.point_in(r, x, y) and controller:draft_card_ready(i) then controller:choose_draft_card(i); return end
     end
     return
   end
@@ -45,19 +45,31 @@ function Input.mousepressed(controller, x, y, button)
 
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
+  if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
 
   local pending = state.pending
+  -- Boutons "Jouer"/"Se concentrer" par héros (2026-08-08) : un clic choisit
+  -- le mode ET le héros en un seul geste -- remplace l'ancienne rangée
+  -- globale + le clic-héros séparé qui suivait.
   if pending and not pending.mode then
-    local b = View.mode_buttons
-    if View.point_in(b.play, x, y) then controller:set_pending_mode("play"); return end
-    if View.point_in(b.concentrate, x, y) then controller:set_pending_mode("concentrate"); return end
-    if View.point_in(b.cancel, x, y) then controller:cancel_pending(); return end
+    if View.point_in(View.cancel_button, x, y) then controller:cancel_pending(); return end
+    local buttons = View.hero_action_rects(state)
+    for _, h in ipairs(state.heroes) do
+      local btns = buttons[h.id]
+      if btns then
+        if View.point_in(btns.play, x, y) then
+          if Combat.can_play(h, pending) then controller:choose_mode_and_assign(h.id, "play") end
+          return
+        end
+        if View.point_in(btns.concentrate, x, y) then
+          if Combat.can_concentrate(h) then controller:choose_mode_and_assign(h.id, "concentrate") end
+          return
+        end
+      end
+    end
   end
 
-  if pending and pending.mode and not pending.hero_id then
-    local hero_id = find_rect(View.hero_rects(state), x, y)
-    if hero_id then controller:assign_hero(hero_id); return end
-  elseif pending and pending.hero_id then
+  if pending and pending.hero_id then
     if pending.def.target == "enemy" or pending.def.target == "conditional" then
       local enemy_id = find_rect(View.enemy_rects(state), x, y)
       if enemy_id then controller:resolve_target("enemy", enemy_id); return end
@@ -72,6 +84,58 @@ function Input.mousepressed(controller, x, y, button)
   -- qu'aucune cible n'est en cours de résolution).
   local hand_id = find_rect(View.hand_rects(state), x, y)
   if hand_id then controller:select_card(hand_id) end
+end
+
+-- Curseur main au survol : relit les mêmes conditions que mousepressed (sans
+-- déclencher d'action), pour que "cliquable visuellement" == "cliquable pour
+-- de vrai" -- appelé chaque frame depuis love.update (main.lua).
+function Input.is_hovering_clickable(controller, x, y)
+  local state = controller.state
+
+  if controller.screen == "defeat" then
+    return View.point_in(View.overlay_restart_button, x, y)
+  end
+
+  if controller.screen == "draft" then
+    local rects = View.draft_rects(controller)
+    for i, r in ipairs(rects) do
+      if View.point_in(r, x, y) and controller:draft_card_ready(i) then return true end
+    end
+    return false
+  end
+
+  if state.mage_keep_pending then
+    if View.point_in(View.mage_discard_all_button, x, y) then return true end
+    return find_rect(View.hand_rects(state), x, y) ~= nil
+  end
+
+  if View.point_in(View.end_turn_button, x, y) then return true end
+  if View.point_in(View.restart_button, x, y) then return true end
+  if View.point_in(View.instant_victory_button, x, y) then return true end
+
+  local pending = state.pending
+  if pending and not pending.mode then
+    if View.point_in(View.cancel_button, x, y) then return true end
+    local buttons = View.hero_action_rects(state)
+    for _, h in ipairs(state.heroes) do
+      local btns = buttons[h.id]
+      if btns then
+        if View.point_in(btns.play, x, y) and Combat.can_play(h, pending) then return true end
+        if View.point_in(btns.concentrate, x, y) and Combat.can_concentrate(h) then return true end
+      end
+    end
+  end
+
+  if pending and pending.hero_id then
+    if pending.def.target == "enemy" or pending.def.target == "conditional" then
+      if find_rect(View.enemy_rects(state), x, y) then return true end
+    end
+    if pending.def.target == "ally" then
+      if find_rect(View.hero_rects(state), x, y) then return true end
+    end
+  end
+
+  return find_rect(View.hand_rects(state), x, y) ~= nil
 end
 
 function Input.mousemoved(controller, x, y)

@@ -58,6 +58,39 @@ function View.hero_rects(state)
   return out
 end
 
+-- Boutons "Jouer"/"Se concentrer" par héros (2026-08-08) : un clic choisit à
+-- la fois le mode ET le héros en un seul geste, ancré au bas de chaque
+-- encart. Coords locales (relatives au coin haut-gauche de la carte) --
+-- réutilisées telles quelles par draw_hero (espace déjà translaté) et
+-- décalées de r.x/r.y ici pour le hit-testing (input.lua).
+local HERO_BTN_H, HERO_BTN_GAP = 15, 3
+
+local function hero_action_local_rects(r)
+  local w = r.w - 12
+  local by = r.h - (HERO_BTN_H * 2 + HERO_BTN_GAP) - 6
+  return {
+    play = { x = 6, y = by, w = w, h = HERO_BTN_H },
+    concentrate = { x = 6, y = by + HERO_BTN_H + HERO_BTN_GAP, w = w, h = HERO_BTN_H },
+  }
+end
+View.hero_action_local_rects = hero_action_local_rects
+
+function View.hero_action_rects(state)
+  local rects = View.hero_rects(state)
+  local out = {}
+  for _, h in ipairs(state.heroes) do
+    local r = rects[h.id]
+    if r then
+      local lr = hero_action_local_rects(r)
+      out[h.id] = {
+        play = { x = r.x + lr.play.x, y = r.y + lr.play.y, w = lr.play.w, h = lr.play.h },
+        concentrate = { x = r.x + lr.concentrate.x, y = r.y + lr.concentrate.y, w = lr.concentrate.w, h = lr.concentrate.h },
+      }
+    end
+  end
+  return out
+end
+
 -- Calcule les rects de la main à partir d'une LISTE de cartes explicite plutôt
 -- que de `state.hand` directement -- permet de rejouer la mise en page d'une
 -- main passée (avant une défausse, par ex.) même après que `state.hand` a déjà
@@ -76,13 +109,15 @@ end
 View.deck_pile_rect = { x = 20, y = 404, w = 64, h = CARD_H }
 View.discard_pile_rect = { x = W - 84, y = 404, w = 64, h = CARD_H }
 
-View.mode_buttons = {
-  play = { x = W / 2 - 220, y = 560, w = 140, h = 32, label = "Jouer" },
-  concentrate = { x = W / 2 - 70, y = 560, w = 180, h = 32, label = "Se concentrer (+1 énergie)" },
-  cancel = { x = W / 2 + 120, y = 560, w = 100, h = 32, label = "Annuler" },
-}
+-- "Jouer"/"Se concentrer" ont migré sur chaque encart héros (2026-08-08, voir
+-- hero_action_local_rects ci-dessus) ; il ne reste ici que l'annulation de la
+-- sélection de carte en cours.
+View.cancel_button = { x = W / 2 - 50, y = 560, w = 100, h = 32, label = "Annuler" }
 View.end_turn_button = { x = W / 2 - 150, y = 600, w = 140, h = 32, label = "Fin de tour" }
 View.restart_button = { x = W / 2 + 10, y = 600, w = 180, h = 32, label = "Recommencer le combat" }
+-- Outil de test discret (2026-08-08) : termine le combat en cours par une
+-- victoire immédiate, sans passer par la résolution réelle des ennemis.
+View.instant_victory_button = { x = View.restart_button.x + View.restart_button.w + 10, y = 604, w = 140, h = 24, label = "victoire instantanée" }
 View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
 View.mage_discard_all_button = { x = W / 2 + 150, y = 396, w = 110, h = 22, label = "tout défausser" }
 
@@ -184,6 +219,24 @@ local function unit_anim_transform(controller, id)
   return 0, 0, 1
 end
 
+--- Courbe "ease-out-back" classique : va de 0 à 1 en dépassant légèrement 1
+-- (le "bump") avant de s'y stabiliser. Utilisée pour le zoom du titre
+-- "Victoire !" (2026-08-08) -- `duration` vient de `controller.victory_title_duration`,
+-- seule source de vérité pour ce timing (voir controller.lua).
+local function ease_out_back(t, duration)
+  local p = math.min(1, math.max(0, t / duration))
+  local c1, c3 = 1.70158, 2.70158
+  return 1 + c3 * (p - 1) ^ 3 + c1 * (p - 1) ^ 2
+end
+
+--- Facteur d'échelle horizontale simulant un retournement de carte (face
+-- cachée -> face visible) : 1 -> 0 (tranche) -> 1, jamais négatif (donc jamais
+-- de miroir). Le contenu affiché doit basculer face/dos exactement à p=0.5.
+local function flip_scale_x(t, duration)
+  local p = math.min(1, math.max(0, t / duration))
+  return math.abs(math.cos(p * math.pi))
+end
+
 -- ---------- unités (héros/ennemis) ----------
 
 local function draw_hero(controller, h, r)
@@ -194,16 +247,42 @@ local function draw_hero(controller, h, r)
   love.graphics.scale(scale, scale)
   love.graphics.translate(-r.w / 2, -r.h / 2)
 
-  local border = Theme.panel_light
   local pending = controller.state.pending
-  local eligible_hero = pending and not pending.hero_id and not dead and h.energy >= Combat.required_cost(h, pending)
-    and not h.has_acted and not (pending.def.requires_camouflage and not h.camoufle)
+  -- Fenêtre de décision "quel héros, quel mode" (2026-08-08) : les boutons
+  -- Jouer/Se concentrer s'affichent directement sur l'encart, au lieu d'une
+  -- rangée globale -- un clic choisit héros + mode en un seul geste.
+  local showing_action_buttons = pending and not pending.mode and not dead
+  local can_play = showing_action_buttons and Combat.can_play(h, pending)
+  local can_concentrate = showing_action_buttons and Combat.can_concentrate(h)
   local eligible_target = pending and pending.hero_id and pending.def.target == "ally" and not dead and h.id ~= pending.hero_id
-  if eligible_hero then border = Theme.energy elseif eligible_target then border = Theme.heal end
+  -- `Game.assign_hero` fixe `has_acted = true` dès l'assignation, avant même
+  -- la résolution de la cible (enemy/ally/conditional en attente d'un clic) --
+  -- le héros ne doit pourtant apparaître grisé qu'une fois son action
+  -- pleinement résolue, pas pendant qu'on choisit encore la cible de SA carte.
+  local awaiting_own_target = pending and pending.hero_id == h.id
+  -- État persistant de l'encart (2026-08-08, remplace la mention texte "a agi
+  -- ce tour") : cadre vert tant que le héros peut agir (pas seulement pendant
+  -- la sélection d'une carte -- indicateur permanent), voile gris dès qu'il a
+  -- agi ce tour.
+  local ready = not dead and not h.has_acted
+  local greyed_out = not dead and h.has_acted and not eligible_target and not awaiting_own_target
+
+  -- Cadre bleu = cible possible pour la carte en attente (allié) ; priorité
+  -- sur le vert "prêt à agir" -- un héros peut être les deux à la fois (pas
+  -- encore agi ce tour ET ciblable), mais l'invite de ciblage est l'info
+  -- pertinente dans l'instant.
+  local border, border_w = Theme.panel_light, 1
+  if eligible_target then
+    border, border_w = Theme.energy, 3
+  elseif ready then
+    border, border_w = Theme.heal, 3
+  elseif greyed_out then
+    border, border_w = Theme.muted, 1
+  end
 
   set(Theme.panel, dead and 0.5 or 1)
   love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
-  set(border); love.graphics.setLineWidth((eligible_hero or eligible_target) and 3 or 1)
+  set(border); love.graphics.setLineWidth(border_w)
   love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
 
   set(Theme.text, dead and 0.45 or 1)
@@ -217,15 +296,35 @@ local function draw_hero(controller, h, r)
   -- pour le texte de carte, juste avec un `size` bien plus grand.
   RichText.draw(h.energy .. ' "energie"', 0, 80, r.w, 24, Theme.energy)
 
-  local badges = {}
-  if h.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = h.defense } end
-  if (h.esquive or 0) > 0 then badges[#badges + 1] = { key = "esquive", abbr = "ESQ", value = h.esquive } end
-  if h.camoufle then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
-  if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
-  if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
-  draw_badge_row(badges, 0, 112, r.w, 16, Theme.status)
+  if showing_action_buttons then
+    local ar = hero_action_local_rects(r)
+    local function action_button(rect, label, enabled, base_color)
+      set(enabled and base_color or Theme.muted, enabled and 1 or 0.35)
+      love.graphics.rectangle("fill", rect.x, rect.y, rect.w, rect.h, 5, 5)
+      set(Theme.bg, enabled and 1 or 0.6)
+      love.graphics.setFont(Fonts.get(9))
+      love.graphics.printf(label, rect.x, rect.y + 3, rect.w, "center")
+    end
+    action_button(ar.play, "Jouer", can_play, Theme.accent)
+    action_button(ar.concentrate, "Concentrer", can_concentrate, Theme.status)
+  else
+    local badges = {}
+    if h.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = h.defense } end
+    if (h.esquive or 0) > 0 then badges[#badges + 1] = { key = "esquive", abbr = "ESQ", value = h.esquive } end
+    if h.camoufle then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
+    if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
+    if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
+    draw_badge_row(badges, 0, 112, r.w, 16, Theme.status)
+  end
 
-  if not dead and h.has_acted then text("a agi ce tour", 0, 134, r.w, 8, Theme.muted) end
+  -- Voile gris par-dessus tout le contenu déjà dessiné (cadre compris) quand
+  -- le héros a déjà agi -- chaque élément ci-dessus fixe sa propre couleur,
+  -- un voile en overlay évite de les reprendre un par un.
+  if greyed_out then
+    set(Theme.black, 0.55)
+    love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
+  end
+
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setLineWidth(1)
@@ -267,9 +366,12 @@ local function draw_enemy(controller, e, r)
   local awaiting_enemy_target = pending and pending.hero_id and not dead
     and (pending.def.target == "enemy" or (pending.def.target == "conditional" and hero and not Combat.enemy_targeting(controller.state, hero)))
 
+  -- Cadre bleu = cible possible pour la carte en attente de résolution
+  -- (2026-08-08) -- même couleur que côté héros (voir eligible_target dans
+  -- draw_hero), pour que "bleu" signifie systématiquement "cible cliquable".
   set(Theme.panel, dead and 0.5 or 1)
   love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
-  set(awaiting_enemy_target and Theme.heal or Theme.panel_light)
+  set(awaiting_enemy_target and Theme.energy or Theme.panel_light)
   love.graphics.setLineWidth(awaiting_enemy_target and 3 or 1)
   love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
 
@@ -330,15 +432,14 @@ local function draw_hand(controller)
   return rects
 end
 
-local function draw_mode_buttons(controller)
+local function draw_cancel_button(controller)
   local pending = controller.state.pending
   if not pending or pending.mode then return end
-  for key, b in pairs(View.mode_buttons) do
-    set(key == "concentrate" and Theme.status or (key == "cancel" and Theme.muted or Theme.accent))
-    love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
-    set(Theme.bg); love.graphics.setFont(Fonts.get(12))
-    love.graphics.printf(b.label, b.x, b.y + 8, b.w, "center")
-  end
+  local b = View.cancel_button
+  set(Theme.muted)
+  love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
+  set(Theme.bg); love.graphics.setFont(Fonts.get(12))
+  love.graphics.printf(b.label, b.x, b.y + 8, b.w, "center")
 end
 
 local function draw_bottom_controls(controller)
@@ -347,6 +448,11 @@ local function draw_bottom_controls(controller)
   set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(b1.label, b1.x, b1.y + 8, b1.w, "center")
   set(Theme.muted); love.graphics.rectangle("line", b2.x, b2.y, b2.w, b2.h, 8, 8)
   text(b2.label, b2.x, b2.y + 8, b2.w, 12, Theme.text)
+
+  -- Discret à dessein : pas de cadre, texte petit et sombre -- un outil de
+  -- test, pas une action de jeu normale.
+  local b3 = View.instant_victory_button
+  text(b3.label, b3.x, b3.y + 7, b3.w, 8, Theme.muted)
 end
 
 local function hint_text(controller)
@@ -354,7 +460,7 @@ local function hint_text(controller)
   local pending = state.pending
   if state.mage_keep_pending then return "Fin de tour : clique la carte que le Mage garde, ou \"tout défausser\"." end
   if not pending then return "Clique une carte de ta main pour commencer." end
-  if not pending.mode then return pending.def.name .. " sélectionnée — Jouer normalement, ou se concentrer ?" end
+  if not pending.mode then return pending.def.name .. " sélectionnée — clique \"Jouer\" ou \"Concentrer\" sur l'aventurier de ton choix." end
   if not pending.hero_id then return pending.def.name .. " — choisis quel aventurier." end
   return pending.def.name .. " — choisis la cible."
 end
@@ -499,7 +605,7 @@ function View.draw(controller)
   -- `state.log` continue d'être alimenté côté règles, juste plus affiché ici.
 
   draw_hand(controller)
-  draw_mode_buttons(controller)
+  draw_cancel_button(controller)
   draw_bottom_controls(controller)
   text(hint_text(controller), 0, 632, W, 10, Theme.muted)
 
@@ -520,20 +626,47 @@ function View.draw(controller)
     set(Theme.bg); text(b.label, b.x, b.y + 9, b.w, 12, Theme.bg)
   elseif controller.screen == "draft" and controller.draft_picks then
     set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
+
+    -- Titre "Victoire !" en zoom + bump (2026-08-08) : seul élément affiché
+    -- au tout début de l'écran de draft, avant même que les cartes existent
+    -- visuellement -- voir Controller:enter_draft_screen pour le séquencement.
+    local va = controller.victory_anim
+    local title_scale = va and ease_out_back(va.t, controller.victory_title_duration) or 1
+    love.graphics.push()
+    love.graphics.translate(W / 2, 72)
+    love.graphics.scale(title_scale, title_scale)
+    love.graphics.translate(-W / 2, -72)
     text("Victoire !", 0, 60, W, 24, Theme.text)
-    text("Combat " .. (state.run.combat_index) .. " remporté ! Choisis une carte à ajouter à ton deck.", 0, 92, W, 12, Theme.muted)
-    local rects = centered_row(#controller.draft_picks, 130, 190, 140, 24)
-    for i, def in ipairs(controller.draft_picks) do
-      local r = rects[i]
-      if controller.draft_revealed[i] then
-        panel(r.x, r.y, r.w, r.h, Theme.panel_light)
-        set(Theme.energy); love.graphics.circle("fill", r.x + 16, r.y + 14, 10)
-        set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), r.x + 6, r.y + 7, 20, "center")
-        text(def.name, r.x + 4, r.y + 26, r.w - 8, 11, Theme.text)
-        RichText.draw(def.desc, r.x + 4, r.y + 46, r.w - 8, 11, Theme.muted)
-      else
-        panel(r.x, r.y, r.w, r.h, Theme.panel_light)
-        text("?", r.x, r.y + r.h / 2 - 12, r.w, 26, Theme.muted)
+    love.graphics.pop()
+
+    if controller.draft_cards_shown then
+      text("Combat " .. (state.run.combat_index) .. " remporté ! Choisis une carte à ajouter à ton deck.", 0, 92, W, 12, Theme.muted)
+      local rects = centered_row(#controller.draft_picks, 130, 190, 140, 24)
+      for i, def in ipairs(controller.draft_picks) do
+        local r = rects[i]
+        -- Retournement carte par carte (2026-08-08) : sans anim (draft_flip[i]
+        -- absent), la carte reste face cachée, identique à l'ancien affichage
+        -- statique -- une fois démarrée, on l'aplatit horizontalement (jamais
+        -- de facteur négatif, donc jamais de miroir) et on bascule le contenu
+        -- dos/face exactement à mi-course (la carte "sur la tranche").
+        local f = controller.draft_flip[i]
+        local sx = f and flip_scale_x(f.t, controller.draft_flip_duration) or 1
+        local show_front = f and (f.t / controller.draft_flip_duration) >= 0.5
+        love.graphics.push()
+        love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2)
+        love.graphics.scale(sx, 1)
+        love.graphics.translate(-r.w / 2, -r.h / 2)
+        if show_front then
+          panel(0, 0, r.w, r.h, Theme.panel_light)
+          set(Theme.energy); love.graphics.circle("fill", 16, 14, 10)
+          set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), 6, 7, 20, "center")
+          text(def.name, 4, 26, r.w - 8, 11, Theme.text)
+          RichText.draw(def.desc, 4, 46, r.w - 8, 11, Theme.muted)
+        else
+          panel(0, 0, r.w, r.h, Theme.panel_light)
+          text("?", 0, r.h / 2 - 12, r.w, 26, Theme.muted)
+        end
+        love.graphics.pop()
       end
     end
   end
@@ -545,7 +678,7 @@ function View.draw(controller)
 end
 
 function View.draft_rects(controller)
-  if not controller.draft_picks then return {} end
+  if not controller.draft_picks or not controller.draft_cards_shown then return {} end
   return centered_row(#controller.draft_picks, 130, 190, 140, 24)
 end
 
