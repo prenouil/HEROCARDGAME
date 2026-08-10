@@ -183,6 +183,25 @@ local function text(str, x, y, w, size, color, align)
   love.graphics.printf(str, x, y, w, align or "center")
 end
 
+--- Nom mis en valeur dans un cadre arrondi de couleur distincte, contour noir compris
+-- (2026-08-10, demande explicite) -- aventuriers, ennemis, cartes. `pad` ajoute de la
+-- marge verticale autour du texte (le cadre grandit, le texte reste à `size` mais se
+-- recentre dedans) -- l'appelant doit alors décaler les éléments qui suivent en
+-- conséquence, ces emplacements étant calés au pixel près (voir fonts.lua --
+-- BODY_FONT_NATIVE_SIZE).
+local function name_badge(str, x, y, w, size, bg, text_color, inset, pad)
+  inset = inset or 4
+  pad = pad or 0
+  local bx, bw, bh = x + inset, w - inset * 2, size + pad * 2
+  set(bg)
+  love.graphics.rectangle("fill", bx, y, bw, bh, 4, 4)
+  set(Theme.black)
+  love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", bx, y, bw, bh, 4, 4)
+  love.graphics.setLineWidth(1)
+  text(str, x, y + pad, w, size, text_color, "center")
+end
+
 --- Dessine `icon` (un emoji) si une police-icône capable de le rendre a pu
 -- être chargée, sinon replie sur `label` (texte simple, toujours lisible).
 -- Voir src/ui/fonts.lua — jamais de glyphe manquant/tofu à l'écran.
@@ -258,6 +277,12 @@ local function bar(x, y, w, h, pct, color)
   love.graphics.rectangle("fill", x, y, w, h, 4, 4)
   set(color)
   love.graphics.rectangle("fill", x, y, w * math.max(0, math.min(1, pct)), h, 4, 4)
+  -- Contour noir (2026-08-10, demande explicite) : accentue l'importance de la barre,
+  -- même traitement que name_badge.
+  set(Theme.black)
+  love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", x, y, w, h, 4, 4)
+  love.graphics.setLineWidth(1)
 end
 
 local function unit_anim_transform(controller, id)
@@ -408,14 +433,15 @@ local function draw_hero(controller, h, r)
 
   set(Theme.text, dead and 0.45 or 1)
   draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, 40, Theme.text)
-  text(h.name, 0, 44, r.w, 16)
-  bar(8, 58, r.w - 16, 7, h.hp / h.max_hp, Theme.hp)
-  text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 67, r.w, 9, Theme.muted)
+  local hero_palette = Theme.card_class[h.class_id] or Theme.card_class.generic
+  name_badge(h.name, 0, 44, r.w, 16, hero_palette.border, Theme.bg, 4, 2)
+  bar(8, 62, r.w - 16, 7, h.hp / h.max_hp, Theme.hp)
+  text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 71, r.w, 9, Theme.muted)
 
   -- Énergie : nombre précis + icône, en gros (2026-08-08, doublement de taille sur
   -- retour du porteur de projet) plutôt que 6 pastilles -- réutilise RichText comme
   -- pour le texte de carte, juste avec un `size` bien plus grand.
-  RichText.draw(h.energy .. ' "energie"', 0, 80, r.w, 24, Theme.energy)
+  RichText.draw(h.energy .. ' "energie"', 0, 84, r.w, 24, Theme.energy)
 
   if showing_action_buttons and arrow_mode then
     -- Mode "flèche" : pas de boutons texte -- un halo coloré + libellé
@@ -549,18 +575,18 @@ local function draw_enemy(controller, e, r)
 
   set(Theme.text, dead and 0.45 or 1)
   draw_enemy_icon(e.template_id, e.icon, e.label, 0, 4, r.w, 40, Theme.text)
-  text(e.name .. " Nv." .. e.level, 0, 44, r.w, 9)
+  name_badge(e.name .. " Nv." .. e.level, 0, 44, r.w, 16, Theme.enemy_nameplate, Theme.text, 4, 3)
   if not dead then
-    bar(8, 66, r.w - 16, 7, e.hp / e.max_hp, Theme.hp)
-    text(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 75, r.w, 9, Theme.muted)
+    bar(8, 72, r.w - 16, 7, e.hp / e.max_hp, Theme.hp)
+    text(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 81, r.w, 9, Theme.muted)
     local badges = {}
     if e.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = e.defense } end
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
     if (e.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = e.vulnerabilite } end
-    draw_badge_row(badges, 0, 88, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
+    draw_badge_row(badges, 0, 94, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
   end
-  text(enemy_telegraph_text(controller.state, e), 0, 104, r.w, 8, Theme.accent)
+  text(enemy_telegraph_text(controller.state, e), 0, 110, r.w, 8, Theme.accent)
   draw_shield_fx(controller, e.id, r)
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
@@ -693,21 +719,33 @@ local function draw_hand(controller)
     love.graphics.scale(scale, scale)
     love.graphics.translate(-r.w / 2, -r.h / 2)
 
-    panel(0, 0, r.w, r.h, Theme.panel_light)
-    set(is_pending and Theme.accent or Theme.panel_light)
-    love.graphics.setLineWidth(is_pending and 3 or 1)
+    -- Identité de classe (2026-08-10) : fond teinté + double contour (extérieur
+    -- sombre, intérieur clair dans l'accent de classe) -- voir Theme.card_class.
+    -- La sélection (`is_pending`) reste exclusivement signalée par l'or de
+    -- Theme.accent sur le contour extérieur, jamais mélangée à la couleur de classe.
+    local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
+    panel(0, 0, r.w, r.h, palette.bg)
+    set(is_pending and Theme.accent or Theme.black)
+    love.graphics.setLineWidth(is_pending and 3 or 2)
     love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
+    set(palette.border)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", 3, 3, r.w - 6, r.h - 6, 8, 8)
     love.graphics.setLineWidth(1)
 
     set(Theme.energy); love.graphics.circle("fill", 14, 12, 9)
     set(Theme.bg or { 0.05, 0.1, 0.1 })
     love.graphics.setFont(Fonts.get(11)); love.graphics.printf(cost_text, 4, 6, 20, "center")
 
-    text(def.tier == "avance" and "Av." or "Dép.", 0, 2, r.w - 4, 8, Theme.muted, "right")
     -- Icône de classe retirée (2026-08-08, jugée inutile) : plus de place pour le
     -- texte de la carte, la chose la plus importante à lire vite en jeu.
-    text(def.name, 2, 22, r.w - 4, 9, has_bonus and Theme.heal or Theme.text)
-    RichText.draw(desc_text, 3, 40, r.w - 6, 10, has_bonus and Theme.heal or Theme.muted)
+    -- Indication de palier ("Dép."/"Av.") retirée (2026-08-10, demande explicite) --
+    -- reste visible en draft via le liseré or sur "Avancé" (voir plus bas).
+    -- Texte du nom toujours sombre sur le cadre coloré (pas de vert "bonus" ici --
+    -- collision de lisibilité avec le vert de l'Assassin -- le vert reste porté par
+    -- la description juste en dessous, qui suffit à signaler l'aperçu de Transcendance).
+    name_badge(def.name, 2, 22, r.w - 4, 16, palette.border, Theme.bg, 2, 1)
+    RichText.draw(desc_text, 3, 42, r.w - 6, 10, has_bonus and Theme.heal or Theme.muted)
     love.graphics.pop()
   end
 
@@ -1159,19 +1197,22 @@ function View.draw(controller)
         love.graphics.scale(sx, 1)
         love.graphics.translate(-r.w / 2, -r.h / 2)
         if show_front then
-          panel(0, 0, r.w, r.h, Theme.panel_light)
-          -- Bordure dorée sur les cartes "Avancé" (2026-08-09) : les distingue
-          -- d'un coup d'œil des "Départ" pendant le draft, au lieu du seul
-          -- petit "Av." en coin -- Theme.accent est déjà cette teinte or/ambre.
-          if def.tier == "avance" then
-            set(Theme.accent); love.graphics.setLineWidth(2)
-            love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
-            love.graphics.setLineWidth(1)
-          end
+          -- Même identité de classe que la main (2026-08-10, voir Theme.card_class) --
+          -- bordure dorée sur les cartes "Avancé" (2026-08-09) conservée sur le contour
+          -- extérieur, exactement comme le contour "sélectionné" de la main.
+          local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
+          panel(0, 0, r.w, r.h, palette.bg)
+          set(def.tier == "avance" and Theme.accent or Theme.black)
+          love.graphics.setLineWidth(def.tier == "avance" and 3 or 2)
+          love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
+          set(palette.border)
+          love.graphics.setLineWidth(1)
+          love.graphics.rectangle("line", 3, 3, r.w - 6, r.h - 6, 8, 8)
+          love.graphics.setLineWidth(1)
           set(Theme.energy); love.graphics.circle("fill", 16, 14, 10)
           set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), 6, 7, 20, "center")
-          text(def.name, 4, 26, r.w - 8, 11, Theme.text)
-          RichText.draw(def.desc, 4, 46, r.w - 8, 11, Theme.muted)
+          name_badge(def.name, 4, 26, r.w - 8, 16, palette.border, Theme.bg, 2, 2)
+          RichText.draw(def.desc, 4, 50, r.w - 8, 11, Theme.muted)
         else
           panel(0, 0, r.w, r.h, Theme.panel_light)
           text("?", 0, r.h / 2 - 12, r.w, 26, Theme.muted)
