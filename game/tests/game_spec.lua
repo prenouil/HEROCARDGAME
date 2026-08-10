@@ -8,6 +8,7 @@ local Combat = require("src.rules.combat")
 local Cards = require("src.data.cards")
 local Enemies = require("src.data.enemies")
 local Encounter = require("src.rules.encounter")
+local Rng = require("src.util.rng")
 
 describe("Game.reset_run", function()
   it("démarre une run avec 4 héros vivants, une main de 5 et un deck de 5", function()
@@ -32,7 +33,7 @@ describe("Flux de jeu : jouer une carte", function()
       puissance = 0, saignements = 0, has_acted = false,
     }
     state.heroes = { hero }
-    local enemy = Encounter.instantiate_enemy(Enemies.by_id("gobelin"), 1, function() return 1 end)
+    local enemy = Encounter.instantiate_enemy(Enemies.by_id("gobelin"), 1, function() return 1 end, Rng.new(1))
     enemy.hp = 100; enemy.max_hp = 100
     state.enemies = { enemy }
 
@@ -77,12 +78,13 @@ end)
 describe("Flux de jeu : fin de tour et résolution ennemie", function()
   it("défausse la main, applique les saignements, résout les ennemis, puis avance le tour", function()
     local state = Game.new_state()
+    state.rng = Game.new_rng_streams(1) -- Game.start_turn (plus bas) tire du flux enemy_turn
     state.heroes = {
       { id = "guerrier", class_id = "guerrier", name = "Guerrier", icon = "", hp = 18, max_hp = 18,
         energy = 0, defense = 0, esquive = 0, camoufle = 0, incapacite = 0, vulnerabilite = 0,
         puissance = 0, saignements = 0, has_acted = true },
     }
-    local enemy = Encounter.instantiate_enemy(Enemies.by_id("gobelin"), 1, function() return 1 end)
+    local enemy = Encounter.instantiate_enemy(Enemies.by_id("gobelin"), 1, function() return 1 end, Rng.new(1))
     enemy.hp = 100; enemy.max_hp = 100
     enemy.incapacite = 1; enemy.vulnerabilite = 1 -- pour vérifier leur décroissance en fin de tour
     enemy.next_move = { kind = "dmg", name = "Griffure", icon = "", amount = 5 }

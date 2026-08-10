@@ -17,13 +17,14 @@ function Encounter.budget_for_combat(n)
 end
 
 -- 40 tentatives, garde la composition dont le coût total colle le mieux au budget.
-function Encounter.generate_encounter(budget)
+-- `rng` (2026-08-10, demande explicite -- tirages reproductibles) : voir Game.reset_run.
+function Encounter.generate_encounter(budget, rng)
   local best = nil
   for _ = 1, 40 do
-    local count = math.random(1, Encounter.MAX_ENEMIES_PER_COMBAT)
+    local count = rng:random(1, Encounter.MAX_ENEMIES_PER_COMBAT)
     local picks = {}
     for i = 1, count do
-      picks[i] = Enemies.templates[math.random(#Enemies.templates)]
+      picks[i] = Enemies.templates[rng:random(#Enemies.templates)]
     end
     local per_slot = budget / count
     local instances = {}
@@ -40,12 +41,12 @@ function Encounter.generate_encounter(budget)
   return best.instances
 end
 
-function Encounter.instantiate_enemy(template, level, uid_gen)
-  local max_hp = Enemies.roll_scaled(template.hp_base, level)
+function Encounter.instantiate_enemy(template, level, uid_gen, rng)
+  local max_hp = Enemies.roll_scaled(template.hp_base, level, rng)
   return {
     id = template.id .. "-" .. uid_gen(), template_id = template.id, name = template.name, icon = template.icon, label = template.label, level = level,
     max_hp = max_hp, hp = max_hp,
-    shield_rolled = template.shield_base and Enemies.roll_scaled(template.shield_base, level) or 0,
+    shield_rolled = template.shield_base and Enemies.roll_scaled(template.shield_base, level, rng) or 0,
     defense = 0, saignements = 0, incapacite = 0, vulnerabilite = 0,
     defending = false, defend_cycle = false, took_damage_this_turn = false, took_fire_damage_this_turn = false,
     next_move = nil, target_hero_id = nil,
@@ -58,7 +59,7 @@ function Encounter.summary(enemies)
   return table.concat(parts, ", ")
 end
 
-function Encounter.pick_hero_target(state, mode)
+function Encounter.pick_hero_target(state, mode, rng)
   local alive = Combat.living_heroes(state)
   if #alive == 0 then return nil end
   if mode == "lowest-hp" then
@@ -66,10 +67,16 @@ function Encounter.pick_hero_target(state, mode)
     for _, h in ipairs(alive) do if h.hp < best.hp then best = h end end
     return best
   end
-  return alive[math.random(#alive)]
+  return alive[rng:random(#alive)]
 end
 
+-- `state.rng.enemy_turn` (2026-08-10, demande explicite -- cibles/coups ennemis
+-- reproductibles à l'identique pour un run donné) : un seul flux, jamais math.random
+-- directement -- voir Game.reset_run. `state` porte déjà `rng`, pas besoin d'un
+-- paramètre séparé ici (contrairement à generate_encounter/instantiate_enemy, qui
+-- ne reçoivent pas `state`).
 function Encounter.roll_telegraphs(state)
+  local rng = state.rng.enemy_turn
   for _, e in ipairs(state.enemies) do
     e.took_damage_this_turn = false
     e.took_fire_damage_this_turn = false
@@ -79,11 +86,11 @@ function Encounter.roll_telegraphs(state)
       e.defense = 0
     else
       local template = Enemies.by_id(e.template_id)
-      local move = template.choose_move(e, state.enemies)
+      local move = template.choose_move(e, state.enemies, rng)
       e.next_move = move
       e.defense = (e.shield_rolled or 0) + (move.defense_bonus_this_turn or 0)
       if Combat.TARGETABLE_MOVE_KINDS[move.kind] then
-        local t = Encounter.pick_hero_target(state, template.target_mode)
+        local t = Encounter.pick_hero_target(state, template.target_mode, rng)
         e.target_hero_id = t and t.id or nil
       else
         e.target_hero_id = nil

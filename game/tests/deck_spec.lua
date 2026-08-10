@@ -1,9 +1,10 @@
 local Deck = require("src.rules.deck")
 local Combat = require("src.rules.combat")
 local Cards = require("src.data.cards")
+local Rng = require("src.util.rng")
 
 local function make_state()
-  return { hand = {}, deck = {}, discard = {}, log = {} }
+  return { hand = {}, deck = {}, discard = {}, log = {}, rng = { deck = Rng.new(1) } }
 end
 
 local function fake_cards(n)
@@ -16,7 +17,7 @@ end
 describe("Deck.build_starting_deck", function()
   it("contient 10 cartes : 3 Coup direct, 3 Encaisser, 1 par classe", function()
     local uid = 0
-    local deck = Deck.build_starting_deck(function() uid = uid + 1 return uid end)
+    local deck = Deck.build_starting_deck(function() uid = uid + 1 return uid end, Rng.new(1))
     assert.equal(10, #deck)
     local counts = {}
     for _, c in ipairs(deck) do counts[c.def.code] = (counts[c.def.code] or 0) + 1 end
@@ -60,7 +61,7 @@ end)
 describe("Deck.shuffle", function()
   it("ne perd ni ne duplique de carte", function()
     local original = fake_cards(10)
-    local shuffled = Deck.shuffle(original)
+    local shuffled = Deck.shuffle(original, Rng.new(1))
     assert.equal(#original, #shuffled)
   end)
 end)

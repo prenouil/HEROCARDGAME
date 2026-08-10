@@ -35,6 +35,7 @@ local function mousepressed_tap(controller, x, y, button)
   -- screen == "playing"
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
+  if View.point_in(View.restart_turn_button, x, y) then controller:restart_turn(); return end
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
 
   local pending = state.pending
@@ -103,6 +104,7 @@ local function mousepressed_arrow(controller, x, y, button)
   -- screen == "playing"
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
+  if View.point_in(View.restart_turn_button, x, y) then controller:restart_turn(); return end
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
 
   local pending = state.pending
@@ -154,10 +156,6 @@ end
 
 function Input.mousepressed(controller, x, y, button)
   if button ~= 1 then return end
-  if controller.screen == "playing" and View.point_in(View.mode_toggle_button, x, y) then
-    controller:toggle_input_mode()
-    return
-  end
   if controller.input_mode == "arrow" then mousepressed_arrow(controller, x, y, button)
   else mousepressed_tap(controller, x, y, button) end
 end
@@ -182,6 +180,7 @@ local function is_hovering_clickable_tap(controller, x, y)
 
   if View.point_in(View.end_turn_button, x, y) then return true end
   if View.point_in(View.restart_button, x, y) then return true end
+  if View.point_in(View.restart_turn_button, x, y) then return true end
   if View.point_in(View.instant_victory_button, x, y) then return true end
 
   local pending = state.pending
@@ -229,6 +228,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
 
   if View.point_in(View.end_turn_button, x, y) then return true end
   if View.point_in(View.restart_button, x, y) then return true end
+  if View.point_in(View.restart_turn_button, x, y) then return true end
   if View.point_in(View.instant_victory_button, x, y) then return true end
 
   local pending = state.pending
@@ -259,7 +259,6 @@ local function is_hovering_clickable_arrow(controller, x, y)
 end
 
 function Input.is_hovering_clickable(controller, x, y)
-  if controller.screen == "playing" and View.point_in(View.mode_toggle_button, x, y) then return true end
   if controller.input_mode == "arrow" then return is_hovering_clickable_arrow(controller, x, y) end
   return is_hovering_clickable_tap(controller, x, y)
 end

@@ -13,6 +13,7 @@ local Enemies = require("src.data.enemies")
 local Combat = require("src.rules.combat")
 local Deck = require("src.rules.deck")
 local Encounter = require("src.rules.encounter")
+local Rng = require("src.util.rng")
 
 local Game = {}
 
@@ -51,7 +52,27 @@ function Game.new_state()
     heroes = {}, enemies = {}, deck = {}, hand = {}, discard = {},
     pending = nil, turn = 1, over = false,
     run = { combat_index = 1 }, draft_picks = nil,
-    combat_snapshot = nil, uid_counter = 0, log = {},
+    combat_snapshot = nil, turn_snapshot = nil, uid_counter = 0, log = {},
+    rng = nil, -- créés par Game.reset_run (voir Game.new_rng_streams)
+  }
+end
+
+-- Un flux indépendant par système à seed reproductible (2026-08-10, demande
+-- explicite -- pour un run donné, mêmes tirages même après un redémarrage de combat
+-- ou de tour) : "encounter" (composition + PV/bouclier des ennemis tirés à chaque
+-- combat), "deck" (ordre de mélange du deck), "enemy_turn" (cible + coup choisi par
+-- chaque ennemi, et la variance de ses montants, à chaque tour), "draft" (les 3
+-- cartes proposées en fin de combat). Seeds dérivées d'une seed maîtresse par de
+-- simples décalages -- pas un besoin d'indépendance statistique forte, juste que
+-- rejouer un flux ne consomme jamais les tirages d'un AUTRE flux.
+function Game.new_rng_streams(master_seed)
+  master_seed = master_seed or os.time()
+  return {
+    master_seed = master_seed,
+    encounter = Rng.new(master_seed),
+    deck = Rng.new(master_seed + 1),
+    enemy_turn = Rng.new(master_seed + 2),
+    draft = Rng.new(master_seed + 3),
   }
 end
 
@@ -66,6 +87,13 @@ function Game.snapshot_combat(state)
   state.combat_snapshot = {
     heroes = heroes, enemies = enemies, deck = deck,
     combat_index = state.run.combat_index,
+    -- État du flux "enemy_turn" à cet instant précis (2026-08-10, demande explicite
+    -- -- tirages reproductibles même après un redémarrage de combat) : ce snapshot
+    -- est toujours pris juste avant le premier Game.start_turn du combat (voir
+    -- reset_run/start_next_combat), donc juste avant le premier
+    -- Encounter.roll_telegraphs -- le restaurer avant de relancer start_turn fait
+    -- retomber les mêmes cibles/coups ennemis au tour 1, pas un nouveau tirage.
+    enemy_turn_rng_state = state.rng.enemy_turn.state,
   }
 end
 
@@ -83,6 +111,7 @@ function Game.restore_combat_snapshot(state)
   for i, c in ipairs(snap.deck) do deck[i] = c end
   state.deck = deck
   state.run.combat_index = snap.combat_index
+  state.rng.enemy_turn.state = snap.enemy_turn_rng_state
   state.hand = {}; state.discard = {}; state.pending = nil
   state.turn = 1; state.over = false
   state.log = {}
@@ -90,20 +119,70 @@ function Game.restore_combat_snapshot(state)
   Game.start_turn(state)
 end
 
---- Nouvelle run complète (équivalent resetGame).
-function Game.reset_run(state)
+--- Photo de l'état juste avant la pioche du tour (2026-08-10, demande explicite --
+-- bouton "Recommencer ce tour"), prise dans Game.start_turn APRÈS l'énergie/les
+-- statuts qui décroissent et le tirage des télégraphes ennemis (déjà fixés à cet
+-- instant, donc reproductibles à l'identique) mais AVANT Deck.fill_hand -- restaurer
+-- puis repiocher redonne exactement la même main, puisque le deck n'est qu'une liste
+-- dépilée dans l'ordre (jamais rebattue tant qu'elle n'est pas vide, voir
+-- Deck.fill_hand) : aucun hasard supplémentaire à rejouer. Même principe que
+-- Game.snapshot_combat ci-dessus, à l'échelle du tour plutôt que du combat.
+function Game.snapshot_turn(state)
+  local heroes, enemies = {}, {}
+  for i, h in ipairs(state.heroes) do heroes[i] = shallow_copy(h) end
+  for i, e in ipairs(state.enemies) do enemies[i] = shallow_copy(e) end
+  local deck, hand, discard = {}, {}, {}
+  for i, c in ipairs(state.deck) do deck[i] = c end
+  for i, c in ipairs(state.hand) do hand[i] = c end
+  for i, c in ipairs(state.discard) do discard[i] = c end
+  state.turn_snapshot = {
+    heroes = heroes, enemies = enemies, deck = deck, hand = hand, discard = discard,
+    turn = state.turn,
+  }
+end
+
+--- Recommence le tour en cours depuis la dernière photo (voir Game.snapshot_turn) --
+-- pas tout le combat. Ne rejoue PAS Game.start_turn au complet (ça redonnerait +1
+-- énergie et re-tirerait de nouveaux télégraphes au hasard) : seule la pioche est
+-- refaite, depuis le deck restauré.
+function Game.restore_turn_snapshot(state)
+  local snap = state.turn_snapshot
+  if not snap then Game.restore_combat_snapshot(state); return end
+  local heroes, enemies = {}, {}
+  for i, h in ipairs(snap.heroes) do heroes[i] = shallow_copy(h) end
+  for i, e in ipairs(snap.enemies) do enemies[i] = shallow_copy(e) end
+  state.heroes = heroes
+  state.enemies = enemies
+  local deck, hand, discard = {}, {}, {}
+  for i, c in ipairs(snap.deck) do deck[i] = c end
+  for i, c in ipairs(snap.hand) do hand[i] = c end
+  for i, c in ipairs(snap.discard) do discard[i] = c end
+  state.deck = deck; state.hand = hand; state.discard = discard
+  state.turn = snap.turn
+  state.pending = nil; state.over = false
+  state.log = {}
+  Combat.log(state, "Tour " .. state.turn .. " relancé depuis le début.", "sys")
+  Deck.fill_hand(state)
+end
+
+--- Nouvelle run complète (équivalent resetGame). `seed` (optionnel, 2026-08-10,
+-- demande explicite) : fixe la seed maîtresse des 4 flux aléatoires de la run
+-- (voir Game.new_rng_streams) -- même run rejouée à l'identique si redonnée ;
+-- par défaut une seed dérivée de l'horloge, comme avant.
+function Game.reset_run(state, seed)
   local heroes = {}
   for i, def in ipairs(Heroes.defs) do heroes[i] = fresh_hero(def) end
   state.heroes = heroes
   state.run = { combat_index = 1 }
+  state.rng = Game.new_rng_streams(seed)
   local budget = Encounter.budget_for_combat(1)
-  local instances = Encounter.generate_encounter(budget)
+  local instances = Encounter.generate_encounter(budget, state.rng.encounter)
   local enemies = {}
   for i, inst in ipairs(instances) do
-    enemies[i] = Encounter.instantiate_enemy(inst.template, inst.level, function() return Game.next_uid(state) end)
+    enemies[i] = Encounter.instantiate_enemy(inst.template, inst.level, function() return Game.next_uid(state) end, state.rng.encounter)
   end
   state.enemies = enemies
-  state.deck = Deck.build_starting_deck(function() return Game.next_uid(state) end)
+  state.deck = Deck.build_starting_deck(function() return Game.next_uid(state) end, state.rng.deck)
   state.hand = {}; state.discard = {}; state.pending = nil
   state.turn = 1; state.over = false
   state.log = {}
@@ -119,17 +198,17 @@ function Game.start_next_combat(state)
   local heroes = {}
   for i, h in ipairs(state.heroes) do heroes[i] = carried_hero(h) end
   state.heroes = heroes
-  local instances = Encounter.generate_encounter(budget)
+  local instances = Encounter.generate_encounter(budget, state.rng.encounter)
   local enemies = {}
   for i, inst in ipairs(instances) do
-    enemies[i] = Encounter.instantiate_enemy(inst.template, inst.level, function() return Game.next_uid(state) end)
+    enemies[i] = Encounter.instantiate_enemy(inst.template, inst.level, function() return Game.next_uid(state) end, state.rng.encounter)
   end
   state.enemies = enemies
   local reclaimed = {}
   for _, c in ipairs(state.deck) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.hand) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.discard) do reclaimed[#reclaimed + 1] = c end
-  state.deck = Deck.shuffle(reclaimed)
+  state.deck = Deck.shuffle(reclaimed, state.rng.deck)
   state.hand = {}; state.discard = {}; state.pending = nil
   state.turn = 1
   state.log = {}
@@ -156,6 +235,7 @@ function Game.start_turn(state)
   Combat.log(state, "— Tour " .. state.turn .. " : +1 énergie, pioche à " .. Deck.HAND_SIZE .. " —", "sys")
 
   Encounter.roll_telegraphs(state)
+  Game.snapshot_turn(state)
   local drawn = Deck.fill_hand(state)
 
   return drawn

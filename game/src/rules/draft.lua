@@ -13,7 +13,10 @@ Draft.DUP_CHANCES = { 1, 0.25, 0.5 }
 
 local function contains(set, v) return set[v] == true end
 
+-- `state.rng.draft` (2026-08-10, demande explicite -- tirages reproductibles à
+-- l'identique pour un run donné) : jamais math.random directement, voir Game.reset_run.
 function Draft.pick_cards(state)
+  local rng = state.rng.draft
   local present_classes = {}
   for _, h in ipairs(Heroes.defs) do present_classes[h.class_id] = true end
 
@@ -50,14 +53,14 @@ function Draft.pick_cards(state)
     end
 
     local chosen
-    if math.random() < chance and #dup_pool > 0 then
-      chosen = dup_pool[math.random(#dup_pool)]
+    if rng:random() < chance and #dup_pool > 0 then
+      chosen = dup_pool[rng:random(#dup_pool)]
     elseif #new_pool > 0 then
-      chosen = new_pool[math.random(#new_pool)]
+      chosen = new_pool[rng:random(#new_pool)]
     elseif #dup_pool > 0 then
-      chosen = dup_pool[math.random(#dup_pool)]
+      chosen = dup_pool[rng:random(#dup_pool)]
     else
-      chosen = pool[math.random(#pool)]
+      chosen = pool[rng:random(#pool)]
     end
     picks[#picks + 1] = chosen
     used_codes[chosen.code] = true

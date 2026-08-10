@@ -153,14 +153,17 @@ View.discard_pile_rect = { x = W - 84, y = 404, w = 64, h = CARD_H }
 -- sélection de carte en cours.
 View.cancel_button = { x = W / 2 - 50, y = 560, w = 100, h = 32, label = "Annuler" }
 View.end_turn_button = { x = W / 2 - 150, y = 600, w = 140, h = 32, label = "Fin de tour" }
-View.restart_button = { x = W / 2 + 10, y = 600, w = 180, h = 32, label = "Recommencer le combat" }
 -- Outil de test discret (2026-08-08) : termine le combat en cours par une
--- victoire immédiate, sans passer par la résolution réelle des ennemis.
-View.instant_victory_button = { x = View.restart_button.x + View.restart_button.w + 10, y = 604, w = 140, h = 24, label = "victoire instantanée" }
--- Bascule 3-clics / flèche (2026-08-09, spike de ciblage dynamique) : visible et
--- cliquable à dessein (contrairement à "victoire instantanée") -- c'est le point
--- d'entrée du test, pas un outil de debug caché.
-View.mode_toggle_button = { x = View.instant_victory_button.x + View.instant_victory_button.w + 10, y = 600, w = 124, h = 32 }
+-- victoire immédiate, sans passer par la résolution réelle des ennemis. Prend
+-- l'ancien emplacement de restart_button (2026-08-10, voir ci-dessous).
+View.instant_victory_button = { x = View.end_turn_button.x + View.end_turn_button.w + 10, y = 604, w = 140, h = 24, label = "victoire instantanée" }
+-- Recommencer le combat : déplacé (2026-08-10, demande explicite) sur l'ancien
+-- emplacement de la bascule 3-clics/flèche, retirée -- le mode flèche est le canon
+-- depuis longtemps (voir decision-log.md, 2026-08-09), le bouton n'avait plus lieu
+-- d'être. Recommencer le TOUR juste au-dessus (voir Game.snapshot_turn/
+-- restore_turn_snapshot) : granularité plus fine, sans perdre le combat entier.
+View.restart_button = { x = View.instant_victory_button.x + View.instant_victory_button.w + 10, y = 600, w = 180, h = 32, label = "Recommencer le combat" }
+View.restart_turn_button = { x = View.restart_button.x, y = View.restart_button.y - 32 - 6, w = 180, h = 32, label = "Recommencer ce tour" }
 View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
 
 local function point_in(r, x, y)
@@ -654,6 +657,31 @@ local function preview_cost(def, hero)
   return Combat.effective_cost(hero, def)
 end
 
+--- Dessine le contenu plein d'une carte (fond teinté par classe, double contour,
+-- pastille de coût, nom en cadre, description) dans l'espace local [0,0]..[w,h] --
+-- l'appelant gère push/translate/scale/pop. Partagé entre la main (draw_one
+-- ci-dessous) et le vol de cartes pioche/défausse (draw_card_flights) : une carte
+-- en plein vol doit avoir exactement le même visage qu'immobile en main, jamais un
+-- second rendu qui diverge (voir Theme.card_class).
+local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight)
+  local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
+  panel(0, 0, w, h, palette.bg)
+  set(highlight and Theme.accent or Theme.black)
+  love.graphics.setLineWidth(highlight and 3 or 2)
+  love.graphics.rectangle("line", 0, 0, w, h, 10, 10)
+  set(palette.border)
+  love.graphics.setLineWidth(1)
+  love.graphics.rectangle("line", 3, 3, w - 6, h - 6, 8, 8)
+  love.graphics.setLineWidth(1)
+
+  set(Theme.energy); love.graphics.circle("fill", 14, 12, 9)
+  set(Theme.bg or { 0.05, 0.1, 0.1 })
+  love.graphics.setFont(Fonts.get(11)); love.graphics.printf(tostring(cost_text), 4, 6, 20, "center")
+
+  name_badge(def.name, 2, 22, w - 4, 16, palette.border, Theme.bg, 2, 1)
+  RichText.draw(desc_text, 3, 42, w - 6, 10, desc_color or Theme.muted)
+end
+
 local function draw_hand(controller)
   local state = controller.state
   local rects = View.hand_rects(state)
@@ -719,33 +747,12 @@ local function draw_hand(controller)
     love.graphics.scale(scale, scale)
     love.graphics.translate(-r.w / 2, -r.h / 2)
 
-    -- Identité de classe (2026-08-10) : fond teinté + double contour (extérieur
-    -- sombre, intérieur clair dans l'accent de classe) -- voir Theme.card_class.
     -- La sélection (`is_pending`) reste exclusivement signalée par l'or de
     -- Theme.accent sur le contour extérieur, jamais mélangée à la couleur de classe.
-    local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
-    panel(0, 0, r.w, r.h, palette.bg)
-    set(is_pending and Theme.accent or Theme.black)
-    love.graphics.setLineWidth(is_pending and 3 or 2)
-    love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
-    set(palette.border)
-    love.graphics.setLineWidth(1)
-    love.graphics.rectangle("line", 3, 3, r.w - 6, r.h - 6, 8, 8)
-    love.graphics.setLineWidth(1)
-
-    set(Theme.energy); love.graphics.circle("fill", 14, 12, 9)
-    set(Theme.bg or { 0.05, 0.1, 0.1 })
-    love.graphics.setFont(Fonts.get(11)); love.graphics.printf(cost_text, 4, 6, 20, "center")
-
-    -- Icône de classe retirée (2026-08-08, jugée inutile) : plus de place pour le
-    -- texte de la carte, la chose la plus importante à lire vite en jeu.
-    -- Indication de palier ("Dép."/"Av.") retirée (2026-08-10, demande explicite) --
-    -- reste visible en draft via le liseré or sur "Avancé" (voir plus bas).
-    -- Texte du nom toujours sombre sur le cadre coloré (pas de vert "bonus" ici --
-    -- collision de lisibilité avec le vert de l'Assassin -- le vert reste porté par
-    -- la description juste en dessous, qui suffit à signaler l'aperçu de Transcendance).
-    name_badge(def.name, 2, 22, r.w - 4, 16, palette.border, Theme.bg, 2, 1)
-    RichText.draw(desc_text, 3, 42, r.w - 6, 10, has_bonus and Theme.heal or Theme.muted)
+    -- Pas de vert "bonus" sur le nom (collision de lisibilité avec l'Assassin, déjà
+    -- vert) -- le vert reste porté par la description, qui suffit à signaler
+    -- l'aperçu de Transcendance.
+    draw_card_face(def, r.w, r.h, cost_text, desc_text, has_bonus and Theme.heal or Theme.muted, is_pending)
     love.graphics.pop()
   end
 
@@ -771,11 +778,13 @@ local function draw_cancel_button(controller)
 end
 
 local function draw_bottom_controls(controller)
-  local b1, b2 = View.end_turn_button, View.restart_button
+  local b1, b2, b4 = View.end_turn_button, View.restart_button, View.restart_turn_button
   set(Theme.accent); love.graphics.rectangle("fill", b1.x, b1.y, b1.w, b1.h, 8, 8)
   set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(b1.label, b1.x, b1.y + 8, b1.w, "center")
   set(Theme.muted); love.graphics.rectangle("line", b2.x, b2.y, b2.w, b2.h, 8, 8)
   text(b2.label, b2.x, b2.y + 8, b2.w, 12, Theme.text)
+  set(Theme.muted); love.graphics.rectangle("line", b4.x, b4.y, b4.w, b4.h, 8, 8)
+  text(b4.label, b4.x, b4.y + 8, b4.w, 12, Theme.text)
 
   -- Discret à dessein : pas de cadre, texte petit et sombre -- un outil de
   -- test, pas une action de jeu normale.
@@ -881,12 +890,19 @@ local function wrapped_line_count(str, avail_w, size)
   return math.max(1, #wrapped)
 end
 
--- Cartes "fantômes" qui volent de la pioche vers la main (arrivée) ou de la
--- main vers la défausse (départ) -- port de flyGhost()/animateDrawnCards()/
--- animateDiscardedCards() depuis proto-cartes-completes/index.html. Chaque
--- entrée de `controller.card_anims` (voir controller.lua) porte son rect de
--- départ/arrivée déjà calculés -- cette fonction ne fait qu'interpoler et
--- dessiner, jamais de logique de jeu.
+-- Canvas réutilisé pour toutes les cartes en vol, à toutes les frames -- créé à la
+-- volée (lazy) une seule fois, jamais une allocation de Canvas par carte par frame.
+local card_flight_canvas
+
+-- Cartes qui volent de la pioche vers la main (arrivée) ou de la main vers la
+-- défausse (départ) -- port de flyGhost()/animateDrawnCards()/animateDiscardedCards()
+-- depuis proto-cartes-completes/index.html. Chaque entrée de `controller.card_anims`
+-- (voir controller.lua) porte son rect de départ/arrivée déjà calculés -- cette
+-- fonction ne fait qu'interpoler et dessiner, jamais de logique de jeu.
+-- Affiche désormais la vraie carte (2026-08-10, demande explicite -- "fluidité de
+-- l'expérience") via draw_card_face, rendue sur un canvas pour appliquer le fondu
+-- d'opacité uniformément (set() ne peut pas multiplier un alpha global sur tous
+-- les tracés du dessin de carte) -- plus un simple rectangle-fantôme avec le nom.
 local function draw_card_flights(controller)
   for _, a in ipairs(controller.card_anims) do
     if a.elapsed >= a.delay then
@@ -897,14 +913,18 @@ local function draw_card_flights(controller)
       local w = a.from.w + (a.to.w - a.from.w) * ease
       local h = a.from.h + (a.to.h - a.from.h) * ease
       local alpha = a.fade_in and math.min(1, p * 1.6) or (1 - p * 0.8)
-      set(Theme.panel_light, alpha)
-      love.graphics.rectangle("fill", x, y, w, h, 8, 8)
-      set(Theme.accent, alpha); love.graphics.setLineWidth(1)
-      love.graphics.rectangle("line", x, y, w, h, 8, 8)
-      if a.name then
-        set(Theme.text, alpha)
-        love.graphics.setFont(Fonts.get(9))
-        love.graphics.printf(a.name, x + 3, y + h / 2 - 6, w - 6, "center")
+      if a.def then
+        card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+        love.graphics.setCanvas(card_flight_canvas)
+        love.graphics.clear(0, 0, 0, 0)
+        draw_card_face(a.def, CARD_W, CARD_H, a.def.cost, a.def.desc, Theme.muted, false)
+        love.graphics.setCanvas()
+        love.graphics.setColor(1, 1, 1, alpha)
+        love.graphics.draw(card_flight_canvas, x, y, 0, w / CARD_W, h / CARD_H)
+      else
+        -- Repli (garde-fou -- ne devrait plus arriver, toutes les entrées portent `def`).
+        set(Theme.panel_light, alpha)
+        love.graphics.rectangle("fill", x, y, w, h, 8, 8)
       end
     end
   end
@@ -1017,15 +1037,6 @@ local function draw_tooltip(controller)
   end
 end
 
-local function draw_mode_toggle(controller)
-  local b = View.mode_toggle_button
-  local arrow_mode = controller.input_mode == "arrow"
-  set(arrow_mode and Theme.status or Theme.muted)
-  love.graphics.setLineWidth(2)
-  love.graphics.rectangle("line", b.x, b.y, b.w, b.h, 8, 8)
-  love.graphics.setLineWidth(1)
-  text(arrow_mode and "Mode : flèche" or "Mode : 3 clics", b.x, b.y + 10, b.w, 10, Theme.text)
-end
 
 -- Flèche dynamique (mode "flèche", 2026-08-09) : de la souris vers le héros
 -- pendant le choix de l'aventurier, puis du héros vers la cible finale si la
@@ -1050,7 +1061,13 @@ end
 -- temps pour un effet "vivant"), maillons = petits rectangles arrondis
 -- orientés sur la tangente locale de la courbe, pointe à l'arrivée orientée
 -- pareil (pas sur le segment droit origine->souris).
-local function draw_arrow(x1, y1, x2, y2, color)
+-- `tip_angle` (optionnel, radians) : impose l'orientation de la pointe (et donc du
+-- point de base sur lequel se cale la chaîne) au lieu de la déduire de la tangente
+-- d'arrivée -- utile quand la direction réelle est connue d'avance et fixe (2026-08-10,
+-- flèche de télégraphe ennemi : les ennemis sont toujours au-dessus des aventuriers
+-- dans la mise en page, "vers le bas" est donc toujours correct, indépendamment de la
+-- cambrure de la courbe qui peut faire dévier l'angle tangent calculé).
+local function draw_arrow(x1, y1, x2, y2, color, tip_angle)
   local dx, dy = x2 - x1, y2 - y1
   local dist = math.sqrt(dx * dx + dy * dy)
   if dist < 1 then return end
@@ -1060,13 +1077,31 @@ local function draw_arrow(x1, y1, x2, y2, color)
   local bow = math.min(dist * 0.22, 70) + math.sin(love.timer.getTime() * 3) * math.min(dist * 0.03, 8)
   local cx, cy = mx + nx * bow, my + ny * bow
 
+  -- Recul de la chaîne (2026-08-10, signalé par le porteur de projet -- deux essais
+  -- précédents ratés : un `t_end` en ligne droite qui ne suit pas fidèlement la
+  -- cambrure, puis un filtre par distance dont la zone d'exclusion circulaire autour
+  -- de la pointe n'est pas alignée avec l'axe du triangle sur une courbe qui s'incurve
+  -- -- le dernier maillon survivant pouvait se retrouver décalé sur le côté au lieu de
+  -- viser franchement la base). Solution correcte : calculer l'angle d'arrivée puis LE
+  -- POINT DE LA BASE du triangle (reculé de `arrow_reach` le long de cet axe) AVANT de
+  -- dessiner les maillons, et faire terminer la courbe de la chaîne pile sur ce point
+  -- (pas sur la pointe x2,y2) -- son dernier maillon (t=1) tombe alors exactement sur
+  -- la base, tangente comprise, quelle que soit la cambrure. `arrow_size` = même valeur
+  -- que le triangle dessiné plus bas (une seule source).
+  local etx, ety = quad_bezier_tangent(1, x1, y1, cx, cy, x2, y2)
+  local end_angle = tip_angle or math.atan(ety, etx)
+  local arrow_size = 12
+  local arrow_reach = arrow_size * math.cos(math.rad(30))
+  local bx = x2 - arrow_reach * math.cos(end_angle)
+  local by = y2 - arrow_reach * math.sin(end_angle)
+
   set(color)
   local link_size = 9
   local steps = math.max(4, math.floor(dist / 16))
   for i = 0, steps do
     local t = i / steps
-    local px, py = quad_bezier(t, x1, y1, cx, cy, x2, y2)
-    local tx, ty = quad_bezier_tangent(t, x1, y1, cx, cy, x2, y2)
+    local px, py = quad_bezier(t, x1, y1, cx, cy, bx, by)
+    local tx, ty = quad_bezier_tangent(t, x1, y1, cx, cy, bx, by)
     local scale = 0.55 + 0.45 * t -- maillons plus petits près de l'origine, comme une queue
     love.graphics.push()
     love.graphics.translate(px, py)
@@ -1075,14 +1110,38 @@ local function draw_arrow(x1, y1, x2, y2, color)
     love.graphics.pop()
   end
 
-  local etx, ety = quad_bezier_tangent(1, x1, y1, cx, cy, x2, y2)
-  local end_angle = math.atan(ety, etx)
-  local size = 12
   local a1, a2 = end_angle + math.rad(150), end_angle - math.rad(150)
   love.graphics.polygon("fill",
     x2, y2,
-    x2 + size * math.cos(a1), y2 + size * math.sin(a1),
-    x2 + size * math.cos(a2), y2 + size * math.sin(a2))
+    x2 + arrow_size * math.cos(a1), y2 + arrow_size * math.sin(a1),
+    x2 + arrow_size * math.cos(a2), y2 + arrow_size * math.sin(a2))
+end
+
+--- Flèche du télégraphe ennemi (2026-08-10, demande explicite) : indique quel
+-- aventurier une attaque ennemie va toucher, avec le même style "chaîne animée" que
+-- draw_arrow ci-dessus (réutilisée telle quelle -- jamais un second dessin de flèche
+-- qui diverge). Rouge (Theme.hp) pour ne jamais se confondre avec le vert/bleu du
+-- ciblage actif du joueur -- deux flèches, deux sens différents. Rien si l'ennemi
+-- est mort, n'a pas de coup télégraphié, si son coup ne cible personne (kind hors
+-- Combat.TARGETABLE_MOVE_KINDS -- soin, buff...), ou si la cible n'est plus vivante
+-- -- jamais vers un autre ennemi, le ciblage ennemi ne vise que des aventuriers
+-- (`target_hero_id`, voir encounter.lua).
+local function draw_enemy_target_arrows(controller)
+  local state = controller.state
+  local enemy_rects = View.enemy_rects(state)
+  local hero_rects = View.hero_rects(state)
+  for _, e in ipairs(state.enemies) do
+    if e.hp > 0 and e.next_move and Combat.TARGETABLE_MOVE_KINDS[e.next_move.kind] and e.target_hero_id then
+      local target = Combat.hero_by_id(state, e.target_hero_id)
+      if target and target.hp > 0 then
+        local er, hr = enemy_rects[e.id], hero_rects[target.id]
+        if er and hr then
+          draw_arrow(er.x + er.w / 2, er.y + er.h, hr.x + hr.w / 2, hr.y, Theme.hp, math.pi / 2)
+        end
+      end
+    end
+  end
+  love.graphics.setColor(1, 1, 1, 1)
 end
 
 local function draw_targeting_arrow(controller)
@@ -1147,6 +1206,8 @@ function View.draw(controller)
   text("Ta troupe", 20, HERO_ROW_Y - 14, 200, 10, Theme.muted, "left")
   for _, h in ipairs(state.heroes) do draw_hero(controller, h, View.hero_rects(state)[h.id]) end
 
+  draw_enemy_target_arrows(controller)
+
   -- Fenêtre de log retirée pour l'instant (2026-08-08, demande explicite -- l'espace
   -- gagné sert à séparer visuellement la troupe des ennemis, voir HERO_ROW_Y ci-dessus).
   -- `state.log` continue d'être alimenté côté règles, juste plus affiché ici.
@@ -1154,7 +1215,6 @@ function View.draw(controller)
   draw_hand(controller)
   draw_cancel_button(controller)
   draw_bottom_controls(controller)
-  draw_mode_toggle(controller)
   text(hint_text(controller), 0, 632, W, 10, Theme.muted)
 
   if controller.screen == "defeat" then

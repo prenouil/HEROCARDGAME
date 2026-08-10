@@ -61,7 +61,7 @@ function Controller.new()
   self.draft_flip = {} -- [index] = { t = elapsed } une fois le retournement démarré
   self.draft_flip_duration = DRAFT_FLIP_DURATION -- lu par view.lua pour l'easing
   self.anim = {} -- [unit_id] = { kind = "pulse-up"|"pulse-down"|"shake", t = elapsed }
-  self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, name } -- voir View.draw
+  self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, def } -- voir View.draw
   self.floaters = {} -- liste de { x, y, text, kind = "damage"|"heal", t } -- lu par view.lua
   self.particles = {} -- liste de { x, y, vx, vy, t } -- petit burst à l'impact
   self.status_pop = {} -- [unit_id] = { [status_key] = elapsed } -- pop d'un badge à son application
@@ -124,6 +124,23 @@ function Controller:restart_combat()
   if self.state.over then self:enter_draft_screen() end
 end
 
+--- Recommence uniquement le tour en cours (2026-08-10, demande explicite) --
+-- même nettoyage d'état d'animation que restart_combat, mais restaure la photo de
+-- tour (Game.restore_turn_snapshot) plutôt que celle de combat.
+function Controller:restart_turn()
+  self.screen = "playing"
+  self.seq:clear()
+  self.anim = {}
+  self.card_anims = {}
+  self.floaters = {}
+  self.particles = {}
+  self.status_pop = {}
+  self.shield_fx = {}
+  Game.restore_turn_snapshot(self.state)
+  self:consume_drawn_animation()
+  if self.state.over then self:enter_draft_screen() end
+end
+
 --- Outil de test (2026-08-08) : termine le combat en cours par une victoire
 -- immédiate (tous les ennemis à 0 PV), sans passer par la résolution réelle --
 -- réutilise le même chemin que la victoire normale (`Game.check_victory` +
@@ -154,11 +171,11 @@ function Controller:animate_draw(drawn_uids)
   for i, uid in ipairs(drawn_uids) do
     local dest = hand_rects[uid]
     if dest then
-      local name
-      for _, c in ipairs(self.state.hand) do if c.uid == uid then name = c.def.name break end end
+      local def
+      for _, c in ipairs(self.state.hand) do if c.uid == uid then def = c.def break end end
       self.card_anims[#self.card_anims + 1] = {
         from = origin, to = dest, elapsed = 0, delay = (i - 1) * DRAW_STAGGER,
-        duration = FLIGHT_DURATION, fade_in = true, name = name, uid = uid,
+        duration = FLIGHT_DURATION, fade_in = true, def = def, uid = uid,
       }
     end
   end
@@ -193,7 +210,7 @@ function Controller:animate_discard_snapshot(cards, exclude_uid)
       if origin then
         self.card_anims[#self.card_anims + 1] = {
           from = origin, to = dest, elapsed = 0, delay = (i - 1) * DISCARD_STAGGER,
-          duration = FLIGHT_DURATION, fade_in = false, name = c.def.name,
+          duration = FLIGHT_DURATION, fade_in = false, def = c.def,
         }
       end
     end
@@ -212,7 +229,7 @@ function Controller:maybe_animate_played_discard(played_uid, hand_before)
   if not origin then return end
   self.card_anims[#self.card_anims + 1] = {
     from = origin, to = View.discard_pile_rect, elapsed = 0, delay = 0,
-    duration = FLIGHT_DURATION, fade_in = false, name = last.def.name,
+    duration = FLIGHT_DURATION, fade_in = false, def = last.def,
   }
 end
 
