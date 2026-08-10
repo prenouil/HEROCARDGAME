@@ -5,6 +5,7 @@
 local Game = require("src.rules.game")
 local Combat = require("src.rules.combat")
 local Draft = require("src.rules.draft")
+local FeuDeCamp = require("src.rules.feu_de_camp")
 local Sequencer = require("src.util.sequencer")
 -- Dépendance à la UI (rects de layout, purs -- aucun appel love.graphics dedans)
 -- nécessaire pour savoir D'OÙ une carte part visuellement quand elle est piochée
@@ -37,6 +38,13 @@ local DRAFT_FACEDOWN_PAUSE = 1.0
 local DRAFT_FLIP_DURATION = 0.5
 local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début du suivant
 
+-- Écran "feuDeCamp" (2026-08-10, demande explicite) : entre le draft de fin de
+-- combat et le combat suivant, s'intercale de façon transparente (n'avance
+-- jamais le budget de difficulté). Petite pause après le choix pour laisser le
+-- temps à l'animation/au son de soin ou d'amélioration de se voir avant que le
+-- combat suivant démarre.
+local FEU_DE_CAMP_RESOLVE_PAUSE = 0.6
+
 -- VFX de lisibilité (2026-08-09, party "amélioration des visuels") : tous
 -- dérivés du même mécanisme de diff avant/après déjà en place pour la
 -- secousse (voir Controller:react_to_diff, ex-shake_from_diff), pas de
@@ -53,8 +61,9 @@ function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "playing" -- "playing" | "draft" | "defeat"
+  self.screen = "playing" -- "playing" | "draft" | "feuDeCamp" | "defeat"
   self.draft_picks = nil
+  self.feu_de_camp = nil -- { heal_target = hero|nil, upgrade_targets = {instance,instance}|nil }, voir enter_feu_de_camp_screen
   self.victory_anim = nil -- { t = elapsed } pendant le zoom+bump du titre "Victoire !"
   self.victory_title_duration = VICTORY_TITLE_DURATION -- lu par view.lua pour l'easing
   self.draft_cards_shown = false -- les 3 cartes (de dos) n'apparaissent qu'après le titre
@@ -93,6 +102,7 @@ end
 function Controller:reset_run()
   self.screen = "playing"
   self.draft_picks = nil
+  self.feu_de_camp = nil
   self.victory_anim = nil
   self.draft_cards_shown = false
   self.draft_flip = {}
@@ -536,12 +546,85 @@ function Controller:choose_draft_card(index)
   self.state.deck[#self.state.deck + 1] = { uid = Game.next_uid(self.state), def = def }
   Combat.log(self.state, def.name .. " ajoutée au deck.", "sys")
   self.draft_picks = nil
-  self.screen = "playing"
-  self.state.over = false
   self.card_anims = {}
-  Game.start_next_combat(self.state)
-  self:consume_drawn_animation()
-  if self.state.over then self:enter_draft_screen() end
+  self:enter_feu_de_camp_screen()
+end
+
+-- ---------- feu de camp ----------
+
+--- Entre sur l'écran "feuDeCamp", entre le draft et le combat suivant (2026-08-10,
+-- demande explicite). Les deux options possibles (soin/résurrection de
+-- l'aventurier le plus blessé, amélioration de 2 cartes tirées au hasard) sont
+-- tirées ICI, une seule fois, via state.rng.feu_de_camp -- même principe que
+-- Draft.pick_cards pour l'écran de draft : ce qui sera montré au joueur ne
+-- dépend jamais de quand il clique, seulement de l'état au moment d'entrer sur
+-- l'écran. nil sur l'un ou l'autre grise l'option correspondante côté UI.
+function Controller:enter_feu_de_camp_screen()
+  self.screen = "feuDeCamp"
+  local rng = self.state.rng.feu_de_camp
+  local heal_target = FeuDeCamp.most_wounded_hero(self.state, rng)
+  local upgrade_targets = FeuDeCamp.pick_upgrade_targets(self.state, rng)
+  self.feu_de_camp = { heal_target = heal_target, upgrade_targets = upgrade_targets }
+end
+
+--- Vrai tant que le choix n'est pas encore fait -- garde contre un double-clic
+-- pendant FEU_DE_CAMP_RESOLVE_PAUSE (self.screen reste "feuDeCamp" jusqu'à ce
+-- que finish_feu_de_camp bascule réellement d'écran, voir son commentaire).
+local function feu_de_camp_choosable(self)
+  local fdc = self.feu_de_camp
+  return self.screen == "feuDeCamp" and fdc ~= nil and not fdc.resolved
+end
+
+function Controller:choose_feu_de_camp_heal()
+  if not feu_de_camp_choosable(self) then return end
+  local fdc = self.feu_de_camp
+  if not fdc.heal_target then return end
+  fdc.resolved = true
+  local hero = fdc.heal_target
+  local healed = hero.max_hp - hero.hp
+  FeuDeCamp.heal_hero(hero)
+  if healed > 0 then self:spawn_floater(hero.id, healed, "heal") end
+  Sfx.play("heal")
+  self:finish_feu_de_camp()
+end
+
+function Controller:choose_feu_de_camp_upgrade()
+  if not feu_de_camp_choosable(self) then return end
+  local fdc = self.feu_de_camp
+  if not fdc.upgrade_targets then return end
+  fdc.resolved = true
+  FeuDeCamp.apply_upgrades(fdc.upgrade_targets)
+  Sfx.play("upgrade")
+  self:finish_feu_de_camp()
+end
+
+--- "Passer" (2026-08-10, demande explicite) : seule option valide quand le
+-- soin ET l'amélioration sont tous les deux grisés (personne blessé et moins
+-- de 2 cartes améliorables).
+function Controller:choose_feu_de_camp_skip()
+  if not feu_de_camp_choosable(self) then return end
+  local fdc = self.feu_de_camp
+  if fdc.heal_target or fdc.upgrade_targets then return end
+  fdc.resolved = true
+  self:finish_feu_de_camp()
+end
+
+function Controller:finish_feu_de_camp()
+  local self_ = self
+  -- Même idiome que Controller:enter_draft_screen (fn vide + durée = "attends",
+  -- PUIS l'étape suivante fait le travail) : Sequencer:push exécute run_fn
+  -- immédiatement et attend `wait_after` avant l'étape SUIVANTE, jamais avant
+  -- run_fn lui-même -- voir src/util/sequencer.lua.
+  self.seq:push(function() end, FEU_DE_CAMP_RESOLVE_PAUSE)
+  self.seq:push(function()
+    self_.feu_de_camp = nil
+    self_.screen = "playing"
+    self_.state.over = false
+    self_.card_anims = {}
+    Game.start_next_combat(self_.state)
+    self_:consume_drawn_animation()
+    if self_.state.over then self_:enter_draft_screen() end
+  end)
 end
 
 return Controller

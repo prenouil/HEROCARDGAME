@@ -62,9 +62,11 @@ end
 -- ou de tour) : "encounter" (composition + PV/bouclier des ennemis tirés à chaque
 -- combat), "deck" (ordre de mélange du deck), "enemy_turn" (cible + coup choisi par
 -- chaque ennemi, et la variance de ses montants, à chaque tour), "draft" (les 3
--- cartes proposées en fin de combat). Seeds dérivées d'une seed maîtresse par de
--- simples décalages -- pas un besoin d'indépendance statistique forte, juste que
--- rejouer un flux ne consomme jamais les tirages d'un AUTRE flux.
+-- cartes proposées en fin de combat), "feu_de_camp" (égalité entre aventuriers
+-- également blessés + tirage des 2 cartes à améliorer, voir src/rules/feu_de_camp.lua).
+-- Seeds dérivées d'une seed maîtresse par de simples décalages -- pas un besoin
+-- d'indépendance statistique forte, juste que rejouer un flux ne consomme jamais
+-- les tirages d'un AUTRE flux.
 function Game.new_rng_streams(master_seed)
   master_seed = master_seed or os.time()
   return {
@@ -73,6 +75,7 @@ function Game.new_rng_streams(master_seed)
     deck = Rng.new(master_seed + 1),
     enemy_turn = Rng.new(master_seed + 2),
     draft = Rng.new(master_seed + 3),
+    feu_de_camp = Rng.new(master_seed + 4),
   }
 end
 

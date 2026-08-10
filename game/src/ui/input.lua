@@ -32,6 +32,14 @@ local function mousepressed_tap(controller, x, y, button)
     return
   end
 
+  if controller.screen == "feuDeCamp" then
+    if View.point_in(View.feu_de_camp_heal_rect, x, y) then controller:choose_feu_de_camp_heal()
+    elseif View.point_in(View.feu_de_camp_upgrade_rect, x, y) then controller:choose_feu_de_camp_upgrade()
+    elseif View.point_in(View.feu_de_camp_skip_button, x, y) then controller:choose_feu_de_camp_skip()
+    end
+    return
+  end
+
   -- screen == "playing"
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
@@ -101,6 +109,14 @@ local function mousepressed_arrow(controller, x, y, button)
     return
   end
 
+  if controller.screen == "feuDeCamp" then
+    if View.point_in(View.feu_de_camp_heal_rect, x, y) then controller:choose_feu_de_camp_heal()
+    elseif View.point_in(View.feu_de_camp_upgrade_rect, x, y) then controller:choose_feu_de_camp_upgrade()
+    elseif View.point_in(View.feu_de_camp_skip_button, x, y) then controller:choose_feu_de_camp_skip()
+    end
+    return
+  end
+
   -- screen == "playing"
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
@@ -163,6 +179,19 @@ end
 -- Curseur main au survol : relit les mêmes conditions que mousepressed (sans
 -- déclencher d'action), pour que "cliquable visuellement" == "cliquable pour
 -- de vrai" -- appelé chaque frame depuis love.update (main.lua).
+
+--- Partagée entre les deux modes (tap/flèche, le clic sur cet écran ne dépend
+-- pas du mode d'entrée -- voir les deux blocs "feuDeCamp" identiques dans
+-- mousepressed_tap/mousepressed_arrow ci-dessus).
+local function feu_de_camp_hovering(controller, x, y)
+  local fdc = controller.feu_de_camp
+  if not fdc then return false end
+  if fdc.heal_target and View.point_in(View.feu_de_camp_heal_rect, x, y) then return true end
+  if fdc.upgrade_targets and View.point_in(View.feu_de_camp_upgrade_rect, x, y) then return true end
+  if not fdc.heal_target and not fdc.upgrade_targets and View.point_in(View.feu_de_camp_skip_button, x, y) then return true end
+  return false
+end
+
 local function is_hovering_clickable_tap(controller, x, y)
   local state = controller.state
 
@@ -177,6 +206,8 @@ local function is_hovering_clickable_tap(controller, x, y)
     end
     return false
   end
+
+  if controller.screen == "feuDeCamp" then return feu_de_camp_hovering(controller, x, y) end
 
   if View.point_in(View.end_turn_button, x, y) then return true end
   if View.point_in(View.restart_button, x, y) then return true end
@@ -226,6 +257,8 @@ local function is_hovering_clickable_arrow(controller, x, y)
     return false
   end
 
+  if controller.screen == "feuDeCamp" then return feu_de_camp_hovering(controller, x, y) end
+
   if View.point_in(View.end_turn_button, x, y) then return true end
   if View.point_in(View.restart_button, x, y) then return true end
   if View.point_in(View.restart_turn_button, x, y) then return true end
@@ -274,6 +307,24 @@ function Input.mousemoved(controller, x, y)
       if View.point_in(r, x, y) and controller:draft_card_ready(i) then
         controller:set_hover("card", controller.draft_picks[i])
         return
+      end
+    end
+    controller:set_hover(nil, nil)
+    return
+  end
+
+  -- Écran "feuDeCamp" (2026-08-10) : infobulle mot-clé sur les 2 cartes
+  -- proposées à l'amélioration -- même souci de cohérence que le bug draft
+  -- ci-dessus (jamais un écran de cartes sans infobulle).
+  if controller.screen == "feuDeCamp" then
+    local fdc = controller.feu_de_camp
+    if fdc and fdc.upgrade_targets then
+      local rows = View.feu_de_camp_upgrade_card_rects()
+      for i, r in ipairs(rows) do
+        if View.point_in(r, x, y) then
+          controller:set_hover("card", fdc.upgrade_targets[i].def)
+          return
+        end
       end
     end
     controller:set_hover(nil, nil)

@@ -77,6 +77,26 @@ BUILDERS.concentrate = function()
   end, 0.35)
 end
 
+-- "essor" -- soin/résurrection au feu de camp (2026-08-10) : glissando
+-- triangle montant, plus ample que "concentrate" (celui-ci referme un état
+-- de combat entier, pas un simple +1 énergie).
+BUILDERS.heal = function()
+  return Chiptune.render(0.42, function(t)
+    local freq = 260 + (520 - 260) * math.min(1, t / 0.42)
+    return Chiptune.triangle(freq, t) * Chiptune.decay(t, 0.42, 0.9)
+  end, 0.45)
+end
+
+-- "eclat" -- amélioration de carte au feu de camp (2026-08-10) : deux notes
+-- carrées aiguës qui montent, distinct de "flush" (plus haut, decay plus lent --
+-- une carte qui monte en puissance, pas qui se déplace).
+BUILDERS.upgrade = function()
+  return Chiptune.concat({
+    note(1046.50, 0.06, "square", 1.6, 0.4, 0.3),
+    note(1318.51, 0.16, "square", 1.2, 0.45, 0.3),
+  })
+end
+
 -- Fanfare de victoire : arpège carré montant + note tenue.
 BUILDERS.victory = function()
   return Chiptune.concat({

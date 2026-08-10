@@ -166,6 +166,20 @@ View.restart_button = { x = View.instant_victory_button.x + View.instant_victory
 View.restart_turn_button = { x = View.restart_button.x, y = View.restart_button.y - 32 - 6, w = 180, h = 32, label = "Recommencer ce tour" }
 View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
 
+-- Écran "feuDeCamp" (2026-08-10, demande explicite) : deux panneaux fixes
+-- côte à côte (soin/résurrection, amélioration de carte) -- leur position ne
+-- dépend jamais de ce qu'ils affichent, seul leur contenu/contour change
+-- selon la disponibilité (voir View.draw). "Passer" n'est dessiné/cliquable
+-- que quand les deux sont grisés (voir Controller:choose_feu_de_camp_skip).
+local FEU_DE_CAMP_PANEL_W, FEU_DE_CAMP_PANEL_H, FEU_DE_CAMP_PANEL_GAP = 380, 320, 40
+local FEU_DE_CAMP_PANEL_X0 = (W - (FEU_DE_CAMP_PANEL_W * 2 + FEU_DE_CAMP_PANEL_GAP)) / 2
+View.feu_de_camp_heal_rect = { x = FEU_DE_CAMP_PANEL_X0, y = 150, w = FEU_DE_CAMP_PANEL_W, h = FEU_DE_CAMP_PANEL_H }
+View.feu_de_camp_upgrade_rect = {
+  x = FEU_DE_CAMP_PANEL_X0 + FEU_DE_CAMP_PANEL_W + FEU_DE_CAMP_PANEL_GAP, y = 150,
+  w = FEU_DE_CAMP_PANEL_W, h = FEU_DE_CAMP_PANEL_H,
+}
+View.feu_de_camp_skip_button = { x = W / 2 - 100, y = 500, w = 200, h = 44, label = "Passer" }
+
 local function point_in(r, x, y)
   return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h
 end
@@ -1193,6 +1207,91 @@ local function draw_targeting_arrow(controller)
   end
 end
 
+-- ---------- feu de camp ----------
+
+--- Petit triangle plein pointant vers le bas, centré en (cx, cy) -- PAS un
+-- glyphe "↓" (2026-08-10, hors du charset Latin étendu de m5x7/m3x6, voir
+-- fonts.lua : rien ne garantit qu'il existe dans la police chargée, contrairement
+-- à un vecteur dessiné à la main comme draw_big_shield/draw_arrow ci-dessus).
+local function draw_down_arrow(cx, cy, size, color)
+  set(color)
+  love.graphics.polygon("fill", cx - size, cy - size * 0.5, cx + size, cy - size * 0.5, cx, cy + size * 0.5)
+end
+
+--- Bandes de survol des 2 cartes proposées à l'amélioration -- position FIXE
+-- dérivée de View.feu_de_camp_upgrade_rect, jamais du contenu (même principe
+-- que les panneaux eux-mêmes, voir leur commentaire) -- réutilisée telle
+-- quelle par draw_feu_de_camp (dessin) et input.lua (hover/tooltip).
+function View.feu_de_camp_upgrade_card_rects()
+  local r = View.feu_de_camp_upgrade_rect
+  return {
+    { x = r.x, y = r.y + 46, w = r.w, h = 100 },
+    { x = r.x, y = r.y + 156, w = r.w, h = 100 },
+  }
+end
+
+--- Écran "feuDeCamp" (2026-08-10, demande explicite) : entre le draft de fin de
+-- combat et le combat suivant. Panneau "Repos" (soin/résurrection à 100% des PV
+-- de l'aventurier le plus blessé, ou grisé si personne n'est blessé) et panneau
+-- "Forge" (2 cartes tirées au hasard, chacune montrée base -> "+", ou grisé si
+-- moins de 2 cartes améliorables) -- voir Controller:enter_feu_de_camp_screen
+-- pour le tirage (fait une seule fois, à l'entrée sur l'écran).
+local function draw_feu_de_camp(controller)
+  local fdc = controller.feu_de_camp
+  set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
+  text("Feu de camp", 0, 60, W, 24, Theme.text)
+  text("Choisis comment préparer le prochain combat.", 0, 92, W, 12, Theme.muted)
+
+  local heal_r, up_r = View.feu_de_camp_heal_rect, View.feu_de_camp_upgrade_rect
+  local heal_available = fdc.heal_target ~= nil
+  local upgrade_available = fdc.upgrade_targets ~= nil
+
+  panel(heal_r.x, heal_r.y, heal_r.w, heal_r.h, heal_available and Theme.panel_light or Theme.panel)
+  set(heal_available and Theme.heal or Theme.muted)
+  love.graphics.setLineWidth(heal_available and 3 or 2)
+  love.graphics.rectangle("line", heal_r.x, heal_r.y, heal_r.w, heal_r.h, 10, 10)
+  love.graphics.setLineWidth(1)
+  text("Repos", heal_r.x, heal_r.y + 16, heal_r.w, 16, Theme.text)
+  if heal_available then
+    local hero = fdc.heal_target
+    local palette = Theme.card_class[hero.class_id] or Theme.card_class.generic
+    name_badge(hero.name, heal_r.x + 20, heal_r.y + 56, heal_r.w - 40, 14, palette.border, Theme.bg, 2, 4)
+    text(hero.hp <= 0 and "Ramené à la vie, PV pleins." or "Soigné à 100% de ses PV.",
+      heal_r.x + 20, heal_r.y + 100, heal_r.w - 40, 12, Theme.muted)
+    bar(heal_r.x + 20, heal_r.y + 130, heal_r.w - 40, 14, hero.hp / hero.max_hp, Theme.hp)
+    draw_down_arrow(heal_r.x + heal_r.w / 2, heal_r.y + 158, 8, Theme.heal)
+    bar(heal_r.x + 20, heal_r.y + 172, heal_r.w - 40, 14, 1, Theme.heal)
+  else
+    text("Personne n'est blessé.", heal_r.x + 20, heal_r.y + heal_r.h / 2 - 8, heal_r.w - 40, 12, Theme.muted)
+  end
+
+  panel(up_r.x, up_r.y, up_r.w, up_r.h, upgrade_available and Theme.panel_light or Theme.panel)
+  set(upgrade_available and Theme.accent or Theme.muted)
+  love.graphics.setLineWidth(upgrade_available and 3 or 2)
+  love.graphics.rectangle("line", up_r.x, up_r.y, up_r.w, up_r.h, 10, 10)
+  love.graphics.setLineWidth(1)
+  text("Forge", up_r.x, up_r.y + 16, up_r.w, 16, Theme.text)
+  if upgrade_available then
+    local card_rows = View.feu_de_camp_upgrade_card_rects()
+    for i, instance in ipairs(fdc.upgrade_targets) do
+      local def = instance.def
+      local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
+      local row_y = card_rows[i].y + 10
+      name_badge(def.name, up_r.x + 20, row_y, up_r.w - 40, 13, palette.border, Theme.bg, 2, 3)
+      draw_down_arrow(up_r.x + up_r.w / 2, row_y + 30, 7, Theme.accent)
+      name_badge(def.name .. " +", up_r.x + 20, row_y + 46, up_r.w - 40, 13, Theme.accent, Theme.bg, 2, 3)
+    end
+  else
+    text("Pas assez de cartes à améliorer.", up_r.x + 20, up_r.y + up_r.h / 2 - 8, up_r.w - 40, 12, Theme.muted)
+  end
+
+  if not heal_available and not upgrade_available then
+    local b = View.feu_de_camp_skip_button
+    set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
+    set(Theme.bg); text(b.label, b.x, b.y + 14, b.w, 14, Theme.bg)
+  end
+end
+
 function View.draw(controller)
   local state = controller.state
   Background.draw(state.enemies, W, H)
@@ -1280,13 +1379,17 @@ function View.draw(controller)
         love.graphics.pop()
       end
     end
+  elseif controller.screen == "feuDeCamp" and controller.feu_de_camp then
+    draw_feu_de_camp(controller)
   end
 
   draw_targeting_arrow(controller)
   draw_card_flights(controller)
   draw_particles(controller)
   draw_floaters(controller)
-  if controller.screen == "playing" or controller.screen == "draft" then draw_tooltip(controller) end
+  if controller.screen == "playing" or controller.screen == "draft" or controller.screen == "feuDeCamp" then
+    draw_tooltip(controller)
+  end
 
   love.graphics.setColor(1, 1, 1, 1)
 end
