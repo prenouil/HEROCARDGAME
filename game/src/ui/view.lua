@@ -6,6 +6,7 @@
 -- du 2026-08-06 : moteur d'abord, feedback visuel ensuite).
 
 local Theme = require("src.ui.theme")
+local Background = require("src.ui.background")
 local Fonts = require("src.ui.fonts")
 local Icons = require("src.ui.icons")
 local Sprites = require("src.ui.sprites")
@@ -407,7 +408,7 @@ local function draw_hero(controller, h, r)
 
   set(Theme.text, dead and 0.45 or 1)
   draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, 40, Theme.text)
-  text(h.name, 0, 44, r.w, 12)
+  text(h.name, 0, 44, r.w, 16)
   bar(8, 58, r.w - 16, 7, h.hp / h.max_hp, Theme.hp)
   text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 67, r.w, 9, Theme.muted)
 
@@ -1097,7 +1098,7 @@ end
 
 function View.draw(controller)
   local state = controller.state
-  set(Theme.bg); love.graphics.rectangle("fill", 0, 0, W, H)
+  Background.draw(state.enemies, W, H)
 
   text("Hero Card Game — Run Infini", 0, 8, W, 20, Theme.text)
   text("Combat " .. state.run.combat_index .. " — Tour " .. state.turn, 0, 30, W, 11, Theme.muted)

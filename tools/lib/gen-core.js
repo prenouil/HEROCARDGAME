@@ -4,6 +4,20 @@ const path = require('path');
 const sharp = require('sharp');
 
 const STYLE_SUFFIX = ', pixel art style, 16-bit retro video game sprite, limited color palette, blocky pixels, hard edges, no anti-aliasing, no gradient, no blur, flat shading, white background, no text, single object, nothing else in the image';
+// Style verrouillé le 2026-08-10 (référence : planche de portraits Final Fantasy VI fournie
+// par le porteur de projet) : uniquement pour la grille "character" (les icônes -- armes,
+// mots-clés -- n'ont ni tête ni posture). Formule retenue après comparaison de 10 essais sur
+// le Guerrier (variante "D", validée explicitement par le porteur de projet) : portrait
+// statique façon écran de sélection JRPG, formes simplifiées, peu d'ornementation, grand
+// visage expressif -- contrairement à la planche de référence brute, l'équipement (arme/
+// bouclier/etc.) reste visible en main (décision explicite -- lecture de classe immédiate
+// en combat).
+const CHARACTER_STYLE_SUFFIX = ', Super Nintendo RPG character sprite in the style of Final Fantasy VI, chibi proportions with a slightly oversized head, simplified shapes, minimal ornamentation, big expressive face, arms symmetrical, character facing forward toward the viewer, static portrait pose like a JRPG character select screen, equipment held visibly';
+// Style verrouillé le 2026-08-10 : à 32x32, la marge d'erreur est minime -- sans ces contraintes
+// le premier essai (23 icônes) est ressorti majoritairement illisible (silhouettes floues,
+// texturées, parfois une bordure/vignette parasite que le détourage quasi-blanc ne peut pas
+// nettoyer puisqu'elle n'est pas blanche). Uniquement pour la grille "icon".
+const ICON_STYLE_SUFFIX = ', bold simple flat icon, thick black outline, high contrast, instantly recognizable clean silhouette, centered, no fine detail, no border, no frame, no vignette';
 const MODEL = '@cf/black-forest-labs/flux-1-schnell';
 const GRID_PRESETS = { icon: 32, character: 64 };
 const FINAL_SIZE = 512;
@@ -71,7 +85,9 @@ async function generateOne(subject, outPath, gridArg) {
   const token = env.CLOUDFLARE_API_TOKEN;
   if (!accountId || !token) throw new Error('CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN manquants dans .env');
 
-  const prompt = subject + STYLE_SUFFIX;
+  const prompt = subject + STYLE_SUFFIX
+    + (gridSize === GRID_PRESETS.character ? CHARACTER_STYLE_SUFFIX : '')
+    + (gridSize === GRID_PRESETS.icon ? ICON_STYLE_SUFFIX : '');
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${MODEL}`;
   const res = await fetch(url, {
     method: 'POST',
@@ -85,7 +101,7 @@ async function generateOne(subject, outPath, gridArg) {
   const rawBuf = Buffer.from(data.result.image, 'base64');
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  const gridBuf = await sharp(rawBuf).resize(gridSize, gridSize, { fit: 'cover' }).toBuffer();
+  const gridBuf = await sharp(rawBuf).resize(gridSize, gridSize, { fit: 'cover', kernel: 'nearest' }).toBuffer();
   const transparentGridBuf = await stripBackground(gridBuf, gridSize, gridSize);
   await sharp(transparentGridBuf).resize(FINAL_SIZE, FINAL_SIZE, { kernel: 'nearest' }).toFile(outPath);
   return { gridSize };

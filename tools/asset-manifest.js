@@ -16,18 +16,24 @@ module.exports = [
     subject: 'a goblin marauder enemy character, small green creature, crude weapon, standing pose' },
   { id: 'squelette', grid: 'character', out: 'game/assets/characters/enemies/squelette.png',
     subject: 'a skeleton archer enemy character, holding a bow, standing pose' },
+  // Formulation revue le 2026-08-10 (trop "mignon"/petit à l'essai initial, jugé par le porteur
+  // de projet) : plus massif, plus menaçant, plein cadre sans être rogné.
   { id: 'troll', grid: 'character', out: 'game/assets/characters/enemies/troll.png',
-    subject: 'a swamp troll enemy character, large hunched green creature, standing pose' },
+    subject: 'a swamp troll enemy character, large hunched green creature, bulky and muscular but hunched over, menacing snarling expression with visible fangs, angry eyes, sharp claws, intimidating, not cute or childlike, full body clearly visible with head and feet inside the frame, not cropped, viewed from the front' },
   { id: 'gobelourd', grid: 'character', out: 'game/assets/characters/enemies/gobelourd.png',
     subject: 'a stocky armored goblin-bear hybrid enemy character holding a shield, standing pose' },
+  // Formulation revue le 2026-08-10 : l'essai initial (juste "standing pose") ressortait
+  // bipède/humanoïde à cause du suffixe de style partagé (CHARACTER_STYLE_SUFFIX, pensé pour
+  // des personnages humanoïdes) -- contredit explicitement ici.
   { id: 'loup', grid: 'character', out: 'game/assets/characters/enemies/loup.png',
-    subject: 'a rabid feral wolf enemy character, standing pose' },
+    subject: 'a rabid feral wolf enemy character, on all four legs, quadruped animal stance, no human-like posture, no hands, no held weapon, viewed from the front' },
   { id: 'araignee', grid: 'character', out: 'game/assets/characters/enemies/araignee.png',
-    subject: 'a venomous giant spider enemy character, standing pose' },
+    subject: 'a venomous giant spider enemy character, eight legs, arachnid body low to the ground, no human-like posture, no hands, no held weapon, viewed from the front' },
   { id: 'necromancien', grid: 'character', out: 'game/assets/characters/enemies/necromancien.png',
     subject: 'a novice necromancer enemy character, dark hooded robe, holding a skull, standing pose' },
+  // Formulation revue le 2026-08-10 (trop petit à l'essai initial, jugé par le porteur de projet).
   { id: 'golem', grid: 'character', out: 'game/assets/characters/enemies/golem.png',
-    subject: 'a stone golem enemy character, large rock creature, standing pose' },
+    subject: 'a stone golem enemy character, large hunched rock creature, hulking and massive, character fills the frame edge to edge, imposing scale, bulky heavy body, viewed from the front' },
   { id: 'bandit', grid: 'character', out: 'game/assets/characters/enemies/bandit.png',
     subject: 'a sneaky bandit enemy character, hood, holding a dagger, standing pose' },
   { id: 'chaman', grid: 'character', out: 'game/assets/characters/enemies/chaman.png',
