@@ -69,17 +69,9 @@ BUILDERS.enemy_telegraph = function()
   end, 0.45)
 end
 
--- "amah" -- concentration : triangle chaud, montée douce, volume bas.
-BUILDERS.concentrate = function()
-  return Chiptune.render(0.3, function(t)
-    local freq = 300 + (420 - 300) * math.min(1, t / 0.3)
-    return Chiptune.triangle(freq, t) * Chiptune.decay(t, 0.3, 0.8)
-  end, 0.35)
-end
-
 -- "essor" -- soin/résurrection au feu de camp (2026-08-10) : glissando
--- triangle montant, plus ample que "concentrate" (celui-ci referme un état
--- de combat entier, pas un simple +1 énergie).
+-- triangle montant, ample et chaud -- referme un état de combat entier,
+-- pas un petit geste ponctuel.
 BUILDERS.heal = function()
   return Chiptune.render(0.42, function(t)
     local freq = 260 + (520 - 260) * math.min(1, t / 0.42)

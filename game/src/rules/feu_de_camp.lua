@@ -59,8 +59,8 @@ end
 -- "même quand il ressuscite"). `math.max(0, hero.hp)` avant d'ajouter :
 -- repart d'un plancher à 0, pas d'un négatif profond, sinon un mort à -15 PV
 -- pourrait ne pas repasser au-dessus de 0 avec un soin partiel. Plafonné à
--- max_hp comme n'importe quel soin. PAS Combat.grant_heal (bonus Transcendance
--- Paladin compris) : ce n'est pas l'effet d'une carte jouée en combat.
+-- max_hp comme n'importe quel soin. PAS Combat.grant_heal : ce n'est pas
+-- l'effet d'une carte jouée en combat, pas de raison de passer par ce chemin-là.
 function FeuDeCamp.heal_hero(hero)
   hero.hp = math.min(hero.max_hp, math.max(0, hero.hp) + FeuDeCamp.heal_amount(hero))
 end

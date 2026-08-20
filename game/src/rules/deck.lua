@@ -8,10 +8,17 @@ local Deck = {}
 
 Deck.HAND_SIZE = 5
 
--- Run Infini : deck de départ à 10 cartes (3 Coup direct, 3 Encaisser, 1 carte
--- Départ par classe).
+-- Run Infini : deck de départ à 12 cartes (2026-08-11, plus de cartes
+-- génériques -- les 3 cartes "depart" de chaque classe, 1 exemplaire chacune :
+-- son "Coup direct", son "Encaisser", et sa carte "depart" propre). Guerrier :
+-- "coup-taille" (pas "coup-estoc", devenu "avance", 2026-08-24 -- voir
+-- cards.lua). Mage : "flameche"/"barriere" (renommées, pas
+-- "coup-direct-mage"/"encaisser-mage").
 Deck.STARTING_DECK_CODES = {
-  { "coup-direct", 3 }, { "encaisser", 3 }, { "coup-estoc", 1 }, { "rempart", 1 }, { "missile-magique", 1 }, { "strategie", 1 },
+  { "coup-direct-guerrier", 1 }, { "encaisser-guerrier", 1 }, { "coup-taille", 1 },
+  { "coup-direct-paladin", 1 }, { "encaisser-paladin", 1 }, { "rempart", 1 },
+  { "flameche", 1 }, { "barriere", 1 }, { "missile-magique", 1 },
+  { "coup-direct-assassin", 1 }, { "encaisser-assassin", 1 }, { "strategie", 1 },
 }
 
 -- `rng` (2026-08-10, demande explicite -- ordre du deck reproductible à l'identique

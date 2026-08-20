@@ -86,14 +86,14 @@ end)
 
 describe("FeuDeCamp.upgradable_instances", function()
   it("balaie le deck, la main et la défausse", function()
-    local state = make_state({}, { card_instance(1, "coup-direct") }, { card_instance(2, "encaisser") }, { card_instance(3, "rempart") })
+    local state = make_state({}, { card_instance(1, "coup-direct-guerrier") }, { card_instance(2, "encaisser-guerrier") }, { card_instance(3, "rempart") })
     assert.equal(3, #FeuDeCamp.upgradable_instances(state))
   end)
 
   it("exclut toute instance déjà améliorée", function()
-    local upgraded = card_instance(1, "coup-direct")
+    local upgraded = card_instance(1, "coup-direct-guerrier")
     upgraded.def = Cards.upgraded_def(upgraded.def)
-    local plain = card_instance(2, "encaisser")
+    local plain = card_instance(2, "encaisser-guerrier")
     local state = make_state({}, { upgraded, plain })
     local out = FeuDeCamp.upgradable_instances(state)
     assert.equal(1, #out)
@@ -103,12 +103,12 @@ end)
 
 describe("FeuDeCamp.pick_upgrade_targets", function()
   it("retourne nil quand moins de 2 cartes sont améliorables", function()
-    local state = make_state({}, { card_instance(1, "coup-direct") })
+    local state = make_state({}, { card_instance(1, "coup-direct-guerrier") })
     assert.is_nil(FeuDeCamp.pick_upgrade_targets(state, Rng.new(1)))
   end)
 
   it("retourne 2 instances distinctes (jamais deux fois la même carte physique)", function()
-    local a, b, c = card_instance(1, "coup-direct"), card_instance(2, "coup-direct"), card_instance(3, "encaisser")
+    local a, b, c = card_instance(1, "coup-direct-guerrier"), card_instance(2, "coup-direct-guerrier"), card_instance(3, "encaisser-guerrier")
     local state = make_state({}, { a, b, c })
     local picks = FeuDeCamp.pick_upgrade_targets(state, Rng.new(7))
     assert.equal(2, #picks)
@@ -116,9 +116,9 @@ describe("FeuDeCamp.pick_upgrade_targets", function()
   end)
 
   it("ne tire jamais parmi les instances déjà améliorées", function()
-    local upgraded = card_instance(1, "coup-direct")
+    local upgraded = card_instance(1, "coup-direct-guerrier")
     upgraded.def = Cards.upgraded_def(upgraded.def)
-    local only_plain = card_instance(2, "encaisser")
+    local only_plain = card_instance(2, "encaisser-guerrier")
     local state = make_state({}, { upgraded, only_plain })
     -- un seul candidat éligible (only_plain) -- pas assez pour un pick de 2.
     assert.is_nil(FeuDeCamp.pick_upgrade_targets(state, Rng.new(1)))
@@ -127,7 +127,7 @@ end)
 
 describe("FeuDeCamp.apply_upgrades", function()
   it("remplace le def de chaque instance par sa version améliorée, sans changer l'uid", function()
-    local a = card_instance(1, "coup-direct")
+    local a = card_instance(1, "coup-direct-guerrier")
     local original_def = a.def
     FeuDeCamp.apply_upgrades({ a })
     assert.equal(1, a.uid)
@@ -137,13 +137,10 @@ describe("FeuDeCamp.apply_upgrades", function()
   end)
 
   it("le nouvel effet applique bien les valeurs améliorées (Coup direct : 4 -> 6 dégâts)", function()
-    local a = card_instance(1, "coup-direct")
+    local a = card_instance(1, "coup-direct-guerrier")
     FeuDeCamp.apply_upgrades({ a })
     local state = { heroes = {}, enemies = {}, log = {} }
-    -- class_id "mage" (pas "guerrier") : isole la valeur améliorée de la
-    -- Transcendance Guerrier (+50% "epee"), déjà couverte par combat_spec.lua --
-    -- pas l'objet de ce test.
-    local hero = make_hero("h1", { class_id = "mage" })
+    local hero = make_hero("h1")
     local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
     a.def.effect({ state = state, hero = hero, target = target, card_def = a.def })
     assert.equal(14, target.hp) -- 20 - 6

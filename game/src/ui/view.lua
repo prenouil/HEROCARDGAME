@@ -13,11 +13,12 @@ local Sprites = require("src.ui.sprites")
 local RichText = require("src.ui.richtext")
 local Glossary = require("src.data.glossary")
 local SCALE = require("src.ui.layout_scale")
-local Heroes = require("src.data.heroes")
 local Enemies = require("src.data.enemies")
+local Heroes = require("src.data.heroes")
 local Combat = require("src.rules.combat")
 local Cards = require("src.data.cards")
 local FeuDeCamp = require("src.rules.feu_de_camp")
+local Game = require("src.rules.game")
 
 local View = {}
 
@@ -25,7 +26,13 @@ local function combats_won_text(controller)
   return tostring(math.max(0, controller.state.run.combat_index - 1))
 end
 
-local W, H = 960, 700
+-- H réduit de 700 à 660 (2026-08-24, demande explicite -- fenêtre trop haute,
+-- ~60px inutilisés sous le dernier élément réel, hint_text à y=632) : garder
+-- IMPÉRATIVEMENT ce chiffre synchronisé avec `t.window.height = 660 * SCALE`
+-- dans conf.lua -- ce module ne peut pas lire cette constante-ci (conf.lua
+-- s'exécute avant le chargement du reste), d'où la duplication manuelle,
+-- même schéma que SCALE (voir layout_scale.lua) partagé entre les deux.
+local W, H = 960, 660
 View.W, View.H = W, H
 
 local UNIT_W, UNIT_H = 150, 156 -- +28 (2026-08-08) pour l'affichage d'énergie agrandi ci-dessous
@@ -68,70 +75,6 @@ function View.unit_rect(state, unit_id)
   return View.hero_rects(state)[unit_id] or View.enemy_rects(state)[unit_id]
 end
 
--- Boutons "Jouer"/"Se concentrer" par héros (2026-08-08) : un clic choisit à
--- la fois le mode ET le héros en un seul geste, ancré au bas de chaque
--- encart. Coords locales (relatives au coin haut-gauche de la carte) --
--- réutilisées telles quelles par draw_hero (espace déjà translaté) et
--- décalées de r.x/r.y ici pour le hit-testing (input.lua).
-local HERO_BTN_H, HERO_BTN_GAP = 15, 3
-
-local function hero_action_local_rects(r)
-  local w = r.w - 12
-  local by = r.h - (HERO_BTN_H * 2 + HERO_BTN_GAP) - 6
-  return {
-    play = { x = 6, y = by, w = w, h = HERO_BTN_H },
-    concentrate = { x = 6, y = by + HERO_BTN_H + HERO_BTN_GAP, w = w, h = HERO_BTN_H },
-  }
-end
-View.hero_action_local_rects = hero_action_local_rects
-
-function View.hero_action_rects(state)
-  local rects = View.hero_rects(state)
-  local out = {}
-  for _, h in ipairs(state.heroes) do
-    local r = rects[h.id]
-    if r then
-      local lr = hero_action_local_rects(r)
-      out[h.id] = {
-        play = { x = r.x + lr.play.x, y = r.y + lr.play.y, w = lr.play.w, h = lr.play.h },
-        concentrate = { x = r.x + lr.concentrate.x, y = r.y + lr.concentrate.y, w = lr.concentrate.w, h = lr.concentrate.h },
-      }
-    end
-  end
-  return out
-end
-
--- Mode "flèche" (2026-08-09, spike) : chaque encart héros porte deux zones de
--- clic à la place des boutons -- 3/4 haut = jouer la carte, 1/4 bas = se
--- concentrer, tel que spécifié par le porteur de projet. Layout et
--- hit-testing partagent la même fonction, même discipline que hero_action_rects.
-local HERO_ZONE_SPLIT = 0.75
-
-local function hero_zone_local_rects(r)
-  local action_h = r.h * HERO_ZONE_SPLIT
-  return {
-    play = { x = 0, y = 0, w = r.w, h = action_h },
-    concentrate = { x = 0, y = action_h, w = r.w, h = r.h - action_h },
-  }
-end
-View.hero_zone_local_rects = hero_zone_local_rects
-
-function View.hero_zone_rects(state)
-  local rects = View.hero_rects(state)
-  local out = {}
-  for _, h in ipairs(state.heroes) do
-    local r = rects[h.id]
-    if r then
-      local lr = hero_zone_local_rects(r)
-      out[h.id] = {
-        play = { x = r.x + lr.play.x, y = r.y + lr.play.y, w = lr.play.w, h = lr.play.h },
-        concentrate = { x = r.x + lr.concentrate.x, y = r.y + lr.concentrate.y, w = lr.concentrate.w, h = lr.concentrate.h },
-      }
-    end
-  end
-  return out
-end
-
 -- Calcule les rects de la main à partir d'une LISTE de cartes explicite plutôt
 -- que de `state.hand` directement -- permet de rejouer la mise en page d'une
 -- main passée (avant une défausse, par ex.) même après que `state.hand` a déjà
@@ -147,25 +90,51 @@ function View.hand_rects(state)
   return View.hand_rects_for(state.hand)
 end
 
-View.deck_pile_rect = { x = 20, y = 404, w = 64, h = CARD_H }
-View.discard_pile_rect = { x = W - 84, y = 404, w = 64, h = CARD_H }
+-- Même taille que les cartes (2026-08-24, demande explicite -- avant, 64px de
+-- large contre 92 pour une carte) : w/h = CARD_W/CARD_H pile, pour que la
+-- pioche/défausse aient l'air de vraies piles de cartes, pas des cases à
+-- part. Effet d'épaisseur en cas de +1 carte : voir draw_pile_stack ci-dessous.
+View.deck_pile_rect = { x = 20, y = 404, w = CARD_W, h = CARD_H }
+View.discard_pile_rect = { x = W - 20 - CARD_W, y = 404, w = CARD_W, h = CARD_H }
 
--- "Jouer"/"Se concentrer" ont migré sur chaque encart héros (2026-08-08, voir
--- hero_action_local_rects ci-dessus) ; il ne reste ici que l'annulation de la
--- sélection de carte en cours.
-View.cancel_button = { x = W / 2 - 50, y = 560, w = 100, h = 32, label = "Annuler" }
-View.end_turn_button = { x = W / 2 - 150, y = 600, w = 140, h = 32, label = "Fin de tour" }
+-- Réserve d'énergie GLOBALE (2026-08-11, demande explicite -- remplace
+-- l'énergie individuelle par héros) : affichage "en gros" au-dessus de la
+-- pioche, dans la colonne de gauche laissée libre par les rangées héros/
+-- ennemis (toutes deux centrées plus à droite, voir hero_rects/enemy_rects).
+View.energy_display_rect = { x = View.deck_pile_rect.x, y = View.deck_pile_rect.y - 66, w = View.deck_pile_rect.w, h = 58 }
+
+-- Repositionnés le 2026-08-11 (demande explicite, après premier playtest) :
+-- "Recommencer ce tour"/"Recommencer le combat" rapetissés, ancrés en bas à
+-- gauche sous la pioche (voir View.deck_pile_rect) ; "Fin de tour" agrandi en
+-- carré, ancré en bas à droite sous la défausse (voir View.discard_pile_rect) --
+-- les 3 ne dépendent plus d'un positionnement relatif en chaîne les uns par
+-- rapport aux autres, chacun est ancré sur sa pile.
+-- Rapetissés une seconde fois (2026-08-24, demande explicite -- encore trop
+-- gros au dernier playtest) : 130x26 -> 96x18, police 9 -> 7 (voir
+-- draw_bottom_controls).
+local RESTART_BTN_W, RESTART_BTN_H, RESTART_BTN_GAP = 96, 18, 3
+local RESTART_BTN_Y0 = View.deck_pile_rect.y + View.deck_pile_rect.h + 8
+View.restart_turn_button = {
+  x = View.deck_pile_rect.x, y = RESTART_BTN_Y0, w = RESTART_BTN_W, h = RESTART_BTN_H, label = "Recommencer ce tour",
+}
+View.restart_button = {
+  x = View.deck_pile_rect.x, y = RESTART_BTN_Y0 + RESTART_BTN_H + RESTART_BTN_GAP, w = RESTART_BTN_W, h = RESTART_BTN_H,
+  label = "Recommencer le combat",
+}
+
+-- Agrandi (2026-08-24, demande explicite -- "un peu plus gros") : 76x64 -> 88x74.
+local END_TURN_BTN_W, END_TURN_BTN_H = 88, 74
+View.end_turn_button = {
+  x = View.discard_pile_rect.x + View.discard_pile_rect.w / 2 - END_TURN_BTN_W / 2,
+  y = View.discard_pile_rect.y + View.discard_pile_rect.h + 8,
+  w = END_TURN_BTN_W, h = END_TURN_BTN_H, label = "Fin de tour",
+}
+
 -- Outil de test discret (2026-08-08) : termine le combat en cours par une
--- victoire immédiate, sans passer par la résolution réelle des ennemis. Prend
--- l'ancien emplacement de restart_button (2026-08-10, voir ci-dessous).
-View.instant_victory_button = { x = View.end_turn_button.x + View.end_turn_button.w + 10, y = 604, w = 140, h = 24, label = "victoire instantanée" }
--- Recommencer le combat : déplacé (2026-08-10, demande explicite) sur l'ancien
--- emplacement de la bascule 3-clics/flèche, retirée -- le mode flèche est le canon
--- depuis longtemps (voir decision-log.md, 2026-08-09), le bouton n'avait plus lieu
--- d'être. Recommencer le TOUR juste au-dessus (voir Game.snapshot_turn/
--- restore_turn_snapshot) : granularité plus fine, sans perdre le combat entier.
-View.restart_button = { x = View.instant_victory_button.x + View.instant_victory_button.w + 10, y = 600, w = 180, h = 32, label = "Recommencer le combat" }
-View.restart_turn_button = { x = View.restart_button.x, y = View.restart_button.y - 32 - 6, w = 180, h = 32, label = "Recommencer ce tour" }
+-- victoire immédiate, sans passer par la résolution réelle des ennemis.
+-- Recentré (2026-08-11) -- ne dépend plus de la position d'end_turn_button,
+-- qui a migré en bas à droite.
+View.instant_victory_button = { x = W / 2 - 70, y = 600, w = 140, h = 24, label = "victoire instantanée" }
 View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
 
 -- Écran "feuDeCamp" (2026-08-10, demande explicite) : deux panneaux fixes
@@ -377,6 +346,14 @@ local function draw_shield_fx(controller, unit_id, r)
   -- dédiée à la Défense plutôt que de recycler Theme.energy (déjà pris par
   -- l'affichage d'énergie et le ciblage en mode flèche).
   draw_big_shield(r.w / 2, r.h / 2, r.w * 0.4, Theme.def, alpha * 0.9)
+  -- Montant absorbé (2026-08-24, demande explicite) : affiché seulement quand
+  -- ce fondu vient d'intercepter un coup (Controller:react_to_diff pose
+  -- `s.amount` dans ce cas précis) -- absent sur un simple gain de Défense.
+  if s.amount then
+    set(Theme.text, alpha)
+    love.graphics.setFont(Fonts.get(14))
+    love.graphics.printf("-" .. tostring(s.amount), 0, r.h / 2 - 8, r.w, "center")
+  end
   love.graphics.setColor(1, 1, 1, 1)
 end
 
@@ -384,67 +361,64 @@ end
 
 local function draw_hero(controller, h, r)
   local dead = h.hp <= 0
+  local hero_palette = Theme.card_class[h.class_id] or Theme.card_class.generic
 
   local pending = controller.state.pending
-  -- Fenêtre de décision "quel héros, quel mode" (2026-08-08) : les boutons
-  -- Jouer/Se concentrer s'affichent directement sur l'encart, au lieu d'une
-  -- rangée globale -- un clic choisit héros + mode en un seul geste.
-  local showing_action_buttons = pending and not pending.mode and not dead
-  local can_play = showing_action_buttons and Combat.can_play(h, pending)
-  local can_concentrate = showing_action_buttons and Combat.can_concentrate(h)
   local eligible_target = pending and pending.hero_id and pending.def.target == "ally" and not dead and h.id ~= pending.hero_id
-  -- `Game.assign_hero` fixe `has_acted = true` dès l'assignation, avant même
-  -- la résolution de la cible (enemy/ally/conditional en attente d'un clic) --
-  -- le héros ne doit pourtant apparaître grisé qu'une fois son action
-  -- pleinement résolue, pas pendant qu'on choisit encore la cible de SA carte.
+  -- Chaque carte a désormais un propriétaire fixe (def.class_id, voir
+  -- Heroes.class_name) : la sélectionner l'assigne DIRECTEMENT à ce héros
+  -- (Game.select_card/Game.assign_hero, plus de choix manuel -- voir
+  -- Controller:select_card) -- `awaiting_own_target` couvre donc toute la
+  -- fenêtre entre la sélection et la résolution réelle (clic de cible pour
+  -- une carte ennemie/alliée). Déclenche l'anticipation (grossit + pulse en
+  -- boucle) ci-dessous.
   local awaiting_own_target = pending and pending.hero_id == h.id
-  -- État persistant de l'encart (2026-08-08, remplace la mention texte "a agi
-  -- ce tour") : cadre vert tant que le héros peut agir (pas seulement pendant
-  -- la sélection d'une carte -- indicateur permanent), voile gris dès qu'il a
-  -- agi ce tour.
-  local ready = not dead and not h.has_acted
-  local greyed_out = not dead and h.has_acted and not eligible_target and not awaiting_own_target
+  -- Un héros peut agir plusieurs fois par tour (2026-08-20, demande explicite
+  -- -- plus de notion de "a déjà agi") : cadre vert tant qu'il est vivant,
+  -- indicateur permanent, jamais de voile gris de fin de tour.
+  local ready = not dead
 
-  -- Cadre bleu = cible possible pour la carte en attente (allié) ; priorité
-  -- sur le vert "prêt à agir" -- un héros peut être les deux à la fois (pas
-  -- encore agi ce tour ET ciblable), mais l'invite de ciblage est l'info
-  -- pertinente dans l'instant.
+  -- Cadre bleu = cible possible pour la carte en attente (allié) ; doré =
+  -- propriétaire de la carte sélectionnée, en attente de sa résolution ;
+  -- priorité sur la couleur de classe (2026-08-24, demande explicite -- avant,
+  -- un vert générique "prêt à agir", devenu peu informatif depuis que tout
+  -- héros vivant peut toujours agir, voir `ready` ci-dessus) -- un héros peut
+  -- être plusieurs choses à la fois, mais l'invite la plus spécifique à
+  -- l'instant l'emporte. Même teinte que ses propres cartes (Theme.card_class,
+  -- voir draw_card_face) : le cadre du héros se reconnaît d'un coup d'œil
+  -- comme "sa" couleur.
   local border, border_w = Theme.panel_light, 1
   if eligible_target then
     border, border_w = Theme.energy, 3
+  elseif awaiting_own_target then
+    border, border_w = Theme.accent, 3
   elseif ready then
-    border, border_w = Theme.heal, 3
-  elseif greyed_out then
-    border, border_w = Theme.muted, 1
+    border, border_w = hero_palette.border, 3
   end
 
-  -- Survol des deux zones (mode "flèche", 2026-08-09) : calculé sur le rect
-  -- ABSOLU, avant toute translation d'animation -- doit rester en phase avec
-  -- le hit-test réel d'input.lua, qui lit le même View.hero_zone_rects.
   local arrow_mode = controller.input_mode == "arrow"
-  local hovering_play, hovering_concentrate = false, false
-  if arrow_mode and showing_action_buttons then
-    local mx, my = love.mouse.getPosition()
-    mx, my = mx / SCALE, my / SCALE
-    local z = hero_zone_local_rects(r)
-    hovering_play = point_in({ x = r.x + z.play.x, y = r.y + z.play.y, w = z.play.w, h = z.play.h }, mx, my)
-    hovering_concentrate = not hovering_play
-      and point_in({ x = r.x + z.concentrate.x, y = r.y + z.concentrate.y, w = z.concentrate.w, h = z.concentrate.h }, mx, my)
-  end
-
   local dx, dy, scale = unit_anim_transform(controller, h.id)
-  -- Petit rebond continu quand la zone survolée est valide : le "VFX clair" +
-  -- "anim simple" demandés pour distinguer Jouer/Concentrer au survol. Même
-  -- rebond quand ce héros est la cible finale survolée (carte à cible alliée,
-  -- ex. Rempart) -- cohérent avec le pulse ajouté côté ennemis (draw_enemy).
+  -- Petit rebond continu au survol d'une cible alliée valide (carte à cible
+  -- alliée, ex. Rempart) -- cohérent avec le pulse ajouté côté ennemis
+  -- (draw_enemy). Calculé sur le rect ABSOLU, avant toute translation
+  -- d'animation -- doit rester en phase avec le hit-test réel d'input.lua,
+  -- qui lit le même View.hero_rects.
   local hovering_as_ally_target = false
   if arrow_mode and eligible_target then
     local mx, my = love.mouse.getPosition()
     mx, my = mx / SCALE, my / SCALE
     hovering_as_ally_target = point_in(r, mx, my)
   end
-  if (hovering_play and can_play) or (hovering_concentrate and can_concentrate) or hovering_as_ally_target then
+  if hovering_as_ally_target then
     scale = scale * (1 + 0.035 * math.sin(love.timer.getTime() * 8))
+  end
+  -- "Anticipation" (2026-08-20, demande explicite) : le propriétaire d'une
+  -- carte sélectionnée grossit et pulse EN BOUCLE (pas un one-shot expirant
+  -- comme unit_anim_transform ci-dessus) tant que sa carte attend une cible --
+  -- dérivé directement de `awaiting_own_target`/state.pending, jamais un
+  -- second état à synchroniser à la main.
+  if awaiting_own_target then
+    scale = scale * (1.12 + 0.045 * math.sin(love.timer.getTime() * 5))
   end
 
   love.graphics.push()
@@ -457,65 +431,55 @@ local function draw_hero(controller, h, r)
   set(border); love.graphics.setLineWidth(border_w)
   love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
 
+  -- Éléments agrandis/espacés (2026-08-24, demande explicite -- portraits
+  -- plus grands, plus de respiration verticale, barres de vie plus épaisses,
+  -- texte un peu plus gros "à essayer") : version modérée pour rester dans la
+  -- fenêtre actuelle (660px, voir W/H plus haut) plutôt que la demande
+  -- initiale (+50%/*2), qui aurait exigé de ragrandir la fenêtre -- portrait
+  -- 40->46 (~+15%), barre 7->10 (~x1.4), textes PV/mana/Discrétion +1px,
+  -- espacements entre éléments élargis de 0-2px à 2-4px. Le héros a plus de
+  -- marge que l'ennemi (badges s'arrêtent bien avant le bas du cadre), d'où
+  -- des espacements un peu plus généreux ici que côté draw_enemy.
   set(Theme.text, dead and 0.45 or 1)
-  draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, 40, Theme.text)
-  local hero_palette = Theme.card_class[h.class_id] or Theme.card_class.generic
-  name_badge(h.name, 0, 44, r.w, 16, hero_palette.border, Theme.bg, 4, 2)
-  bar(8, 62, r.w - 16, 7, h.hp / h.max_hp, Theme.hp)
-  text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 71, r.w, 9, Theme.muted)
+  draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, 46, Theme.text)
+  name_badge(h.name, 0, 52, r.w, 16, hero_palette.border, Theme.bg, 4, 2)
+  bar(8, 72, r.w - 16, 10, h.hp / h.max_hp, Theme.hp)
+  text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 85, r.w, 10, Theme.muted)
 
-  -- Énergie : nombre précis + icône, en gros (2026-08-08, doublement de taille sur
-  -- retour du porteur de projet) plutôt que 6 pastilles -- réutilise RichText comme
-  -- pour le texte de carte, juste avec un `size` bien plus grand.
-  RichText.draw(h.energy .. ' "energie"', 0, 84, r.w, 24, Theme.energy)
-
-  if showing_action_buttons and arrow_mode then
-    -- Mode "flèche" : pas de boutons texte -- un halo coloré + libellé
-    -- apparaît uniquement sous le curseur, sur la zone survolée (rouge/`Theme.hp`
-    -- si cette zone précise n'est pas jouable, jamais un bouton grisé permanent).
-    local z = hero_zone_local_rects(r)
-    local function zone_vfx(zone, enabled, hovering, label, base_color)
-      if not hovering then return end
-      local tint = enabled and base_color or Theme.hp
-      set(tint, 0.28)
-      love.graphics.rectangle("fill", zone.x, zone.y, zone.w, zone.h, 8, 8)
-      set(tint); love.graphics.setLineWidth(2)
-      love.graphics.rectangle("line", zone.x, zone.y, zone.w, zone.h, 8, 8)
-      love.graphics.setLineWidth(1)
-      set(Theme.text)
-      love.graphics.setFont(Fonts.get(9))
-      love.graphics.printf(label, zone.x, zone.y + zone.h / 2 - 5, zone.w, "center")
-    end
-    zone_vfx(z.play, can_play, hovering_play, "Jouer", Theme.heal)
-    zone_vfx(z.concentrate, can_concentrate, hovering_concentrate, "Concentrer", Theme.energy)
-  elseif showing_action_buttons then
-    local ar = hero_action_local_rects(r)
-    local function action_button(rect, label, enabled, base_color)
-      set(enabled and base_color or Theme.muted, enabled and 1 or 0.35)
-      love.graphics.rectangle("fill", rect.x, rect.y, rect.w, rect.h, 5, 5)
-      set(Theme.bg, enabled and 1 or 0.6)
-      love.graphics.setFont(Fonts.get(9))
-      love.graphics.printf(label, rect.x, rect.y + 3, rect.w, "center")
-    end
-    action_button(ar.play, "Jouer", can_play, Theme.accent)
-    action_button(ar.concentrate, "Concentrer", can_concentrate, Theme.status)
-  else
-    local badges = {}
-    if h.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = h.defense } end
-    if (h.esquive or 0) > 0 then badges[#badges + 1] = { key = "esquive", abbr = "ESQ", value = h.esquive } end
-    if (h.camoufle or 0) > 0 then badges[#badges + 1] = { key = "camoufle", abbr = "CAM", value = h.camoufle } end
-    if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
-    if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
-    draw_badge_row(badges, 0, 112, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
+  -- Mana (2026-08-20, ressource propre au Mage, voir hero.mana dans game.lua) :
+  -- dans son propre cadre, juste sous sa jauge de PV -- seul le Mage a ce
+  -- champ non-nil, les 3 autres classes ne dessinent jamais cette ligne.
+  if h.mana ~= nil then
+    text("MANA " .. tostring(h.mana), 0, 98, r.w, 9, Theme.mana)
+  end
+  -- Discrétion (2026-08-24, ressource propre à l'Assassin, voir hero.discretion
+  -- dans game.lua) : même traitement que MANA ci-dessus -- un seul des deux
+  -- champs est jamais non-nil pour un héros donné, pas de collision possible.
+  if h.discretion ~= nil then
+    text("DISCR " .. tostring(h.discretion), 0, 98, r.w, 9, Theme.discretion)
   end
 
-  -- Voile gris par-dessus tout le contenu déjà dessiné (cadre compris) quand
-  -- le héros a déjà agi -- chaque élément ci-dessus fixe sa propre couleur,
-  -- un voile en overlay évite de les reprendre un par un.
-  if greyed_out then
-    set(Theme.black, 0.55)
-    love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
-  end
+  -- Plus de bouton "Jouer" (2026-08-20) : sélectionner une carte assigne
+  -- directement son propriétaire (voir Game.select_card), l'encart n'a donc
+  -- plus qu'un seul contenu possible ici, quel que soit l'état de `pending`.
+  local badges = {}
+  if h.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = h.defense } end
+  if (h.esquive or 0) > 0 then badges[#badges + 1] = { key = "esquive", abbr = "ESQ", value = h.esquive } end
+  -- Pas de valeur affichée (2026-08-24, demande explicite) : Camouflé est un
+  -- ÉTAT (présent/absent, voir Game.gain_discretion -- il ne s'accumule plus
+  -- en compteur depuis que la Discrétion l'a remplacé comme ressource
+  -- graduelle), plus un statut à empiler -- "CAM" seul, jamais "CAM N".
+  if (h.camoufle or 0) > 0 then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
+  if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
+  if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
+  -- Incapacité/Vulnérabilité (bug signalé, 2026-08-24) : oubliées ici alors que
+  -- draw_enemy les affichait déjà -- un héros PEUT porter ces deux statuts
+  -- (ex. Malédiction du Nécromancien Novice pose Vulnérabilité), le
+  -- multiplicateur de dégâts en tenait déjà compte (Combat.damage_multiplier),
+  -- seul le badge manquait -- le statut était donc invisible côté joueur.
+  if (h.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = h.incapacite } end
+  if (h.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = h.vulnerabilite } end
+  draw_badge_row(badges, 0, 111, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
 
   draw_shield_fx(controller, h.id, r)
 
@@ -524,45 +488,57 @@ local function draw_hero(controller, h, r)
   love.graphics.setLineWidth(1)
 end
 
-local function enemy_telegraph_text(state, e)
-  if e.hp <= 0 then return "Vaincu." end
+-- Présentation en 3 lignes distinctes (2026-08-24, demande explicite -- avant,
+-- un seul bloc de texte compact "Titre — montant\nvise Cible") : `title` seul
+-- (le nom du coup), `body` (montant/effet), `target` (nom de la cible, SANS
+-- le mot "vise" -- juste le nom, la flèche visuelle de draw_enemy_target_arrows
+-- suffit déjà à indiquer "cible"). `target` utilise `target.name` (nom
+-- affiché, ex. "Guerrier"), pas `e.target_hero_id` (id brut en minuscules,
+-- ex. "guerrier" -- bug de présentation corrigé au passage). `target_class`
+-- (2026-08-24, demande explicite) : class_id de la cible, pour que
+-- draw_enemy/draw_enemy_target_arrows puissent colorer la bande/flèche à sa
+-- couleur de classe (Theme.card_class) plutôt qu'une teinte fixe. `body`/
+-- `target`/`target_class` peuvent être nil (ex. Vaincu., heal-self/heal-ally
+-- sans cible) -- à l'appelant (draw_enemy) de ne dessiner que ce qui existe.
+local function enemy_telegraph_parts(state, e)
+  if e.hp <= 0 then return { title = "Vaincu." } end
   local move = e.next_move
-  if not move then return "" end
+  if not move then return nil end
   -- Montant réellement ajusté (2026-08-09, demande explicite) : la propre
   -- Incapacité de l'ennemi ET la Vulnérabilité de sa cible (déjà fixée pour
   -- tout le tour, pas besoin de survol) -- même calcul que la résolution
   -- réelle (Combat.deal_damage, via resolve_enemy_attack), jamais une
   -- deuxième formule dupliquée ici.
   local target = e.target_hero_id and Combat.hero_by_id(state, e.target_hero_id)
+  local target_name = target and target.name or nil
+  local target_class = target and target.class_id or nil
   local function adjusted(amount)
-    return Combat.round(amount * Combat.damage_multiplier(e, target, "physique", false))
+    return Combat.round(amount * Combat.damage_multiplier(e, target, "physique"))
   end
   if move.kind == "dmg" or move.kind == "debuff" then
-    local amount_text
+    local body
     if move.kind == "dmg" then
-      amount_text = adjusted(move.amount) .. " dégâts" .. (move.brut and " brut" or "")
+      body = adjusted(move.amount) .. " dégâts" .. (move.brut and " brut" or "")
     else
-      amount_text = (Enemies.status_labels[move.status_key] or move.status_key) .. " " .. move.amount
+      body = (Enemies.status_labels[move.status_key] or move.status_key) .. " " .. move.amount
     end
-    local vise = e.target_hero_id and ("\nvise " .. e.target_hero_id) or ""
-    return move.name .. " — " .. amount_text .. vise
+    return { title = move.name, body = body, target = target_name, target_class = target_class }
   elseif move.kind == "heal-self" then
-    return move.name .. " — soigne " .. move.amount .. " PV"
+    return { title = move.name, body = "soigne " .. move.amount .. " PV" }
   elseif move.kind == "heal-ally" then
-    return move.name .. " — soigne un allié de " .. move.amount .. " PV"
+    return { title = move.name, body = "soigne un allié de " .. move.amount .. " PV" }
   elseif move.kind == "conditional-retaliate" then
     -- Bug signalé (2026-08-09) : contrairement à dmg/debuff juste au-dessus,
     -- cette branche n'affichait jamais la cible (`e.target_hero_id`, pourtant
     -- déjà tirée par Encounter.roll_telegraphs -- voir Combat.TARGETABLE_MOVE_KINDS)
     -- ni le fait que le Golem VA riposter une fois qu'il a déjà encaissé un coup
     -- ce tour (`e.took_damage_this_turn`, lu par Game.resolve_enemy_action).
-    local vise = e.target_hero_id and ("\nvise " .. e.target_hero_id) or ""
     if e.took_damage_this_turn then
-      return "Riposte (touché) — " .. adjusted(move.amount) .. " dégâts" .. vise
+      return { title = "Riposte (touché)", body = adjusted(move.amount) .. " dégâts", target = target_name, target_class = target_class }
     end
-    return move.name .. " — " .. adjusted(move.amount) .. " si touché" .. vise
+    return { title = move.name, body = adjusted(move.amount) .. " si touché", target = target_name, target_class = target_class }
   end
-  return ""
+  return nil
 end
 
 local function draw_enemy(controller, e, r)
@@ -599,20 +575,52 @@ local function draw_enemy(controller, e, r)
   love.graphics.setLineWidth(awaiting_enemy_target and 3 or 1)
   love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
 
+  -- Éléments agrandis/espacés (2026-08-24, demande explicite -- voir draw_hero
+  -- pour le détail du compromis "version modérée, reste dans la fenêtre
+  -- actuelle") : portrait 40->46, barre 7->10, textes PV +1px, espacements
+  -- élargis. Moins de marge que côté héros (le bandeau de cible occupe déjà
+  -- le tout bas du cadre), d'où des espacements un peu plus serrés ici.
   set(Theme.text, dead and 0.45 or 1)
-  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 4, r.w, 40, Theme.text)
-  name_badge(e.name .. " Nv." .. e.level, 0, 44, r.w, 16, Theme.enemy_nameplate, Theme.text, 4, 3)
+  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 4, r.w, 46, Theme.text)
+  name_badge(e.name .. " Nv." .. e.level, 0, 52, r.w, 16, Theme.enemy_nameplate, Theme.text, 4, 3)
+  local parts = enemy_telegraph_parts(controller.state, e)
   if not dead then
-    bar(8, 72, r.w - 16, 7, e.hp / e.max_hp, Theme.hp)
-    text(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 81, r.w, 9, Theme.muted)
+    bar(8, 71, r.w - 16, 10, e.hp / e.max_hp, Theme.hp)
+    text(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 83, r.w, 10, Theme.muted)
+    -- Présentation du coup télégraphié (2026-08-24, demande explicite) : le
+    -- titre seul, centré, juste sous les PV ; le montant dans une police plus
+    -- grande que l'ancien bloc compact (8px) ; les badges de statut de
+    -- l'ennemi (Défense/Saignements/Incapacité/Vulnérabilité) redescendent
+    -- d'autant pour laisser la place.
+    if parts then
+      text(parts.title, 0, 96, r.w, 10, Theme.accent)
+      if parts.body then text(parts.body, 0, 108, r.w, 9, Theme.accent) end
+    end
     local badges = {}
     if e.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = e.defense } end
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
     if (e.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = e.vulnerabilite } end
-    draw_badge_row(badges, 0, 94, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
+    draw_badge_row(badges, 0, 121, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
+  elseif parts then
+    text(parts.title, 0, 92, r.w, 10, Theme.accent)
   end
-  text(enemy_telegraph_text(controller.state, e), 0, 110, r.w, 8, Theme.accent)
+
+  -- Cible télégraphiée (2026-08-24, demande explicite) : tout en bas du
+  -- cadre, même traitement que le nom de l'aventurier-propriétaire sur les
+  -- cartes (voir draw_card_face) -- fond noir translucide pour rester lisible
+  -- même par-dessus les badges de statut juste au-dessus. Couleur de classe de
+  -- LA CIBLE (2026-08-24, demande explicite -- avant, rouge fixe Theme.hp),
+  -- gardée distincte de la flèche (redevenue rouge fixe, voir
+  -- draw_enemy_target_arrows -- risque de confusion avec une action
+  -- d'aventurier signalé explicitement).
+  if parts and parts.target then
+    local target_palette = Theme.card_class[parts.target_class] or Theme.card_class.generic
+    set(Theme.black, 0.55)
+    love.graphics.rectangle("fill", 0, r.h - 12, r.w, 12)
+    text(parts.target, 0, r.h - 11, r.w, 10, target_palette.border)
+  end
+
   draw_shield_fx(controller, e.id, r)
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
@@ -621,13 +629,15 @@ end
 
 -- ---------- main ----------
 
--- Aperçu dynamique de Transcendance (2026-08-09, demande explicite) : au
--- survol d'un héros pendant qu'une carte est sélectionnée, ses valeurs
--- affichent ce qu'elles VONT valoir si CE héros la joue -- ex. Coup direct
--- affiche 6 au lieu de 4 en survolant le Guerrier. Dérivé des mêmes règles
--- que Combat.deal_damage/grant_defense/grant_heal/effective_cost (classe du
--- héros + mot-clé de la carte) : jamais une deuxième copie de la logique de
--- jeu, seule la substitution dans le texte affiché est propre à la vue.
+-- Aperçu dynamique des dégâts (2026-08-09, demande explicite ; réduit au
+-- retrait de la Transcendance le 2026-08-11 -- ne reflète plus que
+-- Puissance/Incapacité/Vulnérabilité, jamais une classe de héros) : au survol
+-- d'un héros pendant qu'une carte est sélectionnée, ses dégâts affichent ce
+-- qu'ils VONT valoir si CE héros la joue sur CETTE cible -- ex. Coup direct
+-- affiche 5 au lieu de 4 sur une cible Vulnérable. Dérivé des mêmes règles
+-- que Combat.deal_damage (Combat.damage_multiplier) : jamais une deuxième
+-- copie de la logique de jeu, seule la substitution dans le texte affiché est
+-- propre à la vue.
 local function scale_near_keyword(text, keyword, factor)
   local out = text
   -- nombre AVANT le mot-clé, ex. `4 "epee"` (Coup direct)
@@ -642,8 +652,8 @@ local function scale_near_keyword(text, keyword, factor)
 end
 
 -- Mots-clés qui portent un montant de DÉGÂTS (par opposition à "bouclier"/
--- "soin", qui suivent une règle de Transcendance à part -- Paladin +50%
--- uniquement, jamais de cumul Puissance/Incapacité/Vulnérabilité dessus).
+-- "soin", qui n'entrent jamais dans Combat.damage_multiplier -- rien ne les
+-- fait varier avec Puissance/Incapacité/Vulnérabilité).
 local DAMAGE_KEYWORDS = { epee = true, etincelle = true, fireball = true }
 
 --- Aperçu du texte d'une carte si `hero` la joue (et, une fois la cible
@@ -655,29 +665,13 @@ local DAMAGE_KEYWORDS = { epee = true, etincelle = true, fireball = true }
 -- la Vulnérabilité n'entre alors simplement pas encore en compte.
 local function preview_desc(def, hero, target)
   local text = def.desc
-  local guerrier_epee_bonus = hero.class_id == "guerrier" and Glossary.has_keyword(def.desc, "epee")
-  local dmg_mult = Combat.damage_multiplier(hero, target, def.dmg_type, guerrier_epee_bonus)
+  local dmg_mult = Combat.damage_multiplier(hero, target, def.dmg_type)
   if dmg_mult ~= 1 then
     for kw in pairs(DAMAGE_KEYWORDS) do
       if Glossary.has_keyword(def.desc, kw) then text = scale_near_keyword(text, kw, dmg_mult) end
     end
   end
-  if hero.class_id == "paladin" then
-    if Glossary.has_keyword(def.desc, "bouclier") then text = scale_near_keyword(text, "bouclier", 1.5) end
-    if Glossary.has_keyword(def.desc, "soin") then text = scale_near_keyword(text, "soin", 1.5) end
-  elseif hero.class_id == "assassin" and Glossary.has_keyword(def.desc, "epee") then
-    -- Pas un nombre existant à l'échelle -- la Transcendance Assassin AJOUTE
-    -- un effet absent du texte de base, donc une phrase en plus plutôt qu'une
-    -- substitution.
-    text = text .. " (Transcendance : Incapacité 1, Vulnérabilité 1.)"
-  end
   return text
-end
-
--- Coût effectif : réutilise directement Combat.effective_cost (le -2 Mage sur
--- "sort"), jamais recalculé séparément ici.
-local function preview_cost(def, hero)
-  return Combat.effective_cost(hero, def)
 end
 
 --- Dessine le contenu plein d'une carte (fond teinté par classe, double contour,
@@ -686,7 +680,22 @@ end
 -- ci-dessous) et le vol de cartes pioche/défausse (draw_card_flights) : une carte
 -- en plein vol doit avoir exactement le même visage qu'immobile en main, jamais un
 -- second rendu qui diverge (voir Theme.card_class).
-local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight)
+-- `cost_insufficient`/`mana_insufficient` (2026-08-24, demande explicite,
+-- optionnels -- seul l'appel depuis la main, draw_one ci-dessous, les
+-- renseigne) : pastille d'énergie/mana en rouge (Theme.hp) au lieu de sa
+-- couleur normale quand la réserve globale/la mana du propriétaire ne
+-- couvrent plus le coût -- pur retour visuel, ne change rien à la règle déjà
+-- appliquée par Combat.can_play/Game.select_card (qui refusent de toute façon
+-- la sélection, voir plus bas). La pastille de mana n'existe QUE si
+-- `def.mana_cost` est renseigné (cartes du Mage avec un coût de mana, voir
+-- cards.lua) -- inexistante sinon, jamais un "0" affiché à tort.
+-- `owner_defeated` (2026-08-24, demande explicite, optionnel, même
+-- provenance) : voile gris sur TOUTE la carte quand le héros propriétaire est
+-- vaincu -- contrairement au rouge ci-dessus (manque temporaire, résoluble au
+-- prochain tour), une carte dont le propriétaire est mort ne redeviendra
+-- jamais jouable ce combat-ci -- même principe visuel que le voile gris qui
+-- couvrait autrefois un héros "a déjà agi" dans draw_hero (retiré 2026-08-20).
+local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight, cost_insufficient, mana_insufficient, owner_defeated)
   local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
   panel(0, 0, w, h, palette.bg)
   set(highlight and Theme.accent or Theme.black)
@@ -697,26 +706,91 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
   love.graphics.rectangle("line", 3, 3, w - 6, h - 6, 8, 8)
   love.graphics.setLineWidth(1)
 
-  set(Theme.energy); love.graphics.circle("fill", 14, 12, 9)
+  set(cost_insufficient and Theme.hp or Theme.energy); love.graphics.circle("fill", 14, 12, 9)
   set(Theme.bg or { 0.05, 0.1, 0.1 })
   love.graphics.setFont(Fonts.get(11)); love.graphics.printf(tostring(cost_text), 4, 6, 20, "center")
 
+  if def.mana_cost then
+    set(mana_insufficient and Theme.hp or Theme.mana); love.graphics.circle("fill", 32, 12, 7)
+    set(Theme.bg or { 0.05, 0.1, 0.1 })
+    love.graphics.setFont(Fonts.get(9))
+    love.graphics.printf(tostring(def.mana_cost), 26, 8, 12, "center")
+  end
+
   name_badge(def.name, 2, 22, w - 4, 16, palette.border, Theme.bg, 2, 1)
   RichText.draw(desc_text, 3, 42, w - 6, 10, desc_color or Theme.muted)
+
+  -- Origine de la carte (2026-08-20, demande explicite) : nom de l'aventurier
+  -- qui l'a fournie -- lu depuis def.class_id (une classe = un seul héros,
+  -- voir Heroes.class_name), pas un champ propre à chaque carte. Fond noir
+  -- translucide dessous (même principe que la pastille de coût) pour rester
+  -- lisible même si la description déborde jusqu'en bas de la carte. Centré,
+  -- police agrandie (2026-08-24, demande explicite -- avant, aligné à droite
+  -- en tout petit, 8px). Remonté de 4px (2026-08-24, bug signalé -- flush
+  -- avec le bas mangeait le liseré arrondi du cadre) : marge visible sous la
+  -- bande pour laisser le contour se voir.
+  local hero_name = Heroes.class_name[def.class_id]
+  if hero_name then
+    set(Theme.black, 0.55)
+    love.graphics.rectangle("fill", 0, h - 16, w, 12)
+    text(hero_name, 0, h - 15, w, 10, palette.border, "center")
+  end
+
+  -- Voile gris par-dessus tout le contenu déjà dessiné (cadre compris) quand
+  -- le propriétaire est vaincu -- chaque élément ci-dessus fixe sa propre
+  -- couleur, un voile en overlay évite de les reprendre un par un (même
+  -- traitement que l'ancien "a déjà agi" de draw_hero).
+  if owner_defeated then
+    set(Theme.black, 0.55)
+    love.graphics.rectangle("fill", 0, 0, w, h, 10, 10)
+  end
+end
+
+--- Réserve d'énergie globale (2026-08-11), "en gros" au-dessus de la pioche --
+-- icône du glossaire (même sprite que partout ailleurs où "energie" apparaît,
+-- voir Sprites.keyword) + la valeur seule, en grand. Pas de "/X" -- la
+-- réserve n'a pas de maximum en cours de tour (précisé par le porteur de
+-- projet), seulement remise à Game.TURN_START_ENERGY pile à chaque début de
+-- tour ; afficher un "/3" laisserait croire à un plafond qui n'existe pas.
+local function draw_energy_display(state)
+  local r = View.energy_display_rect
+  panel(r.x, r.y, r.w, r.h, Theme.panel_light)
+  set(Theme.energy); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 8, 8)
+  love.graphics.setLineWidth(1)
+  local icon = Sprites.keyword("energie")
+  if icon then
+    love.graphics.setColor(1, 1, 1, 1)
+    Sprites.draw_centered(icon, r.x + r.w / 2, r.y + 16, 13)
+  end
+  text(tostring(state.energy), r.x, r.y + 32, r.w, 20, Theme.energy)
+end
+
+--- Pioche/défausse (2026-08-24, demande explicite -- même taille que les
+-- cartes, voir View.deck_pile_rect/discard_pile_rect) : effet d'épaisseur
+-- quand `count` > 1 -- 1 à 2 rectangles décalés en bas-à-droite AVANT le
+-- panneau principal, pour suggérer une vraie pile plutôt qu'une case plate.
+-- Purement cosmétique : la zone cliquable/hit-test reste `rect` seul, jamais
+-- agrandie par les couches décalées (aucun de ces piles n'est d'ailleurs
+-- cliquable aujourd'hui, mais le rect sert aussi de référence de position à
+-- l'animation de vol des cartes -- voir Controller:animate_draw).
+local function draw_pile(rect, icon, label, count)
+  local layers = math.min(2, math.max(0, count - 1))
+  for i = layers, 1, -1 do
+    panel(rect.x + i * 3, rect.y + i * 3, rect.w, rect.h, Theme.panel)
+  end
+  panel(rect.x, rect.y, rect.w, rect.h, Theme.panel_light)
+  icon_text(icon, "", rect.x, rect.y + 20, rect.w, 22, Theme.muted)
+  text(label, rect.x, rect.y + 54, rect.w, 9, Theme.muted)
+  text(tostring(count), rect.x, rect.y + rect.h + 4, rect.w, 12, Theme.text)
 end
 
 local function draw_hand(controller)
   local state = controller.state
   local rects = View.hand_rects(state)
-  panel(View.deck_pile_rect.x, View.deck_pile_rect.y, View.deck_pile_rect.w, View.deck_pile_rect.h, Theme.panel_light)
-  icon_text("\u{1F0A0}", "", View.deck_pile_rect.x, View.deck_pile_rect.y + 20, View.deck_pile_rect.w, 22, Theme.muted)
-  text("PIOCHE", View.deck_pile_rect.x, View.deck_pile_rect.y + 54, View.deck_pile_rect.w, 9, Theme.muted)
-  text(tostring(#state.deck), View.deck_pile_rect.x, View.deck_pile_rect.y + View.deck_pile_rect.h + 4, View.deck_pile_rect.w, 12, Theme.text)
-
-  panel(View.discard_pile_rect.x, View.discard_pile_rect.y, View.discard_pile_rect.w, View.discard_pile_rect.h, Theme.panel_light)
-  icon_text("\u{1F5D1}\u{FE0F}", "", View.discard_pile_rect.x, View.discard_pile_rect.y + 20, View.discard_pile_rect.w, 22, Theme.muted)
-  text("DEFAUSSE", View.discard_pile_rect.x, View.discard_pile_rect.y + 54, View.discard_pile_rect.w, 9, Theme.muted)
-  text(tostring(#state.discard), View.discard_pile_rect.x, View.discard_pile_rect.y + View.discard_pile_rect.h + 4, View.discard_pile_rect.w, 12, Theme.text)
+  draw_energy_display(state)
+  draw_pile(View.deck_pile_rect, "\u{1F0A0}", "PIOCHE", #state.deck)
+  draw_pile(View.discard_pile_rect, "\u{1F5D1}\u{FE0F}", "DEFAUSSE", #state.discard)
 
   -- Mode "flèche" (2026-08-09) : la carte sélectionnée reste posée en avant
   -- tant qu'elle est en attente, et la carte survolée grossit immédiatement
@@ -740,12 +814,12 @@ local function draw_hand(controller)
     local r = rects[c.uid]
     local def = c.def
     local is_pending = state.pending and state.pending.uid == c.uid
-    -- Aperçu de Transcendance (voir preview_desc/preview_cost ci-dessus) :
-    -- seulement sur LA carte sélectionnée. Deux étapes : héros pas encore
-    -- assigné -> on prévisualise celui survolé (pas de cible connue, la
-    -- Vulnérabilité n'entre pas encore en compte) ; héros déjà assigné et en
-    -- attente d'une cible -> le héros est fixé (pending.hero_id), et survoler
-    -- l'ennemi visé complète l'aperçu avec SA Vulnérabilité.
+    -- Aperçu de dégâts (voir preview_desc ci-dessus) : seulement sur LA carte
+    -- sélectionnée. Deux étapes : héros pas encore assigné -> on prévisualise
+    -- celui survolé (pas de cible connue, la Vulnérabilité n'entre pas encore
+    -- en compte) ; héros déjà assigné et en attente d'une cible -> le héros
+    -- est fixé (pending.hero_id), et survoler l'ennemi visé complète l'aperçu
+    -- avec SA Vulnérabilité.
     local previewing_hero, previewing_target = nil, nil
     if is_pending and state.pending then
       if state.pending.hero_id then
@@ -755,12 +829,23 @@ local function draw_hand(controller)
         previewing_hero = Combat.hero_by_id(state, controller.hover.target)
       end
     end
-    local desc_text, cost_text, has_bonus = def.desc, def.cost, false
+    local desc_text, has_bonus = def.desc, false
     if previewing_hero then
-      desc_text, cost_text = preview_desc(def, previewing_hero, previewing_target), preview_cost(def, previewing_hero)
-      has_bonus = desc_text ~= def.desc or cost_text ~= def.cost
+      desc_text = preview_desc(def, previewing_hero, previewing_target)
+      has_bonus = desc_text ~= def.desc
     end
-    cost_text = tostring(cost_text)
+    local cost_text = tostring(def.cost)
+    local owner = Combat.hero_by_id(state, def.class_id)
+    -- Coût en rouge quand la réserve globale (ou, pour les sorts du Mage, sa
+    -- mana) ne couvre plus le coût (2026-08-24, demande explicite) : pur
+    -- retour visuel, ne duplique pas la règle -- Combat.can_play/
+    -- Game.select_card (voir game.lua) refusent déjà la sélection dans ce cas.
+    local cost_insufficient = state.energy < def.cost
+    local mana_insufficient = def.mana_cost and (not owner or (owner.mana or 0) < def.mana_cost)
+    -- Voile gris (2026-08-24, demande explicite) : le propriétaire est vaincu,
+    -- cette carte ne redeviendra jouable à aucun prix ce combat-ci -- signal
+    -- distinct du rouge ci-dessus (manque temporaire de ressource).
+    local owner_defeated = not owner or owner.hp <= 0
     local scale, lift = 1, 0
     if popped then
       if is_pending then scale, lift = 1.16, 18 else scale, lift = 1.1, 10 end
@@ -774,8 +859,8 @@ local function draw_hand(controller)
     -- Theme.accent sur le contour extérieur, jamais mélangée à la couleur de classe.
     -- Pas de vert "bonus" sur le nom (collision de lisibilité avec l'Assassin, déjà
     -- vert) -- le vert reste porté par la description, qui suffit à signaler
-    -- l'aperçu de Transcendance.
-    draw_card_face(def, r.w, r.h, cost_text, desc_text, has_bonus and Theme.heal or Theme.muted, is_pending)
+    -- l'aperçu de dégâts.
+    draw_card_face(def, r.w, r.h, cost_text, desc_text, has_bonus and Theme.heal or Theme.muted, is_pending, cost_insufficient, mana_insufficient, owner_defeated)
     love.graphics.pop()
   end
 
@@ -790,24 +875,20 @@ local function draw_hand(controller)
   return rects
 end
 
-local function draw_cancel_button(controller)
-  local pending = controller.state.pending
-  if not pending or pending.mode then return end
-  local b = View.cancel_button
-  set(Theme.muted)
-  love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
-  set(Theme.bg); love.graphics.setFont(Fonts.get(12))
-  love.graphics.printf(b.label, b.x, b.y + 8, b.w, "center")
-end
-
 local function draw_bottom_controls(controller)
   local b1, b2, b4 = View.end_turn_button, View.restart_button, View.restart_turn_button
+  -- Bouton carré agrandi (2026-08-24, demande explicite -- "un peu plus gros",
+  -- voir END_TURN_BTN_W/H) : centrage vertical approximatif pour un libellé
+  -- qui peut retomber sur 2 lignes ("Fin de" / "tour") dans une largeur étroite.
   set(Theme.accent); love.graphics.rectangle("fill", b1.x, b1.y, b1.w, b1.h, 8, 8)
-  set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(b1.label, b1.x, b1.y + 8, b1.w, "center")
+  set(Theme.bg); love.graphics.setFont(Fonts.get(13)); love.graphics.printf(b1.label, b1.x, b1.y + b1.h / 2 - 10, b1.w, "center")
+  -- Boutons rerapetissés (2026-08-24, demande explicite -- encore trop gros) :
+  -- police 9 -> 7, centrage vertical ajusté sur la hauteur réduite (voir
+  -- RESTART_BTN_W/H).
   set(Theme.muted); love.graphics.rectangle("line", b2.x, b2.y, b2.w, b2.h, 8, 8)
-  text(b2.label, b2.x, b2.y + 8, b2.w, 12, Theme.text)
+  text(b2.label, b2.x, b2.y + b2.h / 2 - 4, b2.w, 7, Theme.text)
   set(Theme.muted); love.graphics.rectangle("line", b4.x, b4.y, b4.w, b4.h, 8, 8)
-  text(b4.label, b4.x, b4.y + 8, b4.w, 12, Theme.text)
+  text(b4.label, b4.x, b4.y + b4.h / 2 - 4, b4.w, 7, Theme.text)
 
   -- Discret à dessein : pas de cadre, texte petit et sombre -- un outil de
   -- test, pas une action de jeu normale.
@@ -815,17 +896,14 @@ local function draw_bottom_controls(controller)
   text(b3.label, b3.x, b3.y + 7, b3.w, 8, Theme.muted)
 end
 
+-- Sélectionner une carte l'assigne directement à son propriétaire (2026-08-20,
+-- voir Game.select_card) : plus de phase "choisis l'aventurier" à décrire ici,
+-- seulement l'attente d'une cible (pour les cartes qui en ont besoin).
 local function hint_text(controller)
   local state = controller.state
   local pending = state.pending
-  local arrow_mode = controller.input_mode == "arrow"
   if not pending then return "Clique une carte de ta main pour commencer." end
-  if not pending.mode then
-    if arrow_mode then return pending.def.name .. " sélectionnée — vise le haut (Jouer) ou le bas (Concentrer) d'un aventurier." end
-    return pending.def.name .. " sélectionnée — clique \"Jouer\" ou \"Concentrer\" sur l'aventurier de ton choix."
-  end
-  if not pending.hero_id then return pending.def.name .. " — choisis quel aventurier." end
-  if arrow_mode then return pending.def.name .. " — vise la cible." end
+  if controller.input_mode == "arrow" then return pending.def.name .. " — vise la cible." end
   return pending.def.name .. " — choisis la cible."
 end
 
@@ -837,10 +915,18 @@ end
 -- écrites dans le glossaire plutôt que d'en dupliquer le texte ; `defense`
 -- n'a pas d'entrée dédiée dans le glossaire (seulement le mot-clé de carte
 -- "bouclier"), d'où l'explication propre ci-dessous.
+-- `hide_value` (2026-08-24, demande explicite -- Camouflé n'est plus un
+-- compteur, juste un état présent/absent depuis que la Discrétion l'a
+-- remplacé comme ressource graduelle, voir Game.gain_discretion) : n'affecte
+-- QUE le texte affiché ("Camouflé" au lieu de "Camouflé 1") -- jamais la
+-- détection d'activité elle-même, qui reste `value > 0` pour tous les champs
+-- (numériques ici, camoufle compris -- un ancien flag `spec.boolean` faisait
+-- ce mélange et aurait affiché la ligne même à camoufle == 0, puisque 0 est
+-- "truthy" en Lua -- jamais réellement utilisé, retiré).
 local STATUS_TOOLTIP_FIELDS = {
   { field = "defense", glossary_key = "bouclier", label = "Bouclier", explain = "Absorbe les prochains dégâts avant les PV." },
   { field = "esquive", glossary_key = "esquive" },
-  { field = "camoufle", glossary_key = "camoufle" },
+  { field = "camoufle", glossary_key = "camoufle", hide_value = true },
   { field = "puissance", glossary_key = "puissance" },
   { field = "saignements", glossary_key = "saignement" },
   { field = "incapacite", glossary_key = "incapacite" },
@@ -851,12 +937,12 @@ local function active_status_lines(unit)
   local lines = {}
   for _, spec in ipairs(STATUS_TOOLTIP_FIELDS) do
     local value = unit[spec.field]
-    local active = spec.boolean and value or (type(value) == "number" and value > 0)
+    local active = type(value) == "number" and value > 0
     if active then
       local g = Glossary.find_term(spec.glossary_key)
       local label = spec.label or (g and (g.label or g.icon)) or spec.field
       local explain = spec.explain or (g and g.explain ~= "" and g.explain) or ""
-      local line_text = label .. (spec.boolean and "" or (" " .. value)) .. (explain ~= "" and (" — " .. explain) or "")
+      local line_text = label .. (spec.hide_value and "" or (" " .. value)) .. (explain ~= "" and (" — " .. explain) or "")
       -- Sprites.status (pas Sprites.keyword/le has_icon du glossaire, qui ne
       -- couvre que le texte de carte) -- ce sont les mêmes icônes déjà visibles
       -- sur les badges de statut de l'encart, pas de nouvel asset à générer.
@@ -872,8 +958,11 @@ local function tooltip_lines(controller)
   if h.kind == "hero" then
     local hero = Combat.hero_by_id(controller.state, h.target)
     if not hero then return nil end
-    local p = Heroes.class_powers[hero.class_id]
-    local lines = { p.transcendance }
+    -- Description de classe (2026-08-24, demande explicite) : en tête de
+    -- l'infobulle, avant les statuts actifs -- voir Heroes.class_description.
+    local lines = {}
+    local desc = Heroes.class_description[hero.class_id]
+    if desc then lines[#lines + 1] = desc end
     for _, l in ipairs(active_status_lines(hero)) do lines[#lines + 1] = l end
     return hero.name, lines
   elseif h.kind == "enemy" then
@@ -1061,11 +1150,11 @@ local function draw_tooltip(controller)
 end
 
 
--- Flèche dynamique (mode "flèche", 2026-08-09) : de la souris vers le héros
--- pendant le choix de l'aventurier, puis du héros vers la cible finale si la
--- carte en a besoin -- couleur dérivée des mêmes conditions d'éligibilité que
--- les cadres verts/bleus déjà en place (Combat.can_play/can_concentrate, cible
--- vivante), jamais une logique de validité dupliquée.
+-- Flèche dynamique (mode "flèche", 2026-08-09 ; simplifiée 2026-08-20 -- la
+-- carte assigne directement son propriétaire, plus de choix de héros à
+-- l'arc) : du propriétaire vers la cible finale, si la carte en a besoin --
+-- couleur dérivée des mêmes conditions d'éligibilité que les cadres verts/
+-- bleus déjà en place (cible vivante), jamais une logique de validité dupliquée.
 local function quad_bezier(t, x0, y0, cx, cy, x1, y1)
   local mt = 1 - t
   return mt * mt * x0 + 2 * mt * t * cx + t * t * x1,
@@ -1090,13 +1179,24 @@ end
 -- flèche de télégraphe ennemi : les ennemis sont toujours au-dessus des aventuriers
 -- dans la mise en page, "vers le bas" est donc toujours correct, indépendamment de la
 -- cambrure de la courbe qui peut faire dévier l'angle tangent calculé).
-local function draw_arrow(x1, y1, x2, y2, color, tip_angle)
+-- `bow_up` (optionnel, 2026-08-24, demande explicite -- flèche ennemi->cible
+-- pas belle en courbure vers le bas) : force la cambrure du côté du HAUT de
+-- l'écran (y plus petit), quel que soit le signe de dx -- sans ça, la
+-- perpendiculaire naturelle (-dy, dx) bascule de côté selon que la cible est
+-- à gauche ou à droite de l'origine (dy restant petit -- rangées ennemis/
+-- héros proches -- c'est dx qui domine la direction du segment, donc de la
+-- cambrure), ce qui donnait tantôt une courbe vers le haut tantôt vers le bas
+-- selon la disposition. Seul draw_enemy_target_arrows l'active ; la flèche de
+-- ciblage du joueur (mousepressed/draw_targeting_arrow) garde son
+-- comportement naturel, jamais concernée.
+local function draw_arrow(x1, y1, x2, y2, color, tip_angle, bow_up)
   local dx, dy = x2 - x1, y2 - y1
   local dist = math.sqrt(dx * dx + dy * dy)
   if dist < 1 then return end
 
   local mx, my = (x1 + x2) / 2, (y1 + y2) / 2
   local nx, ny = -dy / dist, dx / dist
+  if bow_up and ny > 0 then nx, ny = -nx, -ny end
   local bow = math.min(dist * 0.22, 70) + math.sin(love.timer.getTime() * 3) * math.min(dist * 0.03, 8)
   local cx, cy = mx + nx * bow, my + ny * bow
 
@@ -1143,12 +1243,17 @@ end
 --- Flèche du télégraphe ennemi (2026-08-10, demande explicite) : indique quel
 -- aventurier une attaque ennemie va toucher, avec le même style "chaîne animée" que
 -- draw_arrow ci-dessus (réutilisée telle quelle -- jamais un second dessin de flèche
--- qui diverge). Rouge (Theme.hp) pour ne jamais se confondre avec le vert/bleu du
--- ciblage actif du joueur -- deux flèches, deux sens différents. Rien si l'ennemi
--- est mort, n'a pas de coup télégraphié, si son coup ne cible personne (kind hors
--- Combat.TARGETABLE_MOVE_KINDS -- soin, buff...), ou si la cible n'est plus vivante
--- -- jamais vers un autre ennemi, le ciblage ennemi ne vise que des aventuriers
--- (`target_hero_id`, voir encounter.lua).
+-- qui diverge). Rouge fixe (Theme.hp, 2026-08-24 -- revenu en arrière après un essai
+-- en couleur de classe de la cible : trop proche des couleurs d'action d'un
+-- aventurier, risque de confusion "ceci vient d'un aventurier" -- signalé
+-- explicitement) : le rouge dit sans ambiguïté "menace ennemie", jamais une
+-- couleur de classe. La bande de nom en bas du cadre ennemi (voir draw_enemy),
+-- elle, reste en couleur de classe de la cible -- pas concernée par cette
+-- correction, jamais signalée comme un problème. Rien si l'ennemi est mort,
+-- n'a pas de coup télégraphié, si son coup ne cible personne (kind hors
+-- Combat.TARGETABLE_MOVE_KINDS -- soin, buff...), ou si la cible n'est plus
+-- vivante -- jamais vers un autre ennemi, le ciblage ennemi ne vise que des
+-- aventuriers (`target_hero_id`, voir encounter.lua).
 local function draw_enemy_target_arrows(controller)
   local state = controller.state
   local enemy_rects = View.enemy_rects(state)
@@ -1159,7 +1264,7 @@ local function draw_enemy_target_arrows(controller)
       if target and target.hp > 0 then
         local er, hr = enemy_rects[e.id], hero_rects[target.id]
         if er and hr then
-          draw_arrow(er.x + er.w / 2, er.y + er.h, hr.x + hr.w / 2, hr.y, Theme.hp, math.pi / 2)
+          draw_arrow(er.x + er.w / 2, er.y + er.h, hr.x + hr.w / 2, hr.y, Theme.hp, math.pi / 2, true)
         end
       end
     end
@@ -1167,53 +1272,39 @@ local function draw_enemy_target_arrows(controller)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
+-- Sélectionner une carte l'assigne DIRECTEMENT à son propriétaire (2026-08-20,
+-- voir Game.select_card) : `pending` n'existe donc jamais sans `pending.hero_id`
+-- déjà fixé -- plus de "flèche main -> aventurier" pendant un choix de héros,
+-- seulement la flèche aventurier -> cible finale (ennemi/allié) ci-dessous.
 local function draw_targeting_arrow(controller)
   if controller.input_mode ~= "arrow" or controller.screen ~= "playing" then return end
   local state = controller.state
   local pending = state.pending
-  if not pending then return end
+  if not pending or not pending.hero_id then return end
+  if pending.def.target ~= "enemy" and pending.def.target ~= "ally" and pending.def.target ~= "conditional" then return end
 
   local mx, my = love.mouse.getPosition()
   mx, my = mx / SCALE, my / SCALE
 
-  if not pending.mode then
-    local origin = View.hand_rects(state)[pending.uid]
-    if not origin then return end
-    local ox, oy = origin.x + origin.w / 2, origin.y
-    local color = Theme.energy
-    local zones = View.hero_zone_rects(state)
-    for _, h in ipairs(state.heroes) do
-      local z = zones[h.id]
-      if z then
-        if point_in(z.play, mx, my) then
-          color = Combat.can_play(h, pending) and Theme.heal or Theme.hp
-        elseif point_in(z.concentrate, mx, my) then
-          color = Combat.can_concentrate(h) and Theme.heal or Theme.hp
-        end
-      end
+  local origin = View.hero_rects(state)[pending.hero_id]
+  if not origin then return end
+  local ox, oy = origin.x + origin.w / 2, origin.y + origin.h / 2
+  local valid = false
+  if pending.def.target == "enemy" or pending.def.target == "conditional" then
+    for _, e in ipairs(state.enemies) do
+      local r = View.enemy_rects(state)[e.id]
+      if r and e.hp > 0 and point_in(r, mx, my) then valid = true end
     end
-    draw_arrow(ox, oy, mx, my, color)
-  elseif pending.hero_id and (pending.def.target == "enemy" or pending.def.target == "ally" or pending.def.target == "conditional") then
-    local origin = View.hero_rects(state)[pending.hero_id]
-    if not origin then return end
-    local ox, oy = origin.x + origin.w / 2, origin.y + origin.h / 2
-    local valid = false
-    if pending.def.target == "enemy" or pending.def.target == "conditional" then
-      for _, e in ipairs(state.enemies) do
-        local r = View.enemy_rects(state)[e.id]
-        if r and e.hp > 0 and point_in(r, mx, my) then valid = true end
-      end
-    end
-    if pending.def.target == "ally" then
-      for _, h in ipairs(state.heroes) do
-        if h.id ~= pending.hero_id then
-          local r = View.hero_rects(state)[h.id]
-          if r and h.hp > 0 and point_in(r, mx, my) then valid = true end
-        end
-      end
-    end
-    draw_arrow(ox, oy, mx, my, valid and Theme.heal or Theme.energy)
   end
+  if pending.def.target == "ally" then
+    for _, h in ipairs(state.heroes) do
+      if h.id ~= pending.hero_id then
+        local r = View.hero_rects(state)[h.id]
+        if r and h.hp > 0 and point_in(r, mx, my) then valid = true end
+      end
+    end
+  end
+  draw_arrow(ox, oy, mx, my, valid and Theme.heal or Theme.energy)
 end
 
 -- ---------- feu de camp ----------
@@ -1405,7 +1496,6 @@ function View.draw(controller)
   -- `state.log` continue d'être alimenté côté règles, juste plus affiché ici.
 
   draw_hand(controller)
-  draw_cancel_button(controller)
   draw_bottom_controls(controller)
   text(hint_text(controller), 0, 632, W, 10, Theme.muted)
 
@@ -1465,6 +1555,17 @@ function View.draw(controller)
           set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), 6, 7, 20, "center")
           name_badge(def.name, 4, 26, r.w - 8, 16, palette.border, Theme.bg, 2, 2)
           RichText.draw(def.desc, 4, 50, r.w - 8, 11, Theme.muted)
+          -- Même origine que draw_card_face (voir plus haut, y compris le
+          -- centrage/agrandissement 2026-08-24 et le remontage anti-liseré-
+          -- mangé) : ce bloc dessine les cartes de draft à une taille
+          -- différente (130x190, pas CARD_W/CARD_H), donc dupliqué ici plutôt
+          -- que réutilisé.
+          local hero_name = Heroes.class_name[def.class_id]
+          if hero_name then
+            set(Theme.black, 0.55)
+            love.graphics.rectangle("fill", 0, r.h - 20, r.w, 16)
+            text(hero_name, 0, r.h - 18, r.w, 12, palette.border, "center")
+          end
         else
           panel(0, 0, r.w, r.h, Theme.panel_light)
           text("?", 0, r.h / 2 - 12, r.w, 26, Theme.muted)

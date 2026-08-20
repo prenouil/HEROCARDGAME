@@ -85,8 +85,14 @@ Enemies.templates = {
   },
   {
     id = "troll", name = "Troll des Marais", icon = "\u{1F9CC}", label = "TRL", hp_base = 28, cost = 14, target_mode = "random",
+    -- Bug signalé (2026-08-24) : Régénération pouvait être télégraphiée/jouée
+    -- même à PV pleins (e.hp >= e.max_hp), pour un soin plafonné à 0 -- tour
+    -- gâché sans que rien ne se passe à l'écran. `e.hp < e.max_hp` exclut
+    -- Régénération du tirage dans ce cas, jamais Coup de Massue à la place --
+    -- distinct de l'annulation par les flammes (Game.resolve_enemy_action),
+    -- qui s'applique APRÈS coup, une fois déjà télégraphiée.
     choose_move = function(e, all, rng)
-      if rng:random() < 1 / 3 then
+      if e.hp < e.max_hp and rng:random() < 1 / 3 then
         return { kind = "heal-self", name = "Régénération", icon = "\u{1F49A}", amount = roll_scaled(15, e.level, rng) }
       end
       return { kind = "dmg", name = "Coup de Massue", icon = "\u{1F528}", amount = roll_scaled(8, e.level, rng) }

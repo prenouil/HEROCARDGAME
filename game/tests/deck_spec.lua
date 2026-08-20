@@ -9,23 +9,29 @@ end
 
 local function fake_cards(n)
   local out = {}
-  local def = Cards.by_code("coup-direct")
+  local def = Cards.by_code("coup-direct-guerrier")
   for i = 1, n do out[i] = { uid = i, def = def } end
   return out
 end
 
 describe("Deck.build_starting_deck", function()
-  it("contient 10 cartes : 3 Coup direct, 3 Encaisser, 1 par classe", function()
+  it("contient 12 cartes : les 3 cartes depart de chaque classe, 1 exemplaire chacune", function()
     local uid = 0
     local deck = Deck.build_starting_deck(function() uid = uid + 1 return uid end, Rng.new(1))
-    assert.equal(10, #deck)
+    assert.equal(12, #deck)
     local counts = {}
     for _, c in ipairs(deck) do counts[c.def.code] = (counts[c.def.code] or 0) + 1 end
-    assert.equal(3, counts["coup-direct"])
-    assert.equal(3, counts["encaisser"])
-    assert.equal(1, counts["coup-estoc"])
+    assert.equal(1, counts["coup-direct-guerrier"])
+    assert.equal(1, counts["encaisser-guerrier"])
+    assert.equal(1, counts["coup-taille"]) -- "depart" côté Guerrier depuis 2026-08-24, pas "coup-estoc"
+    assert.equal(1, counts["coup-direct-paladin"])
+    assert.equal(1, counts["encaisser-paladin"])
     assert.equal(1, counts["rempart"])
+    assert.equal(1, counts["flameche"]) -- pas "coup-direct-mage" (renommée 2026-08-24)
+    assert.equal(1, counts["barriere"]) -- pas "encaisser-mage" (renommée 2026-08-24)
     assert.equal(1, counts["missile-magique"])
+    assert.equal(1, counts["coup-direct-assassin"])
+    assert.equal(1, counts["encaisser-assassin"])
     assert.equal(1, counts["strategie"])
   end)
 end)

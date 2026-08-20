@@ -299,8 +299,12 @@ function Controller:pop_status(unit_id, key)
   self.status_pop[unit_id][key] = 0
 end
 
-function Controller:spawn_shield_fx(unit_id)
-  self.shield_fx[unit_id] = { t = 0 }
+-- `amount` (optionnel, 2026-08-24, demande explicite) : montant de Défense
+-- absorbé par ce fondu quand il vient d'intercepter un coup (voir
+-- Controller:react_to_diff) -- nil sur un simple gain de Défense, voir
+-- draw_shield_fx (view.lua), seul endroit qui l'affiche.
+function Controller:spawn_shield_fx(unit_id, amount)
+  self.shield_fx[unit_id] = { t = 0, amount = amount }
 end
 
 --- Compare PV + statuts avant/après un appel de règles et en déduit tous les
@@ -308,13 +312,17 @@ end
 -- "plarf"/"waof" sur une perte de PV (selon `opts.dmg_type`, "physique" par
 -- défaut), nombre flottant vert sur un soin, pop d'un badge sur toute valeur
 -- de statut qui vient d'augmenter (Camouflage compris), gros bouclier
--- + "shting" sur un gain de Défense OU des dégâts intégralement absorbés
--- (défense qui baisse sans perte de PV -- voir Combat.deal_damage). Le son
--- d'impact/bouclier ne joue qu'une fois par appel, même si plusieurs unités
--- sont touchées (carte à zone) -- pas une salve de sons identiques superposés.
--- `opts.skip_shield_sfx` : évite un faux "shting" quand la Défense retombe à
--- 0 en début de tour (Game.start_turn), qui n'est pas un blocage de dégâts.
--- Remplace l'ancien shake_from_diff, mêmes points d'appel.
+-- + "shting" sur un gain de Défense OU sur un coup intercepté par du
+-- bouclier -- MÊME partiellement (2026-08-24, demande explicite : avant,
+-- seul un coup INTÉGRALEMENT absorbé jouait le son, sans aucun visuel ; le
+-- fondu affiche maintenant le montant absorbé, EN PLUS du nombre flottant de
+-- PV perdus si l'absorption n'était que partielle -- voir Combat.deal_damage,
+-- qui retire d'abord la Défense avant de laisser passer le reste en PV). Le
+-- son d'impact/bouclier ne joue qu'une fois par appel, même si plusieurs
+-- unités sont touchées (carte à zone) -- pas une salve de sons identiques
+-- superposés. `opts.skip_shield_sfx` : évite un faux "shting" quand la
+-- Défense retombe à 0 en début de tour (Game.start_turn), qui n'est pas un
+-- blocage de dégâts. Remplace l'ancien shake_from_diff, mêmes points d'appel.
 function Controller:react_to_diff(before, opts)
   opts = opts or {}
   local hit_sfx = (opts.dmg_type == "magique") and "hit_magic" or "hit_physical"
@@ -333,11 +341,13 @@ function Controller:react_to_diff(before, opts)
     for _, k in ipairs(STATUS_KEYS) do
       if (u[k] or 0) > b[k] then self:pop_status(u.id, k) end
     end
-    local defense_now = u.defense or 0
-    if defense_now > b.defense then
+    local defense_before, defense_now = b.defense or 0, u.defense or 0
+    local absorbed = defense_before - defense_now
+    if defense_now > defense_before then
       self:spawn_shield_fx(u.id)
       if not shield_played then Sfx.play("shield"); shield_played = true end
-    elseif not opts.skip_shield_sfx and defense_now < b.defense and u.hp == b.hp then
+    elseif not opts.skip_shield_sfx and absorbed > 0 then
+      self:spawn_shield_fx(u.id, absorbed)
       if not shield_played then Sfx.play("shield"); shield_played = true end
     end
   end
@@ -396,50 +406,48 @@ end
 
 -- ---------- jouer une carte ----------
 
+-- Chaque carte appartient à un héros précis (def.class_id, voir Heroes.class_name
+-- -- 2026-08-20, une classe = un seul héros) : la sélectionner l'assigne
+-- DIRECTEMENT à son propriétaire (Game.select_card), il n'y a plus de choix
+-- de héros à faire côté joueur -- remplace l'ancien Controller:assign_hero,
+-- qui ne s'appelait plus qu'au clic sur "Jouer". Un héros peut aussi agir
+-- plusieurs fois par tour désormais (2026-08-20, demande explicite) : il n'y
+-- a donc plus de champ has_acted à comparer avant/après pour savoir si la
+-- sélection a réellement abouti -- Game.select_card renvoie directement
+-- "deselected"|"refused"|"assigned"|"resolved".
+-- L'animation de pulsation du héros ne doit se déclencher qu'à la résolution
+-- RÉELLE de l'action -- pas à la simple sélection, qui peut encore attendre un
+-- clic de cible (ennemi/allié). Pour une carte auto-résolue (soi/tous les
+-- ennemis), le résultat vaut "resolved" ; pour une carte à cible, le pulse est
+-- différé jusqu'à `resolve_target`, et l'"anticipation" (grossit + boucle sur
+-- le propriétaire, voir view.lua) se lit directement depuis
+-- `state.pending.hero_id` en attendant -- jamais un second état à tenir à jour ici.
 function Controller:select_card(uid)
   if self.screen ~= "playing" or self.state.over then return end
-  Game.select_card(self.state, uid)
-end
 
-function Controller:set_pending_mode(mode)
-  Game.set_pending_mode(self.state, mode)
+  local card
+  for _, c in ipairs(self.state.hand) do if c.uid == uid then card = c break end end
+  if not card then return end
+  local hero_id = card.def.class_id
+  local dmg_type = card.def.dmg_type
+
+  local played_uid, hand_before = uid, Game.shallow_copy(self.state.hand)
+  local before = self:snapshot_units()
+
+  local result = Game.select_card(self.state, uid)
+
+  if result == "resolved" then
+    self:pulse(hero_id, "pulse-up")
+    self:react_to_diff(before, { dmg_type = dmg_type })
+    self:maybe_animate_played_discard(played_uid, hand_before)
+    self:consume_drawn_animation() -- Clairvoyance pioche dans son propre effet, si la carte auto-résout ici
+    self:after_card_resolved()
+  end
+  -- "deselected"/"refused"/"assigned" : rien d'autre à faire ici.
 end
 
 function Controller:cancel_pending()
   Game.cancel_pending(self.state)
-end
-
--- Boutons "Jouer"/"Se concentrer" par héros (2026-08-08) : choisit le mode et
--- assigne le héros en un seul appel -- Input.lua a déjà vérifié l'éligibilité
--- (Combat.can_play/can_concentrate) avant d'appeler ceci, mais on revérifie
--- que rien n'a changé entre-temps (mode déjà choisi = clic ignoré).
-function Controller:choose_mode_and_assign(hero_id, mode)
-  local pending = self.state.pending
-  if not pending or pending.mode then return end
-  self:set_pending_mode(mode)
-  self:assign_hero(hero_id)
-end
-
--- L'animation de pulsation du héros (et donc, indirectement, le voile gris
--- "a agi" qui suit au prochain affichage) ne doit se déclencher qu'à la
--- résolution RÉELLE de l'action -- pas à la simple assignation, qui peut
--- encore attendre un clic de cible (ennemi/allié). D'où le `if resolved`
--- ci-dessous : pour une carte auto-résolue (soi/tous les ennemis/concentration),
--- `Game.assign_hero` résout tout en un seul appel et `resolved` est déjà vrai ;
--- pour une carte à cible, le pulse est différé jusqu'à `resolve_target`.
-function Controller:assign_hero(hero_id)
-  local pending = self.state.pending
-  if not pending then return end
-  local played_uid, hand_before = pending.uid, Game.shallow_copy(self.state.hand)
-  local dmg_type, is_concentrate = pending.def.dmg_type, pending.mode == "concentrate"
-  local before = self:snapshot_units()
-  local resolved = Game.assign_hero(self.state, hero_id)
-  if resolved then self:pulse(hero_id, "pulse-up") end
-  if resolved and is_concentrate then Sfx.play("concentrate") end
-  self:react_to_diff(before, { dmg_type = dmg_type })
-  self:maybe_animate_played_discard(played_uid, hand_before)
-  self:consume_drawn_animation() -- Clairvoyance : le mode "concentrate" ne pioche jamais, mais "play" le peut
-  if resolved then self:after_card_resolved() end
 end
 
 function Controller:resolve_target(kind, target_id)
@@ -501,6 +509,12 @@ function Controller:advance_after_discard_sequenced()
       if self_.state.over then return end
       Game.decay_end_of_turn_statuses(self_.state)
       if Game.check_defeat(self_.state) then self_:enter_defeat_screen(); return end
+      -- Discrétion de l'Assassin (2026-08-24) : "+5 s'IL termine le tour sans
+      -- avoir joué de carte lui-même" -- doit lire played_card_this_turn
+      -- AVANT que Game.start_turn ne le remette à false pour le tour suivant.
+      local discretion_before = self_:snapshot_units()
+      Game.tick_discretion_end_of_turn(self_.state)
+      self_:react_to_diff(discretion_before)
       self_.state.turn = self_.state.turn + 1
       local turn_before = self_:snapshot_units()
       Game.start_turn(self_.state)

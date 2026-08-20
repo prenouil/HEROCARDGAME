@@ -59,15 +59,53 @@ function Encounter.summary(enemies)
   return table.concat(parts, ", ")
 end
 
+-- Camouflé (2026-08-24, demande explicite -- jamais câblé jusqu'ici, voir
+-- glossary.lua : "ne peut pas être ciblé par un ennemi") : exclu du pool de
+-- cibles tant qu'un AUTRE héros vivant ne l'est pas -- s'il ne reste plus que
+-- des héros Camouflés (ou un seul héros vivant, Camouflé), on retombe sur le
+-- pool complet plutôt que de ne jamais pouvoir désigner de cible ("tant qu'un
+-- allié est en vie", voir la même entrée du glossaire). Filet de sécurité
+-- seulement : le nettoyage RÉEL du champ (retirer Camouflé à tout le monde dès
+-- qu'il ne reste plus d'allié non-Camouflé vivant) vit dans
+-- Game.sync_camoufle_visibility, appelé après tout événement qui peut faire
+-- mourir un héros ou en rendre un Camouflé -- ce filtre ici ne devrait donc en
+-- pratique jamais avoir besoin de retomber sur le pool complet.
+--
+-- Discrétion (2026-08-24, demande explicite) : en mode "random" (le seul
+-- réellement probabiliste -- "lowest-hp" reste un choix déterministe, pas
+-- concerné), chaque point de Discrétion du CANDIDAT retire 10% de chance
+-- RELATIVE d'être choisi (poids 1 - 0.1*discretion, jamais négatif) -- pas une
+-- exclusion binaire comme Camouflé (déjà géré par le filtre `visible`
+-- ci-dessus), juste moins probable. Sans effet sur les héros sans Discrétion
+-- (poids 1, `discretion` nil traité comme 0).
 function Encounter.pick_hero_target(state, mode, rng)
   local alive = Combat.living_heroes(state)
   if #alive == 0 then return nil end
+  local visible = {}
+  for _, h in ipairs(alive) do
+    if (h.camoufle or 0) <= 0 then visible[#visible + 1] = h end
+  end
+  if #visible > 0 then alive = visible end
   if mode == "lowest-hp" then
     local best = alive[1]
     for _, h in ipairs(alive) do if h.hp < best.hp then best = h end end
     return best
   end
-  return alive[rng:random(#alive)]
+
+  local weights, total_weight = {}, 0
+  for i, h in ipairs(alive) do
+    local w = math.max(0, 1 - 0.1 * (h.discretion or 0))
+    weights[i] = w
+    total_weight = total_weight + w
+  end
+  if total_weight <= 0 then return alive[rng:random(#alive)] end -- filet : tout le monde à poids nul
+  local roll = rng:random() * total_weight
+  local cumulative = 0
+  for i, w in ipairs(weights) do
+    cumulative = cumulative + w
+    if roll < cumulative then return alive[i] end
+  end
+  return alive[#alive] -- filet : arrondi flottant
 end
 
 -- `state.rng.enemy_turn` (2026-08-10, demande explicite -- cibles/coups ennemis

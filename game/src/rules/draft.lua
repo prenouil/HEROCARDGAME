@@ -1,5 +1,5 @@
 -- Écran de fin de combat (Run Infini) : choix d'1 carte parmi 3 à ajouter au deck.
--- Port fidèle de pickDraftCards. Règles : pool = génériques + classes présentes ;
+-- Port fidèle de pickDraftCards. Règles : pool = cartes des classes présentes ;
 -- probabilité de doublon par slot 100% / 25% / 50% ; jamais deux fois la même carte
 -- parmi les 3 propositions ; si le pool de cartes inédites est épuisé, retombe
 -- silencieusement sur un doublon.
@@ -22,7 +22,7 @@ function Draft.pick_cards(state)
 
   local eligible = {}
   for _, def in ipairs(Cards.list) do
-    if def.class_id == "generic" or present_classes[def.class_id] then
+    if present_classes[def.class_id] then
       eligible[#eligible + 1] = def
     end
   end

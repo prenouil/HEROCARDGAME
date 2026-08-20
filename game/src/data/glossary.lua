@@ -13,6 +13,7 @@ local Glossary = {}
 
 Glossary.terms = {
   { key = "energie", icon = "\u{26A1}", label = "énergie", has_icon = true, related = "énergie", explain = "" },
+  { key = "mana", icon = "\u{1F535}", label = "mana", has_icon = true, related = "mana", explain = "Ressource propre au Mage : ne se régénère jamais seule, seules des cartes peuvent l'augmenter." },
   { key = "epee", icon = "\u{2694}\u{FE0F}", label = "épée", has_icon = true, related = "dégats physique de mélée", explain = "" },
   { key = "arc", icon = "\u{1F3F9}", label = "arc", has_icon = true, related = "dégats physique à distance", explain = "" },
   { key = "brut", icon = "\u{1F4A5}", label = "brut", has_icon = true, related = "dégats brut", explain = "Ne tient pas compte des boucliers ou barrières." },
@@ -33,8 +34,16 @@ Glossary.terms = {
   { key = "saignement", icon = nil, has_icon = false, related = "", explain = "Inflige X dégâts brut à la fin du tour, -1 Saignement au début de chaque tour.", aliases = { "saignements" } },
   { key = "incapacite", icon = nil, has_icon = false, related = "", explain = "Inflige -25% de dégâts, -1 Incapacité au début de chaque tour." },
   { key = "vulnerabilite", icon = nil, has_icon = false, related = "", explain = "Reçoit +25% de dégâts, -1 Vulnérabilité au début de chaque tour." },
-  { key = "camoufle", icon = nil, has_icon = false, related = "", explain = "Ne peut pas être ciblé par un ennemi tant qu'un autre allié est présent, jusqu'à la prochaine attaque." },
+  { key = "camoufle", icon = nil, has_icon = false, related = "", explain = "Ne peut pas être ciblé par un ennemi. Reste tant qu'un allié est en vie et jusqu'à jouer une carte." },
   { key = "puissance", icon = nil, has_icon = false, related = "", explain = "Les attaques physiques gagnent +25%, -1 Puissance au début de chaque tour." },
+  -- Discrétion (2026-08-24, ressource propre à l'Assassin, DISTINCTE de
+  -- Camouflé -- voir hero.discretion/Game.gain_discretion dans game.lua) :
+  -- pas un statut de combat classique (pas de décroissance de fin de tour),
+  -- affichée en gros sous le portrait de l'Assassin comme la mana du Mage
+  -- (voir draw_hero dans view.lua), pas via ce badge -- entrée gardée pour
+  -- que les mentions "Discrétion" entre guillemets sur les cartes
+  -- (Assassinat/Dans les ombres) restent reconnues par RichText.
+  { key = "discretion", icon = nil, has_icon = false, related = "", explain = "Ressource propre à l'Assassin (0 à 10) : +1 quand un autre héros joue une carte, +5 s'il termine le tour sans en avoir joué. À 10, devient Camouflé. Repart à 0 dès que l'Assassin joue une carte." },
 }
 
 -- Lowercase + strip everything but a-z. Le jeu de cartes source n'utilise que des
