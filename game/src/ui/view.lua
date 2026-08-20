@@ -16,6 +16,8 @@ local SCALE = require("src.ui.layout_scale")
 local Heroes = require("src.data.heroes")
 local Enemies = require("src.data.enemies")
 local Combat = require("src.rules.combat")
+local Cards = require("src.data.cards")
+local FeuDeCamp = require("src.rules.feu_de_camp")
 
 local View = {}
 
@@ -171,14 +173,21 @@ View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34,
 -- dépend jamais de ce qu'ils affichent, seul leur contenu/contour change
 -- selon la disponibilité (voir View.draw). "Passer" n'est dessiné/cliquable
 -- que quand les deux sont grisés (voir Controller:choose_feu_de_camp_skip).
-local FEU_DE_CAMP_PANEL_W, FEU_DE_CAMP_PANEL_H, FEU_DE_CAMP_PANEL_GAP = 380, 320, 40
+-- Hauteur relevée (2026-08-11, demande explicite -- portrait de héros en
+-- entier + cartes à améliorer affichées face complète, pas juste leur titre)
+-- de 320 à 460 : c'est le vrai contenu (portrait, 2 cartes pleine taille par
+-- ligne) qui a grandi, la hauteur des panneaux suit.
+local FEU_DE_CAMP_PANEL_W, FEU_DE_CAMP_PANEL_H, FEU_DE_CAMP_PANEL_GAP = 380, 460, 40
+local FEU_DE_CAMP_PANEL_Y = 126
 local FEU_DE_CAMP_PANEL_X0 = (W - (FEU_DE_CAMP_PANEL_W * 2 + FEU_DE_CAMP_PANEL_GAP)) / 2
-View.feu_de_camp_heal_rect = { x = FEU_DE_CAMP_PANEL_X0, y = 150, w = FEU_DE_CAMP_PANEL_W, h = FEU_DE_CAMP_PANEL_H }
+View.feu_de_camp_heal_rect = { x = FEU_DE_CAMP_PANEL_X0, y = FEU_DE_CAMP_PANEL_Y, w = FEU_DE_CAMP_PANEL_W, h = FEU_DE_CAMP_PANEL_H }
 View.feu_de_camp_upgrade_rect = {
-  x = FEU_DE_CAMP_PANEL_X0 + FEU_DE_CAMP_PANEL_W + FEU_DE_CAMP_PANEL_GAP, y = 150,
+  x = FEU_DE_CAMP_PANEL_X0 + FEU_DE_CAMP_PANEL_W + FEU_DE_CAMP_PANEL_GAP, y = FEU_DE_CAMP_PANEL_Y,
   w = FEU_DE_CAMP_PANEL_W, h = FEU_DE_CAMP_PANEL_H,
 }
-View.feu_de_camp_skip_button = { x = W / 2 - 100, y = 500, w = 200, h = 44, label = "Passer" }
+View.feu_de_camp_skip_button = {
+  x = W / 2 - 100, y = FEU_DE_CAMP_PANEL_Y + FEU_DE_CAMP_PANEL_H + 14, w = 200, h = 44, label = "Passer",
+}
 
 local function point_in(r, x, y)
   return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h
@@ -1213,10 +1222,43 @@ end
 -- glyphe "↓" (2026-08-10, hors du charset Latin étendu de m5x7/m3x6, voir
 -- fonts.lua : rien ne garantit qu'il existe dans la police chargée, contrairement
 -- à un vecteur dessiné à la main comme draw_big_shield/draw_arrow ci-dessus).
-local function draw_down_arrow(cx, cy, size, color)
-  set(color)
+local function draw_down_arrow(cx, cy, size, color, alpha)
+  set(color, alpha)
   love.graphics.polygon("fill", cx - size, cy - size * 0.5, cx + size, cy - size * 0.5, cx, cy + size * 0.5)
 end
+
+--- Même principe que draw_down_arrow, pointant vers la droite (2026-08-11 --
+-- les 2 cartes de la Forge sont maintenant côte à côte, pas empilées).
+-- `alpha` (optionnel, défaut 1 via `set`) : fondu pendant l'animation de
+-- choix d'amélioration, voir draw_feu_de_camp.
+local function draw_right_arrow(cx, cy, size, color, alpha)
+  set(color, alpha)
+  love.graphics.polygon("fill", cx - size * 0.5, cy - size, cx - size * 0.5, cy + size, cx + size * 0.5, cy)
+end
+
+--- Carte pleine face en fondu à une opacité donnée (2026-08-11, animation de
+-- choix d'amélioration -- la carte de base s'efface pendant que la "+" se
+-- recentre, voir draw_feu_de_camp) : `set(color, alpha)` ne peut PAS porter un
+-- fondu uniforme sur les multiples tracés de draw_card_face (panneau, contour,
+-- badge, texte...), donc même détour par canvas que draw_card_flights
+-- ci-dessus (réutilise le même `card_flight_canvas`, jamais deux canvas pour
+-- le même usage).
+local function draw_faded_card(def, x, y, alpha)
+  card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+  love.graphics.setCanvas(card_flight_canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  draw_card_face(def, CARD_W, CARD_H, def.cost, def.desc, Theme.muted, false)
+  love.graphics.setCanvas()
+  love.graphics.setColor(1, 1, 1, alpha)
+  love.graphics.draw(card_flight_canvas, x, y)
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
+-- Décalage Y (relatif au panneau) de chaque ligne carte-base/carte-améliorée
+-- de la Forge -- une seule source pour le dessin ET les bandes de survol,
+-- pour qu'elles ne puissent jamais diverger.
+local FEU_DE_CAMP_CARD_ROW_Y = { 50, 212 }
+local FEU_DE_CAMP_CARD_GAP = 40 -- largeur de la zone flèche entre les 2 cartes d'une ligne
 
 --- Bandes de survol des 2 cartes proposées à l'amélioration -- position FIXE
 -- dérivée de View.feu_de_camp_upgrade_rect, jamais du contenu (même principe
@@ -1224,10 +1266,11 @@ end
 -- quelle par draw_feu_de_camp (dessin) et input.lua (hover/tooltip).
 function View.feu_de_camp_upgrade_card_rects()
   local r = View.feu_de_camp_upgrade_rect
-  return {
-    { x = r.x, y = r.y + 46, w = r.w, h = 100 },
-    { x = r.x, y = r.y + 156, w = r.w, h = 100 },
-  }
+  local out = {}
+  for i, row_y in ipairs(FEU_DE_CAMP_CARD_ROW_Y) do
+    out[i] = { x = r.x, y = r.y + row_y - 6, w = r.w, h = CARD_H + 12 }
+  end
+  return out
 end
 
 --- Écran "feuDeCamp" (2026-08-10, demande explicite) : entre le draft de fin de
@@ -1254,13 +1297,30 @@ local function draw_feu_de_camp(controller)
   text("Repos", heal_r.x, heal_r.y + 16, heal_r.w, 16, Theme.text)
   if heal_available then
     local hero = fdc.heal_target
+    -- Portrait (2026-08-11, demande explicite) : même chemin que draw_hero
+    -- (draw_class_icon -> Icons.draw_class -> Sprites.hero, le vrai sprite du
+    -- héros dès que le rayon dépasse SPRITE_MIN_RADIUS), juste affiché bien
+    -- plus grand ici qu'au format carte de la troupe.
+    local portrait_size = 150
+    draw_class_icon(hero.class_id, hero.icon, hero.label,
+      heal_r.x + (heal_r.w - portrait_size) / 2, heal_r.y + 50, portrait_size, portrait_size, Theme.text)
     local palette = Theme.card_class[hero.class_id] or Theme.card_class.generic
-    name_badge(hero.name, heal_r.x + 20, heal_r.y + 56, heal_r.w - 40, 14, palette.border, Theme.bg, 2, 4)
-    text(hero.hp <= 0 and "Ramené à la vie, PV pleins." or "Soigné à 100% de ses PV.",
-      heal_r.x + 20, heal_r.y + 100, heal_r.w - 40, 12, Theme.muted)
-    bar(heal_r.x + 20, heal_r.y + 130, heal_r.w - 40, 14, hero.hp / hero.max_hp, Theme.hp)
-    draw_down_arrow(heal_r.x + heal_r.w / 2, heal_r.y + 158, 8, Theme.heal)
-    bar(heal_r.x + 20, heal_r.y + 172, heal_r.w - 40, 14, 1, Theme.heal)
+    name_badge(hero.name, heal_r.x + 20, heal_r.y + 212, heal_r.w - 40, 14, palette.border, Theme.bg, 2, 4)
+    text(hero.hp <= 0 and "Ramené à la vie avec 20% de ses PV max." or "Regagne 20% de ses PV max.",
+      heal_r.x + 20, heal_r.y + 244, heal_r.w - 40, 12, Theme.muted)
+    -- Barres avant/après (2026-08-11, demande explicite -- "beaucoup moins
+    -- grandes") : hauteur 8, même famille que la barre de PV des encarts
+    -- héros/ennemis (voir draw_hero, bar(..., 7, ...)), PLUS les PV chiffrés
+    -- en dessous -- jamais une barre seule sans le nombre exact. Aperçu
+    -- "après" calculé via FeuDeCamp.heal_amount (2026-08-11 : soin partiel à
+    -- 20%, plus un plein soin) -- jamais recalculé indépendamment ici, seule
+    -- source de vérité sur le montant.
+    local after_hp = math.min(hero.max_hp, math.max(0, hero.hp) + FeuDeCamp.heal_amount(hero))
+    bar(heal_r.x + 30, heal_r.y + 284, heal_r.w - 60, 8, hero.hp / hero.max_hp, Theme.hp)
+    text(math.max(0, hero.hp) .. "/" .. hero.max_hp .. " PV", heal_r.x, heal_r.y + 296, heal_r.w, 10, Theme.muted)
+    draw_down_arrow(heal_r.x + heal_r.w / 2, heal_r.y + 322, 8, Theme.heal)
+    bar(heal_r.x + 30, heal_r.y + 346, heal_r.w - 60, 8, after_hp / hero.max_hp, Theme.heal)
+    text(after_hp .. "/" .. hero.max_hp .. " PV", heal_r.x, heal_r.y + 358, heal_r.w, 10, Theme.muted)
   else
     text("Personne n'est blessé.", heal_r.x + 20, heal_r.y + heal_r.h / 2 - 8, heal_r.w - 40, 12, Theme.muted)
   end
@@ -1272,14 +1332,47 @@ local function draw_feu_de_camp(controller)
   love.graphics.setLineWidth(1)
   text("Forge", up_r.x, up_r.y + 16, up_r.w, 16, Theme.text)
   if upgrade_available then
-    local card_rows = View.feu_de_camp_upgrade_card_rects()
+    -- Cartes en entier (2026-08-11, demande explicite) : même draw_card_face
+    -- que la main/l'écran de draft, jamais un simple nom -- base à gauche,
+    -- flèche, version "+" à droite (mise en évidence via `highlight`, le même
+    -- paramètre qui dore déjà le contour "Avancé" en draft).
+    local pair_w = CARD_W * 2 + FEU_DE_CAMP_CARD_GAP
+    local x0 = up_r.x + (up_r.w - pair_w) / 2
+    local upgraded_x0 = x0 + CARD_W + FEU_DE_CAMP_CARD_GAP
+    local centered_x0 = up_r.x + (up_r.w - CARD_W) / 2 -- "la case" : centrée dans le panneau
+    local anim = controller.feu_de_camp_upgrade_anim
     for i, instance in ipairs(fdc.upgrade_targets) do
-      local def = instance.def
-      local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
-      local row_y = card_rows[i].y + 10
-      name_badge(def.name, up_r.x + 20, row_y, up_r.w - 40, 13, palette.border, Theme.bg, 2, 3)
-      draw_down_arrow(up_r.x + up_r.w / 2, row_y + 30, 7, Theme.accent)
-      name_badge(def.name .. " +", up_r.x + 20, row_y + 46, up_r.w - 40, 13, Theme.accent, Theme.bg, 2, 3)
+      local card_y = up_r.y + FEU_DE_CAMP_CARD_ROW_Y[i]
+      if anim then
+        -- Choix déjà fait (2026-08-11) : instance.def porte maintenant la
+        -- version améliorée (voir Controller:choose_feu_de_camp_upgrade) --
+        -- la carte de base vient d'anim.base_defs, prise AVANT la mutation
+        -- (Cards.upgraded_def sur un def déjà "+" doublerait le suffixe).
+        local p = math.min(1, anim.t / (controller.feu_de_camp_upgrade_anim_duration or 1))
+        local ease = 1 - (1 - p) ^ 2 -- easeOutQuad, même famille que draw_card_flights
+        local fade_alpha = 1 - p
+        if fade_alpha > 0 then
+          draw_faded_card(anim.base_defs[i], x0, card_y, fade_alpha)
+          draw_right_arrow(x0 + CARD_W + FEU_DE_CAMP_CARD_GAP / 2, card_y + CARD_H / 2, 8, Theme.accent, fade_alpha)
+        end
+        local cur_x = upgraded_x0 + (centered_x0 - upgraded_x0) * ease
+        love.graphics.push()
+        love.graphics.translate(cur_x, card_y)
+        draw_card_face(instance.def, CARD_W, CARD_H, instance.def.cost, instance.def.desc, Theme.text, true)
+        love.graphics.pop()
+      else
+        local def = instance.def
+        love.graphics.push()
+        love.graphics.translate(x0, card_y)
+        draw_card_face(def, CARD_W, CARD_H, def.cost, def.desc, Theme.muted, false)
+        love.graphics.pop()
+        draw_right_arrow(x0 + CARD_W + FEU_DE_CAMP_CARD_GAP / 2, card_y + CARD_H / 2, 8, Theme.accent)
+        love.graphics.push()
+        love.graphics.translate(upgraded_x0, card_y)
+        local upgraded_def = Cards.upgraded_def(def)
+        draw_card_face(upgraded_def, CARD_W, CARD_H, upgraded_def.cost, upgraded_def.desc, Theme.text, true)
+        love.graphics.pop()
+      end
     end
   else
     text("Pas assez de cartes à améliorer.", up_r.x + 20, up_r.y + up_r.h / 2 - 8, up_r.w - 40, 12, Theme.muted)

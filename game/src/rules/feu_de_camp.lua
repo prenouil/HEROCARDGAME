@@ -11,6 +11,13 @@ local Cards = require("src.data.cards")
 
 local FeuDeCamp = {}
 
+-- Le soin ne rend qu'une fraction des PV max (2026-08-11, revu à la baisse --
+-- ne rendait que 100% jusqu'ici, changement explicite du porteur de projet),
+-- y compris pour ressusciter un mort : jamais un plein soin.
+FeuDeCamp.HEAL_FRACTION = 0.5
+
+local function round(x) return math.floor(x + 0.5) end
+
 --- Pourcentage de "blessure" d'un héros -- 1 (100%) pour un mort, toujours
 -- prioritaire sur un vivant amoché (confirmé par Zgrubulu, 2026-08-10) -- 0
 -- pour un héros à pleine vie.
@@ -40,12 +47,22 @@ function FeuDeCamp.most_wounded_hero(state, rng)
   return candidates[rng:random(#candidates)]
 end
 
---- Soigne/ressuscite `hero` à 100% de ses PV max, quel que soit son état de
--- départ (confirmé par Zgrubulu, 2026-08-10) -- PAS Combat.grant_heal (+N,
--- plafonné, bonus Transcendance Paladin) : ce n'est pas l'effet d'une carte
--- jouée en combat, juste un reset direct des PV.
+--- Montant rendu par le soin : HEAL_FRACTION des PV max, arrondi -- jamais un
+-- plein soin (confirmé par Zgrubulu, 2026-08-11).
+function FeuDeCamp.heal_amount(hero)
+  return round(hero.max_hp * FeuDeCamp.HEAL_FRACTION)
+end
+
+--- Soigne/ressuscite `hero` de HEAL_FRACTION de ses PV max, quel que soit son
+-- état de départ -- un mort (PV négatifs compris) revient toujours à la vie
+-- avec ce même montant, jamais plus (confirmé par Zgrubulu, 2026-08-11 :
+-- "même quand il ressuscite"). `math.max(0, hero.hp)` avant d'ajouter :
+-- repart d'un plancher à 0, pas d'un négatif profond, sinon un mort à -15 PV
+-- pourrait ne pas repasser au-dessus de 0 avec un soin partiel. Plafonné à
+-- max_hp comme n'importe quel soin. PAS Combat.grant_heal (bonus Transcendance
+-- Paladin compris) : ce n'est pas l'effet d'une carte jouée en combat.
 function FeuDeCamp.heal_hero(hero)
-  hero.hp = hero.max_hp
+  hero.hp = math.min(hero.max_hp, math.max(0, hero.hp) + FeuDeCamp.heal_amount(hero))
 end
 
 --- Toutes les instances de carte encore améliorables (deck + main + défausse --

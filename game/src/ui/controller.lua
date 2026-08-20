@@ -45,6 +45,14 @@ local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début 
 -- combat suivant démarre.
 local FEU_DE_CAMP_RESOLVE_PAUSE = 0.6
 
+-- Choix "amélioration" (2026-08-11, demande explicite) : les 2 cartes de base
+-- et les flèches disparaissent en fondu pendant que les 2 cartes améliorées se
+-- recentrent dans leur case, PUIS 1s de pause (cartes déjà réglées, juste le
+-- temps de les lire) avant d'enchaîner sur le combat suivant -- remplace la
+-- pause générique FEU_DE_CAMP_RESOLVE_PAUSE sur ce chemin précis.
+local FEU_DE_CAMP_UPGRADE_ANIM_DURATION = 0.5
+local FEU_DE_CAMP_UPGRADE_HOLD_PAUSE = 1.0
+
 -- VFX de lisibilité (2026-08-09, party "amélioration des visuels") : tous
 -- dérivés du même mécanisme de diff avant/après déjà en place pour la
 -- secousse (voir Controller:react_to_diff, ex-shake_from_diff), pas de
@@ -64,6 +72,8 @@ function Controller.new()
   self.screen = "playing" -- "playing" | "draft" | "feuDeCamp" | "defeat"
   self.draft_picks = nil
   self.feu_de_camp = nil -- { heal_target = hero|nil, upgrade_targets = {instance,instance}|nil }, voir enter_feu_de_camp_screen
+  self.feu_de_camp_upgrade_anim = nil -- { base_defs = {def,def}, t = elapsed }, voir choose_feu_de_camp_upgrade
+  self.feu_de_camp_upgrade_anim_duration = FEU_DE_CAMP_UPGRADE_ANIM_DURATION -- lu par view.lua pour l'easing
   self.victory_anim = nil -- { t = elapsed } pendant le zoom+bump du titre "Victoire !"
   self.victory_title_duration = VICTORY_TITLE_DURATION -- lu par view.lua pour l'easing
   self.draft_cards_shown = false -- les 3 cartes (de dos) n'apparaissent qu'après le titre
@@ -103,6 +113,7 @@ function Controller:reset_run()
   self.screen = "playing"
   self.draft_picks = nil
   self.feu_de_camp = nil
+  self.feu_de_camp_upgrade_anim = nil
   self.victory_anim = nil
   self.draft_cards_shown = false
   self.draft_flip = {}
@@ -369,6 +380,7 @@ function Controller:update(dt)
   if self.hover.target then self.hover.t = self.hover.t + dt end
   if self.victory_anim then self.victory_anim.t = self.victory_anim.t + dt end
   for _, f in pairs(self.draft_flip) do f.t = f.t + dt end
+  if self.feu_de_camp_upgrade_anim then self.feu_de_camp_upgrade_anim.t = self.feu_de_camp_upgrade_anim.t + dt end
 end
 
 function Controller:set_hover(kind, target)
@@ -581,21 +593,31 @@ function Controller:choose_feu_de_camp_heal()
   if not fdc.heal_target then return end
   fdc.resolved = true
   local hero = fdc.heal_target
-  local healed = hero.max_hp - hero.hp
+  local before_hp = hero.hp
   FeuDeCamp.heal_hero(hero)
+  local healed = hero.hp - before_hp
   if healed > 0 then self:spawn_floater(hero.id, healed, "heal") end
   Sfx.play("heal")
   self:finish_feu_de_camp()
 end
 
+--- Snapshot des defs de BASE avant mutation (2026-08-11, demande explicite) --
+-- FeuDeCamp.apply_upgrades remplace `instance.def` par la version "+" ; l'anim
+-- de transition a besoin des deux (base qui s'efface en fondu, "+" qui se
+-- recentre) donc on garde les defs de base à part avant l'appel, jamais
+-- reconstruites après coup (Cards.upgraded_def sur un def déjà amélioré
+-- doublerait le suffixe " +").
 function Controller:choose_feu_de_camp_upgrade()
   if not feu_de_camp_choosable(self) then return end
   local fdc = self.feu_de_camp
   if not fdc.upgrade_targets then return end
   fdc.resolved = true
+  local base_defs = {}
+  for i, instance in ipairs(fdc.upgrade_targets) do base_defs[i] = instance.def end
   FeuDeCamp.apply_upgrades(fdc.upgrade_targets)
+  self.feu_de_camp_upgrade_anim = { base_defs = base_defs, t = 0 }
   Sfx.play("upgrade")
-  self:finish_feu_de_camp()
+  self:finish_feu_de_camp(FEU_DE_CAMP_UPGRADE_ANIM_DURATION + FEU_DE_CAMP_UPGRADE_HOLD_PAUSE)
 end
 
 --- "Passer" (2026-08-10, demande explicite) : seule option valide quand le
@@ -609,15 +631,19 @@ function Controller:choose_feu_de_camp_skip()
   self:finish_feu_de_camp()
 end
 
-function Controller:finish_feu_de_camp()
+--- `pause` (optionnel) : durée avant l'étape suivante -- FEU_DE_CAMP_RESOLVE_PAUSE
+-- par défaut (soin/passer), plus long sur le chemin amélioration pour laisser
+-- l'animation de fondu/recentrage se jouer (voir choose_feu_de_camp_upgrade).
+function Controller:finish_feu_de_camp(pause)
   local self_ = self
   -- Même idiome que Controller:enter_draft_screen (fn vide + durée = "attends",
   -- PUIS l'étape suivante fait le travail) : Sequencer:push exécute run_fn
   -- immédiatement et attend `wait_after` avant l'étape SUIVANTE, jamais avant
   -- run_fn lui-même -- voir src/util/sequencer.lua.
-  self.seq:push(function() end, FEU_DE_CAMP_RESOLVE_PAUSE)
+  self.seq:push(function() end, pause or FEU_DE_CAMP_RESOLVE_PAUSE)
   self.seq:push(function()
     self_.feu_de_camp = nil
+    self_.feu_de_camp_upgrade_anim = nil
     self_.screen = "playing"
     self_.state.over = false
     self_.card_anims = {}

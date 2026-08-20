@@ -59,14 +59,26 @@ describe("FeuDeCamp.most_wounded_hero", function()
 end)
 
 describe("FeuDeCamp.heal_hero", function()
-  it("ramène un héros blessé à 100% de ses PV max", function()
-    local h = make_hero("h1", { hp = 5, max_hp = 20 })
+  it("ne rend que 20% des PV max (jamais un plein soin)", function()
+    local h = make_hero("h1", { hp = 5, max_hp = 20 }) -- +4 (20% de 20)
     FeuDeCamp.heal_hero(h)
-    assert.equal(20, h.hp)
+    assert.equal(9, h.hp)
   end)
 
-  it("ressuscite un héros mort (PV négatifs compris) à 100% de ses PV max", function()
+  it("ressuscite un héros mort (PV négatifs compris) avec seulement 20% de ses PV max, jamais plus", function()
     local h = make_hero("h1", { hp = -8, max_hp = 20 })
+    FeuDeCamp.heal_hero(h)
+    assert.equal(4, h.hp) -- plancher à 0 avant d'ajouter, PAS -8 + 4
+  end)
+
+  it("un mort très profondément négatif revient quand même à la vie", function()
+    local h = make_hero("h1", { hp = -100, max_hp = 20 })
+    FeuDeCamp.heal_hero(h)
+    assert.equal(4, h.hp)
+  end)
+
+  it("ne dépasse jamais les PV max", function()
+    local h = make_hero("h1", { hp = 19, max_hp = 20 }) -- +4 dépasserait 20
     FeuDeCamp.heal_hero(h)
     assert.equal(20, h.hp)
   end)

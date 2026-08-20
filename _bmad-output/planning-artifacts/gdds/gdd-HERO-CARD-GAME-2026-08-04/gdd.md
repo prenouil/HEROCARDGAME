@@ -3,7 +3,7 @@ title: Hero Card Game - Game Design Document
 game_type: Roguelike / Card Game (hybride)
 platforms: PC (souris, manette), smartphone (tactile)
 created: 2026-08-04
-updated: 2026-08-09
+updated: 2026-08-11
 status: draft
 ---
 
@@ -203,28 +203,30 @@ Pouvoir spécial propre à chaque **aventurier individuel** (par opposition à u
 
 *(Mise à jour 2026-08-06 : le tableur des cartes a été entièrement refait par le porteur de projet — Coup mortel passe de la classe Assassin à la classe Guerrier, une nouvelle carte Assassin "Blessure ouverte" apparaît, et plusieurs coûts/effets changent. Correction du même jour : Coup Brutal retiré du Guerrier — laissé par erreur lors de la refonte, il faisait doublon avec Blessure ouverte de l'Assassin, effet strictement identique. Le deck du MVP reste donc à 18 cartes : 2 génériques + 4 par classe × 4 classes.)*
 
+*(Resynchronisation 2026-08-11 : la table ci-dessous avait dérivé du code sans que la dérive soit répercutée ici — coûts et dégâts de Missile magique/Tornade de feu/Boule de feu faux, effet de Lumière divine sous-évalué, et Lâcheté toujours listée alors que `decision-log.md` (2026-08-09) trace déjà sa réécriture en "Dans les ombres" et la refonte d'Assassinat (12 dégâts si Camouflé, sinon Camouflé 1 + Puissance 1) au moment du retravail de la Transcendance Assassin — décisions actées mais jamais reportées dans cette table. Valeurs resynchronisées directement depuis `game/src/data/cards.lua`, qui fait foi — voir Assumptions and Dependencies pour le détail de la correction. Colonne "Effet amélioré" ajoutée à cette occasion : voir Système d'amélioration de cartes (feu de camp) sous Run Infini.)*
+
 La table ci-dessous est la liste **MVP** telle qu'implémentée dans le prototype (18 cartes fixes, 4 par héros). Elle est une instanciation simplifiée de la structure long terme décrite en Character Selection (5 "cartes de départ" + 10 "cartes spéciales" par héros, débloquées progressivement sur les 40 héros) — les deux ne se contredisent pas : celle-ci est le sous-ensemble jouable dès aujourd'hui, l'autre la cible complète du jeu fini.
 
-| Carte | Classe | Palier | Coût | Catégorie | Effet |
-|---|---|---|---|---|---|
-| Coup direct | Générique | Départ | 0 | épée | Inflige 4 dégâts. |
-| Encaisser | Générique | Départ | 0 | bouclier | Gagne 4 défense. |
-| Coup d'estoc | Guerrier | Départ | 0 | épée | Inflige 4 dégâts. Inflige 4 dégâts de plus si la cible a de la défense. |
-| Coup de taille | Guerrier | Avancé | 1 | épée | Inflige 4 dégâts à tous les ennemis. |
-| Coup mortel | Guerrier | Avancé | 0 | épée | Inflige 4 dégâts. Si tue sa cible, l'aventurier n'est pas considéré avoir agi et la carte retourne en main (au lieu de la défausse). |
-| Riposte | Guerrier | Avancé | 3 | bouclier + épée | Si l'aventurier est la cible de l'attaque ennemie, annule cette attaque et inflige 4 dégâts. |
-| Rempart | Paladin | Départ | 1 | bouclier | Cet aventurier et un autre gagnent 4 en défense chacun (6 chacun si joué par le Paladin — Transcendance s'applique aux deux gains). |
-| Provocation | Paladin | Avancé | 0 | bouclier | Gagne 6 défense (9 si joué par le Paladin — Transcendance). Un ennemi change sa cible pour cet aventurier. |
-| Clairvoyance | Paladin | Avancé | 0 | sort | Pioche une carte. Un autre aventurier se concentre. Cet aventurier n'est pas considéré avoir agi (voir la règle "un héros, une carte par tour" dans Core Gameplay Loop) — il peut recevoir une autre carte ce tour-ci. |
-| Lumière divine | Paladin | Avancé | 2 | sort | Gagne 4 défense (6 si joué par le Paladin). Restaure 2 PV à tous les aventuriers (3 si joué par le Paladin — Transcendance s'applique aux deux effets). |
-| Missile magique | Mage | Départ | 2 | sort, distance | Inflige 5 dégâts magiques. |
-| Image miroir | Mage | Avancé | 3 | sort, défense | Gagne Esquive 2. |
-| Tornade de feu | Mage | Avancé | 6 | sort, distance, feu | Inflige 5 dégâts magiques de feu à tous les ennemis. |
-| Boule de feu | Mage | Avancé | 8 | sort, distance, feu | Inflige 15 dégâts magiques de feu. |
-| Stratégie | Assassin | Départ | 0 | épée + bouclier | S'il est ciblé par un ennemi, gagne 4 en défense ; sinon, inflige 4 dégâts. |
-| Blessure ouverte | Assassin | Avancé | 2 | épée | Inflige 6 dégâts et Saignements 3. |
-| Assassinat | Assassin | Avancé | 4 | épée, brut | Si camouflé : inflige 10 dégâts bruts et perd le Camouflage. Sinon : se concentre (+1 énergie) et la carte retourne au sommet du deck au lieu d'être jouée. |
-| Lâcheté | Assassin | Avancé | 1 | — | Change la cible pour un autre aventurier. L'ennemi gagne Incapacité 1. |
+| Carte | Classe | Palier | Coût | Catégorie | Effet | Effet amélioré ("+", feu de camp) |
+|---|---|---|---|---|---|---|
+| Coup direct | Générique | Départ | 0 | épée | Inflige 4 dégâts. | Inflige 6 dégâts. |
+| Encaisser | Générique | Départ | 0 | bouclier | Gagne 4 défense. | Gagne 6 défense. |
+| Coup d'estoc | Guerrier | Départ | 0 | épée | Inflige 4 dégâts. Inflige 4 dégâts de plus si la cible a de la défense. | Inflige 6 dégâts. Inflige 6 dégâts de plus si la cible a de la défense. |
+| Coup de taille | Guerrier | Avancé | 1 | épée | Inflige 4 dégâts à tous les ennemis. | Inflige 6 dégâts à tous les ennemis. |
+| Coup mortel | Guerrier | Avancé | 0 | épée | Inflige 4 dégâts. Si tue sa cible, l'aventurier n'est pas considéré avoir agi et la carte retourne en main (au lieu de la défausse). | Inflige 6 dégâts (reste de l'effet inchangé). |
+| Riposte | Guerrier | Avancé | 3 | bouclier + épée | Si l'aventurier est la cible de l'attaque ennemie, annule cette attaque et inflige 4 dégâts. | Inflige 6 dégâts. |
+| Rempart | Paladin | Départ | 1 | bouclier | Cet aventurier et un autre gagnent 4 en défense chacun (6 chacun si joué par le Paladin — Transcendance s'applique aux deux gains). | Cet aventurier gagne 5 défense, l'allié gagne 6 défense (8 et 9 si joué par le Paladin) — **montée asymétrique volontaire du tableur** (pas un ×1.5 uniforme comme les autres cartes), Transcendance Paladin s'applique toujours par-dessus. |
+| Provocation | Paladin | Avancé | 0 | bouclier | Gagne 6 défense (9 si joué par le Paladin — Transcendance). Un ennemi change sa cible pour cet aventurier. | Gagne 9 défense (14 si joué par le Paladin — Transcendance s'applique toujours par-dessus la valeur améliorée). |
+| Clairvoyance | Paladin | Avancé | 0 | sort | Pioche une carte. Un autre aventurier se concentre. Cet aventurier n'est pas considéré avoir agi (voir la règle "un héros, une carte par tour" dans Core Gameplay Loop) — il peut recevoir une autre carte ce tour-ci. | Pioche 2 cartes (reste de l'effet inchangé). |
+| Lumière divine | Paladin | Avancé | 2 | sort | Tous les alliés gagnent 4 défense et 4 PV (6 chacun si joué par le Paladin — Transcendance s'applique aux deux effets). | Tous les alliés gagnent 6 défense et 6 PV (9 chacun si joué par le Paladin). |
+| Missile magique | Mage | Départ | 3 | sort, distance | Inflige 8 dégâts magiques. | Inflige 12 dégâts magiques. |
+| Image miroir | Mage | Avancé | 3 | sort, défense | Gagne Esquive 2. | Gagne Esquive 3. |
+| Tornade de feu | Mage | Avancé | 6 | sort, distance, feu | Inflige 8 dégâts magiques de feu à tous les ennemis. | Inflige 12 dégâts magiques de feu à tous les ennemis. |
+| Boule de feu | Mage | Avancé | 8 | sort, distance, feu | Inflige 20 dégâts magiques de feu. | Inflige 30 dégâts magiques de feu. |
+| Stratégie | Assassin | Départ | 0 | épée + bouclier | S'il est ciblé par un ennemi, gagne 4 en défense ; sinon, inflige 4 dégâts. | Gagne 6 défense ; sinon inflige 6 dégâts. |
+| Blessure ouverte | Assassin | Avancé | 2 | épée | Inflige 6 dégâts et Saignements 3. | Inflige 9 dégâts et Saignements 4. |
+| Assassinat | Assassin | Avancé | 4 | épée | Si Camouflé : inflige 12 dégâts et perd le Camouflage. Sinon : gagne Camouflage 1 et Puissance 1, la carte retourne au sommet du deck (rejouable au tirage suivant). | Si Camouflé : inflige 18 dégâts. Sinon : Camouflage 2, Puissance 2 (reste de l'effet inchangé). |
+| Dans les ombres | Assassin | Avancé | 1 | bouclier | Gagne 4 défense, 1 énergie et Camouflage 1. | Gagne 6 défense, 2 énergie et Camouflage 2. |
 
 **Coût de Stratégie confirmé à 0** par le porteur de projet (2026-08-06) — le tableur refait fait foi, la valeur 1 d'une itération précédente est abandonnée.
 
@@ -246,11 +248,25 @@ Amélioration du prototype de combat existant (le continue, ne le remplace pas) 
 - **Bestiaire (10 ennemis, niveau 1, comportement fixe — seules les valeurs scalent avec le niveau, +20 %/niveau) :** Gobelin Maraudeur, Squelette Archer, Troll des Marais (régénération annulée par des dégâts de feu subis pendant la phase joueur), Gobelourd (attaque toujours, dégâts réduits en défense), Loup Enragé, Araignée Venimeuse (dégâts brut + Saignement), Nécromancien Novice (Vulnérabilité 3, pas de dégât direct), Golem de Pierre (ne fait rien sauf s'il est touché pendant la phase joueur, auquel cas il riposte), Bandit Fourbe (cible toujours le héros au moins de PV), Chaman Gobelin (soigne un allié blessé s'il y en a un, sinon attaque).
 - **Variance aléatoire :** chaque montant ennemi (dégâts, soin, bouclier, PV max) est tiré dans une fourchette ±20 % autour d'une valeur centrale — le télégraphe affiche toujours le montant réel déjà tiré (jamais la fourchette), qui n'apparaît qu'à titre informatif dans l'infobulle de l'ennemi.
 - **Écran de fin de combat :** les 3 cartes du draft apparaissent face cachée, se retournent une par une après 2 s, sont survolables (même infobulle que la main) ; le choix ajoute la carte au deck, les 2 autres sont détruites visuellement. Règles de tirage : pool = génériques + classes présentes dans le groupe ; une carte Départ ne peut être que celle déjà dans le deck ; probabilité de doublon par slot 100 % / 25 % / 50 % ; jamais deux fois la même carte parmi les 3 ; pool de cartes inédites épuisé → retombe simplement sur un doublon.
+- **Feu de camp (2026-08-10, voir Système d'amélioration de cartes ci-dessous) :** après le draft, avant le combat suivant — soin partiel de l'aventurier le plus blessé ou amélioration de 2 cartes.
 - **"Recommencer" relance le combat en cours**, pas toute la run (mêmes ennemis, mêmes niveaux/PV déjà tirés, même deck) — une sauvegarde de l'état est prise au tout début de chaque combat. Le "Rejouer" affiché sur l'écran de défaite, lui, relance bien une run entière depuis le combat 1.
 
 Hors scope de cette implémentation : le scaling comportemental des ennemis (nouveaux patterns à des paliers de puissance, prévu plus tard) et la récompense de fin de run garantie (pilier 3) — testé via Playwright (chargement sans erreur, boucle combat→draft→combat suivant→défaite jouée sur un run réel).
 
 Mots-clés/statuts : voir Primary Mechanics.
+
+### Système d'amélioration de cartes (feu de camp, implémenté 2026-08-10, revu 2026-08-11)
+
+Deuxième écran de fin de combat, immédiatement après le draft et avant le combat suivant, à chaque combat sans exception — jamais aléatoire dans son apparition, contrairement au draft. Nommé "feuDeCamp" (nom canon choisi par le porteur de projet, repris tel quel dans le code : nom d'écran, nom du flux aléatoire dédié). S'intercale de façon totalement transparente dans la boucle : **ne fait jamais avancer le budget de difficulté** du combat suivant (`20 × 1.22^(N-1)`, voir Run Infini ci-dessus).
+
+Le joueur choisit entre deux options, tirées une seule fois à l'entrée de l'écran (donc déjà déterminées avant même le premier clic — même logique que les 3 cartes du draft) :
+
+1. **Repos (soin/résurrection) :** cible automatiquement l'aventurier le plus blessé en pourcentage de PV manquants. Un aventurier mort compte comme 100 % blessé, donc toujours prioritaire sur un vivant même à 1 PV. Égalité entre plusieurs aventuriers départagée aléatoirement. **Ne rend que 20 % des PV maximum de la cible — jamais un soin complet, y compris pour ressusciter un mort** (décision du porteur de projet, revue à la baisse le 2026-08-11 : posé à 100 % lors de l'implémentation initiale du 2026-08-10, jugé trop généreux). Grisée si personne n'est blessé.
+2. **Forge (amélioration de carte) :** tire 2 cartes distinctes au hasard dans tout le deck du joueur (doublons d'une même carte inclus) et les fait passer à leur version "+" (voir la colonne "Effet amélioré" de Card Types and Effects ci-dessus, 18 valeurs alignées sur le tableur du porteur de projet). Le nom affiché est suffixé " +" (ex. "Coup direct" → "Coup direct +"). Une carte déjà améliorée n'est plus jamais retirable — pas de second palier au-delà du "+". Grisée si le joueur possède moins de 2 cartes encore améliorables.
+
+Si les deux options sont grisées simultanément (personne blessé et moins de 2 cartes améliorables), un bouton "Passer" apparaît comme seule issue. Aléatoire résolu par un flux dédié et reproductible (5ᵉ flux de la run, après ceux de la rencontre/du deck/des tours ennemis/du draft), pour rester cohérent avec le reste du système décrit en Assumptions and Dependencies.
+
+Présentation : le portrait réel de l'aventurier (pas une icône) s'affiche en grand sur l'option Repos, avec les PV chiffrés avant/après en plus des barres. Les 2 cartes proposées à l'amélioration s'affichent en pleine face (coût, nom, texte complet), pas en simple titre. Au choix de l'amélioration, les 2 cartes de base et les flèches qui les reliaient à leur version "+" s'effacent en fondu pendant que les cartes améliorées se recentrent dans leur emplacement ; 1 seconde après, le combat suivant démarre.
 
 ### Deck Building
 
@@ -345,9 +361,9 @@ Designs de héros "ultra classiques, stéréotypés et reconnaissables" — choi
 
 ### Audio and Music
 
-*(Mis à jour le 2026-08-09 — premier jalon concret sur une question jusque-là "entièrement à définir", voir `decision-log.md`. Reste listé aussi en Assumptions and Dependencies tant que le porteur de projet n'a pas validé le rendu à l'oreille — pas encore promu au canon complet.)*
+*(Mis à jour le 2026-08-09 — premier jalon concret sur une question jusque-là "entièrement à définir", voir `decision-log.md`. +2 sons le 2026-08-10 (écran feu de camp, voir Run Infini) ; total corrigé à cette occasion, la bibliothèque comptait déjà 8 sons distincts avant cet ajout et non 9 comme précédemment écrit ici — décompte refait directement sur `sfx.lua`. Reste listé aussi en Assumptions and Dependencies tant que le porteur de projet n'a pas validé le rendu à l'oreille — pas encore promu au canon complet.)*
 
-**Direction retenue : synthèse audio procédurale façon puce sonore NES.** Ondes carrée/triangle/bruit générées directement en mémoire au lancement (aucun fichier audio, aucune dépendance externe, aucun service à payer) — le même principe que la console elle-même, qui ne jouait pas de samples enregistrés. 9 sons nommés : pioche d'une carte et retournement d'une carte au loot (même son), dégâts physiques, dégâts magiques (deux sons distincts), gain de bouclier ou dégâts intégralement bloqués par un bouclier (même son), un ennemi qui s'apprête à résoudre son action télégraphiée, résolution d'une Concentration, fanfare de victoire, fanfare de défaite. `[NOTE FOR DESIGNER] Un seul son joué par résolution même si une carte touche plusieurs cibles (pas de salve superposée) ; bibliothèque volontairement scopée à ces 9 événements pour l'instant, à étendre seulement après validation du style.`
+**Direction retenue : synthèse audio procédurale façon puce sonore NES.** Ondes carrée/triangle/bruit générées directement en mémoire au lancement (aucun fichier audio, aucune dépendance externe, aucun service à payer) — le même principe que la console elle-même, qui ne jouait pas de samples enregistrés. 10 sons nommés : pioche d'une carte et retournement d'une carte au loot (même son), dégâts physiques, dégâts magiques (deux sons distincts), gain de bouclier ou dégâts intégralement bloqués par un bouclier (même son), un ennemi qui s'apprête à résoudre son action télégraphiée, résolution d'une Concentration, **soin/résurrection au feu de camp, amélioration d'une carte au feu de camp**, fanfare de victoire, fanfare de défaite. `[NOTE FOR DESIGNER] Un seul son joué par résolution même si une carte touche plusieurs cibles (pas de salve superposée) ; bibliothèque volontairement scopée à ces 10 événements pour l'instant, à étendre seulement après validation du style.`
 
 ---
 
@@ -426,12 +442,18 @@ Hors périmètre du jeu en général (aucune source ne l'évoque) :
 - **Pas de plafond d'énergie** — l'énergie individuelle par héros se banque indéfiniment si non dépensée. Les 3 prototypes de code (plafond à 3) sont désormais en divergence avec le canon et à corriger.
 - **Contrôles : ciblage dynamique à la flèche confirmé comme cible de design du jeu final (2026-08-09), remplace le Drag & Drop** — voir Controls and Input. Spike testé en jeu et validé par le porteur de projet avant d'être promu au canon. La séquence à 3 taps reste un mode alterné du prototype `proto-cartes-completes`, jamais le canon.
 - **Économie de cartes long terme corrigée (2026-08-06) :** 15 cartes propres par héros (5 "cartes de départ" + 10 "cartes spéciales", 12 à débloquer), soit ~480 cartes à débloquer et ~600 cartes distinctes au total sur 40 héros — remplace le chiffre "~640 améliorations" utilisé jusqu'ici, qui provenait d'une erreur de transcription du document source (15×40 = 600, pas 640). *(Le volet "améliorations de passifs" de cette même décision, alors 80 = Pouvoir de Classe + Transcendance × 2 par héros, est retombé à 40 = Transcendance seule le 2026-08-09 avec le retrait du Pouvoir de Classe — voir ci-dessous.)*
-- **Pouvoir de Classe retiré (2026-08-09), décision radicale du porteur de projet** : « ça ne marche pas pour l'instant, je les remettrai peut-être plus tard, repensés. » Les 4 pouvoirs (coups gratuits du Guerrier, réanimation du Paladin, garder 1 carte du Mage, Camouflage + Puissance 2 en Concentration de l'Assassin) disparaissent du canon — voir Character Selection. La Transcendance individuelle n'est pas concernée. Conséquence mécanique non demandée mais directe, signalée plutôt que corrigée sans accord : la carte Assassinat ("Si Camouflé...") ne peut plus jamais résoudre sa branche Camouflé, plus aucune source n'accordant ce statut.
+- **Pouvoir de Classe retiré (2026-08-09), décision radicale du porteur de projet** : « ça ne marche pas pour l'instant, je les remettrai peut-être plus tard, repensés. » Les 4 pouvoirs (coups gratuits du Guerrier, réanimation du Paladin, garder 1 carte du Mage, Camouflage + Puissance 2 en Concentration de l'Assassin) disparaissent du canon — voir Character Selection. La Transcendance individuelle n'est pas concernée. **Correction 2026-08-11 :** la conséquence alors signalée ici (plus aucune source n'accordant Camouflage à Assassinat) ne tient plus — le même jour (2026-08-09), l'Assassin a été retravaillé pour s'accorder Camouflage lui-même : Assassinat non-Camouflé donne désormais Camouflage 1 + Puissance 1 (la carte retourne au sommet du deck plutôt que de se concentrer), et la nouvelle carte "Dans les ombres" (voir Card Types and Effects) donne Camouflage 1 en plus de défense et d'énergie. Assassinat peut donc de nouveau résoudre sa branche Camouflé.
 - **Le Paladin remplace le Clerc dans le roster MVP** (Guerrier, Paladin, Mage, Assassin).
 - **Nom de classe canonique : Assassin**, pas "Voleur" — le prototype `proto-deck-main-defausse` a dérivé sur ce nom, à corriger.
 - **Verrouillage de carte par classe abandonné** : toute carte de classe est jouable par tout héros ayant l'énergie requise. Le mécanisme de synergie réel est la Transcendance (voir Character Selection), pas une restriction d'accès. Referme la question ouverte débattue en `bmad-party-mode` — c'est bien la piste "libre" qui était juste, affinée par la Transcendance plutôt que par un simple bonus de passif.
 - **Système de ligne Front/Back abandonné** : absent du tableur des classes refait le 2026-08-06, remplacé à l'époque par le pouvoir de réanimation du Paladin (lui-même retiré depuis le 2026-08-09 avec tout le Pouvoir de Classe — voir Character Selection). Retiré du prototype `proto-cartes-completes` (CSS + logique + bonus de dégâts par ligne).
 - **Relecture complète du GDD source (Google Doc), 2026-08-06 :** le porteur de projet a fourni un export PDF intégral (la lecture web précédente ne renvoyait qu'un résumé automatique tronqué, jugé peu fiable et écarté). Contenu significativement plus riche que l'extraction du 2026-08-04 sur Win/Loss (Mission Secours), Core Gameplay Loop (retour au village), Controls and Input (Drag & Drop vs prototype), Difficulty Modifiers (Malédictions, règles spécifiques de quête, difficulté ajustable, Challenge hard), Run Structure (Biomes), Level Design Framework (événements, durée par quête, Village, arbre de quêtes, Narrative Delivery) et Character Selection/Card Collection (économie de cartes par héros). Toutes ces sections ont été mises à jour en conséquence — voir chacune pour le détail.
+- **Écran "feuDeCamp" ajouté au mode Run Infini (2026-08-10)** — voir Système d'amélioration de cartes (feu de camp) sous Run Infini et la colonne "Effet amélioré" de Card Types and Effects pour le détail complet. Décisions prises en cours de route :
+  - **2026-08-11, revu à la baisse par le porteur de projet :** le soin de l'écran ne rend que 20 % des PV max de la cible, jamais un soin complet — vrai aussi pour une résurrection. Posé à 100 % lors de l'implémentation initiale du 2026-08-10, jugé trop généreux.
+  - **Nom canon "feuDeCamp"** tranché par le porteur de projet, repris tel quel comme nom d'écran et de flux aléatoire dans le code — pas de traduction anglaise à chercher.
+  - **Suffixe " +" pour une carte améliorée** (ex. "Coup direct +"), convention calée sur le genre (Slay the Spire) plutôt qu'un badge ou une icône dédiée.
+  - **2026-08-11 :** présentation revue — portrait réel de l'aventurier (pas une icône) affiché en grand sur l'option de soin, PV chiffrés en plus des barres (réduites de taille), et les 2 cartes proposées à l'amélioration affichées en pleine face plutôt qu'en simple titre.
+- **Table Card Types and Effects resynchronisée avec le code (2026-08-11)** — coûts et dégâts de Missile magique/Tornade de feu/Boule de feu faux, effet de Lumière divine sous-évalué, Assassinat obsolète (ancienne version qui perdait le Camouflage au lieu d'en gagner), et la 18ᵉ carte Assassin toujours listée comme "Lâcheté" alors que `decision-log.md` trace déjà sa réécriture en "Dans les ombres" le 2026-08-09 (même passe que la refonte de la Transcendance Assassin) — décisions actées mais jamais reportées dans cette table jusqu'ici. `game/src/data/cards.lua` fait foi désormais ; voir aussi la correction ci-dessus sur Assassinat/Camouflage.
 
 **État du prototype `proto-cartes-completes` (le plus à jour) — canon désormais appliqué en code, plus seulement documenté :**
 - Pas de `MAX_ENERGY` : l'énergie se banque indéfiniment.
@@ -445,6 +467,7 @@ Hors périmètre du jeu en général (aucune source ne l'évoque) :
 - Liste de cartes alignée sur le tableur refait (18 cartes, voir Card Types and Effects) — Coup mortel déplacé vers le Guerrier (inflige 4, pas 3), Blessure ouverte ajoutée à l'Assassin, Assassinat révisé (branche Camouflé/non-Camouflé), Coup Brutal retiré du Guerrier (doublon avec Blessure ouverte). **Répartition des paliers revue le 2026-08-06 : chaque classe n'a plus qu'1 carte "Départ" (les 3 autres passent "Avancé")** — Coup de taille, Coup mortel, Provocation et Image miroir sont repassées en "Avancé" pour s'aligner sur le deck de départ à 10 cartes du mode Run Infini (voir Run Infini).
 - Glossaire de mots-clés (icônes + infobulles au survol) implémenté.
 - **Mode Run Infini implémenté (2026-08-06)** — boucle de combats enchaînés avec draft de carte après chaque victoire, bestiaire à 10 ennemis, budget de difficulté croissant, PV/deck persistants entre combats d'un même run. Détail complet : voir Run Infini, sous Roguelike / Card Game Specific Design. C'est un harnais de test pour l'Epic 1 (boucle de combat), pas une redéfinition de la structure de run finale (carte de quêtes/village/biomes, toujours visée à terme — voir Run Structure et Development Epics → Epic 4).
+- **Écran "feuDeCamp" implémenté (2026-08-10, présentation revue le 2026-08-11)** — soin partiel (20 % des PV max) ou amélioration de 2 cartes vers leur version "+", entre le draft et le combat suivant, sans jamais avancer le budget de difficulté. Détail complet : voir Système d'amélioration de cartes (feu de camp), sous Run Infini.
 
 **Prototypes plus anciens (`mini-proto-2-cartes`, `proto-4-heros-2-ennemis`, `proto-deck-main-defausse`), conservés comme jalons historiques, non mis à jour — toujours en divergence avec le canon** (plafond d'énergie à 3, verrouillage de carte par classe, nom "Voleur", Clerc/Soin, pas de ressource Défense ni de statuts, coût de "Coup direct" à 1 au lieu de 0).
 
