@@ -7,6 +7,8 @@ updated: 2026-08-04
 
 # Game Brief : Hero Card Game
 
+*(Note du Documentaliste, 2026-08-24 : ce brief capture la vision fondatrice du 2026-08-04 et n'a plus été retouché depuis — plusieurs détails de mécanique de combat qu'il cite (énergie individuelle par aventurier, clerc, 8 passifs, "~640 améliorations") ont depuis été révisés ou entièrement renversés en cours de prototypage. `gdd.md` fait foi sur tout point de mécanique de combat qui diverge d'ici — voir en particulier sa section Assumptions and Dependencies pour l'historique complet des renversements. Ce brief reste correct sur la vision, le public visé et le scope MVP au sens large.)*
+
 ## Executive Summary
 
 Hero Card Game est un deck-building roguelike où le joueur mène une troupe de 4 aventuriers — piochés parmi une collection qui grandit au fil des runs — à travers des quêtes à embranchements, jusqu'à un boss, avant de rentrer au village pour dépenser ses ressources. Sur le fond, la formule est familière (on doit beaucoup à *Slay the Spire*) ; la spécificité tient à des choix précis et assumés : une énergie de combat individuelle par aventurier plutôt qu'un pool global, des ennemis qui annoncent leurs actions au lieu de punir par surprise, et un déblocage significatif garanti à chaque run plutôt qu'un sentiment de vacuité une fois l'objectif atteint.
