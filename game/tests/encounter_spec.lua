@@ -73,3 +73,37 @@ describe("Encounter.pick_hero_target : pondération par Discrétion (2026-08-24)
     assert.is_true(counts.a > 150 and counts.b > 150)
   end)
 end)
+
+-- Règle tacite du Nécromancien Novice (2026-08-21, demande explicite -- ne
+-- doit jamais apparaître dans un texte affiché au joueur, voir enemies.lua) :
+-- si aucun ennemi ne fait de dégâts directs ce tour, tout Nécromancien
+-- présent échange sa Malédiction contre Toucher Nécrotique.
+describe("Encounter.roll_telegraphs : règle tacite du Nécromancien Novice (2026-08-21)", function()
+  local function make_necro(id)
+    return { id = id, template_id = "necromancien", hp = 10, max_hp = 10, level = 1, shield_rolled = 0, incapacite = 0, vulnerabilite = 0 }
+  end
+
+  it("un Nécromancien seul dans la rencontre finit toujours par infliger des dégâts, quel que soit le tirage", function()
+    for seed = 1, 40 do
+      local necro = make_necro("necro")
+      local state = { enemies = { necro }, heroes = { make_hero("h1") }, rng = { enemy_turn = Rng.new(seed) } }
+      Encounter.roll_telegraphs(state)
+      assert.equal("dmg", necro.next_move.kind)
+    end
+  end)
+
+  it("un autre ennemi qui fait déjà des dégâts laisse le Nécromancien tirer librement (pas d'override forcé)", function()
+    local saw_debuff = false
+    for seed = 1, 40 do
+      local necro = make_necro("necro")
+      -- Squelette Archer : Tir à l'Arc, toujours "dmg" (aucun hasard sur sa
+      -- nature) -- any_damage est donc déjà vrai avant même le Nécromancien.
+      local squelette = { id = "sq", template_id = "squelette", hp = 12, max_hp = 12, level = 1, shield_rolled = 0, incapacite = 0, vulnerabilite = 0 }
+      local state = { enemies = { squelette, necro }, heroes = { make_hero("h1") }, rng = { enemy_turn = Rng.new(seed) } }
+      Encounter.roll_telegraphs(state)
+      assert.equal("dmg", squelette.next_move.kind)
+      if necro.next_move.kind == "debuff" then saw_debuff = true end
+    end
+    assert.is_true(saw_debuff)
+  end)
+end)

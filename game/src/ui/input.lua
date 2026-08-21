@@ -14,12 +14,66 @@ local function find_rect(rects_by_id, x, y)
   return nil
 end
 
+-- Écrans "menu"/"options" (2026-08-21, demande explicite) : mêmes boutons
+-- quel que soit le mode d'entrée (tap/flèche), jamais de ciblage de carte en
+-- jeu -- factorisé une seule fois, comme feu_de_camp_hovering plus bas,
+-- réutilisé par mousepressed_tap/arrow ET is_hovering_clickable_tap/arrow.
+-- Renvoie true si le clic a été traité par un de ces 2 écrans (pour que
+-- l'appelant sache s'arrêter là, jamais retomber sur la logique "playing").
+local function menu_click(controller, x, y)
+  if controller.screen == "menu" then
+    for _, b in ipairs(View.menu_buttons) do
+      if View.point_in(b, x, y) then
+        if b.id == "boss" then controller:start_boss_test()
+        elseif b.id == "run" then controller:reset_run("bounded")
+        elseif b.id == "infini" then controller:reset_run("infini")
+        elseif b.id == "options" then controller:enter_options()
+        elseif b.id == "quit" then love.event.quit()
+        end
+        return true
+      end
+    end
+    return true
+  end
+  if controller.screen == "options" then
+    if View.point_in(View.back_button, x, y) then controller:back_to_menu() end
+    return true
+  end
+  return false
+end
+
+local function menu_hovering(controller, x, y)
+  if controller.screen == "menu" then
+    for _, b in ipairs(View.menu_buttons) do
+      if View.point_in(b, x, y) then return true end
+    end
+    return false
+  end
+  if controller.screen == "options" then
+    return View.point_in(View.back_button, x, y)
+  end
+  return false
+end
+
+--- "Rejouer" sur l'écran de défaite (2026-08-21, demande explicite) : relance
+-- le même mode qu'à la mort -- `run_mode == "boss_test"` relance le test du
+-- boss (Game.start_boss_test, jamais Game.reset_run, qui tirerait une
+-- rencontre normale par le budget), tout le reste (nil/infini/bounded) passe
+-- par reset_run(), qui reconduit déjà self.run_mode tout seul.
+local function restart_after_defeat(controller)
+  if controller.run_mode == "boss_test" then controller:start_boss_test()
+  else controller:reset_run()
+  end
+end
+
 local function mousepressed_tap(controller, x, y, button)
   if button ~= 1 then return end
+  if menu_click(controller, x, y) then return end
+  if controller.screen == "bossVictory" then return end
   local state = controller.state
 
   if controller.screen == "defeat" then
-    if View.point_in(View.overlay_restart_button, x, y) then controller:reset_run() end
+    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller) end
     return
   end
 
@@ -75,10 +129,12 @@ end
 -- d'un cran.
 local function mousepressed_arrow(controller, x, y, button)
   if button ~= 1 then return end
+  if menu_click(controller, x, y) then return end
+  if controller.screen == "bossVictory" then return end
   local state = controller.state
 
   if controller.screen == "defeat" then
-    if View.point_in(View.overlay_restart_button, x, y) then controller:reset_run() end
+    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller) end
     return
   end
 
@@ -152,6 +208,10 @@ local function feu_de_camp_hovering(controller, x, y)
 end
 
 local function is_hovering_clickable_tap(controller, x, y)
+  if controller.screen == "menu" or controller.screen == "options" then
+    return menu_hovering(controller, x, y)
+  end
+  if controller.screen == "bossVictory" then return false end
   local state = controller.state
 
   if controller.screen == "defeat" then
@@ -190,6 +250,10 @@ end
 -- mousepressed_arrow) -- mais on ne l'annonce pas comme "cliquable" au survol
 -- (curseur main), le curseur ne réagit qu'aux vraies opportunités d'action.
 local function is_hovering_clickable_arrow(controller, x, y)
+  if controller.screen == "menu" or controller.screen == "options" then
+    return menu_hovering(controller, x, y)
+  end
+  if controller.screen == "bossVictory" then return false end
   local state = controller.state
 
   if controller.screen == "defeat" then
@@ -231,6 +295,11 @@ function Input.is_hovering_clickable(controller, x, y)
 end
 
 function Input.mousemoved(controller, x, y)
+  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
+    controller:set_hover(nil, nil)
+    return
+  end
+
   -- Écran de draft (2026-08-09, bug signalé) : aucune infobulle mot-clé sur les
   -- 3 cartes de loot, parce que cette fonction s'arrêtait net hors "playing".
   -- Gardé par draft_card_ready comme le clic -- pas de survol tant que la carte
@@ -278,6 +347,13 @@ function Input.mousemoved(controller, x, y)
 
   local enemy_id = find_rect(View.enemy_rects(state), x, y)
   if enemy_id then controller:set_hover("enemy", enemy_id); return end
+
+  -- Pioche/défausse (2026-08-21, demande explicite) : survolables pour une
+  -- infobulle (nombre de cartes + règle associée, voir tooltip_lines dans
+  -- view.lua) -- ne deviennent pas cliquables pour autant, aucun mousepressed
+  -- ne les gère.
+  if View.point_in(View.deck_pile_rect, x, y) then controller:set_hover("deck", nil); return end
+  if View.point_in(View.discard_pile_rect, x, y) then controller:set_hover("discard", nil); return end
 
   local hand_rects = View.hand_rects(state)
   for _, c in ipairs(state.hand) do

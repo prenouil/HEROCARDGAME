@@ -19,6 +19,7 @@ local Combat = require("src.rules.combat")
 local Cards = require("src.data.cards")
 local FeuDeCamp = require("src.rules.feu_de_camp")
 local Game = require("src.rules.game")
+local Deck = require("src.rules.deck")
 
 local View = {}
 
@@ -75,12 +76,40 @@ function View.unit_rect(state, unit_id)
   return View.hero_rects(state)[unit_id] or View.enemy_rects(state)[unit_id]
 end
 
+-- Éventail façon Slay the Spire (2026-08-21, demande explicite -- "présentées
+-- en arc de cercle") : x reste la grille régulière de centered_row (pas une
+-- vraie interpolation sur cercle -- changement de code minimal pour l'effet
+-- recherché), `y` descend selon l'écart au centre de la main, et un
+-- `fan_angle` (radians, champ EN PLUS sur le rect) s'ajoute pour la rotation
+-- visuelle. La descente est baked dans le rect lui-même : le hit-test
+-- (Input.mousemoved) et le vol de cartes (Controller:animate_draw/
+-- animate_discard_snapshot, qui lisent ces mêmes rects) suivent donc
+-- l'éventail sans code séparé, aucun des deux ne connaît `fan_angle` et
+-- l'ignore simplement (rects passés à View.point_in/aux animations de vol,
+-- qui ne lisent que x/y/w/h) -- seule la rotation reste un pur habillage
+-- visuel, appliqué uniquement à la carte immobile en main (voir draw_one),
+-- jamais en vol (draw_card_flights, non concerné, ni pendant le survol
+-- agrandi -- la carte "spéciale" se redresse, comme dans Slay the Spire).
+local HAND_FAN_ANGLE_STEP = 0.05 -- radians par carte d'écart au centre (~3°)
+local HAND_FAN_DROP = 7 -- px de descente par carte d'écart au centre
+
+local function hand_row_fan(count, y)
+  local rects = centered_row(count, CARD_W, CARD_H, y)
+  local mid = (count + 1) / 2
+  for i, r in ipairs(rects) do
+    local d = i - mid
+    r.y = r.y + math.abs(d) * HAND_FAN_DROP
+    r.fan_angle = d * HAND_FAN_ANGLE_STEP
+  end
+  return rects
+end
+
 -- Calcule les rects de la main à partir d'une LISTE de cartes explicite plutôt
 -- que de `state.hand` directement -- permet de rejouer la mise en page d'une
 -- main passée (avant une défausse, par ex.) même après que `state.hand` a déjà
 -- changé, pour les animations de vol de carte (voir controller.lua).
 function View.hand_rects_for(cards)
-  local rects = centered_row(#cards, CARD_W, CARD_H, 404)
+  local rects = hand_row_fan(#cards, 404)
   local out = {}
   for i, c in ipairs(cards) do out[c.uid] = rects[i] end
   return out
@@ -136,6 +165,37 @@ View.end_turn_button = {
 -- qui a migré en bas à droite.
 View.instant_victory_button = { x = W / 2 - 70, y = 600, w = 140, h = 24, label = "victoire instantanée" }
 View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
+
+-- Menu principal (2026-08-21, demande explicite) : 5 boutons empilés,
+-- centrés -- même geste que les autres écrans à bouton unique (Rejouer,
+-- feuDeCamp) : un id sur chaque rect, lu par Input.mousepressed pour savoir
+-- quelle action déclencher, jamais une deuxième liste dupliquée côté input.lua.
+local MENU_BTN_W, MENU_BTN_H, MENU_BTN_GAP = 300, 48, 18
+local MENU_BTN_Y0 = 220
+View.menu_buttons = {}
+do
+  local defs = {
+    { id = "boss", label = "Tester le boss" },
+    { id = "run", label = "Jouer un run" },
+    { id = "infini", label = "Mode infini" },
+    { id = "options", label = "Options" },
+    { id = "quit", label = "Quitter" },
+  }
+  for i, d in ipairs(defs) do
+    View.menu_buttons[i] = {
+      id = d.id, label = d.label,
+      x = W / 2 - MENU_BTN_W / 2, y = MENU_BTN_Y0 + (i - 1) * (MENU_BTN_H + MENU_BTN_GAP),
+      w = MENU_BTN_W, h = MENU_BTN_H,
+    }
+  end
+end
+
+-- Écran "Options" (2026-08-21, demande explicite) : bouton "Retour" vers le
+-- menu. Servait aussi à l'écran "En travaux" du boss/fin de run borné, retiré
+-- depuis que l'Homme Arbre existe pour de vrai (voir Game.start_boss_test/
+-- start_boss_combat) -- gardé nommé génériquement au cas où un futur écran
+-- à bouton unique en ait de nouveau besoin.
+View.back_button = { x = W / 2 - 90, y = H / 2 + 40, w = 180, h = 40, label = "Retour" }
 
 -- Écran "feuDeCamp" (2026-08-10, demande explicite) : deux panneaux fixes
 -- côte à côte (soin/résurrection, amélioration de carte) -- leur position ne
@@ -357,6 +417,30 @@ local function draw_shield_fx(controller, unit_id, r)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
+-- Indice discret d'infobulle (2026-08-21, demande explicite -- tuto onboarding) :
+-- petit "?" en bas à droite de tout élément qui porte une infobulle (allié,
+-- ennemi, carte), à très léger alpha pour ne jamais dominer visuellement --
+-- PUREMENT décoratif, ne change ni la zone de survol ni le délai d'apparition
+-- de l'infobulle elle-même (voir Controller.hover_ready/HOVER_DELAY). Espace
+-- local [0,0]..[w,h] de l'appelant, comme draw_card_face.
+-- Rond blanc autour du "?" (2026-08-21, demande explicite -- "pour qu'on
+-- puisse mieux le voir") : contour seul (pas rempli, resterait discret),
+-- alpha légèrement plus marqué que le glyphe lui-même puisque son seul rôle
+-- est d'aider l'œil à repérer le point d'interrogation, pas d'attirer
+-- l'attention pour lui-même.
+local TOOLTIP_HINT_ALPHA = 0.35
+local TOOLTIP_HINT_RING_ALPHA = 0.45
+local function draw_tooltip_hint(w, h)
+  local cx, cy = w - 10, h - 9
+  set(Theme.white, TOOLTIP_HINT_RING_ALPHA)
+  love.graphics.setLineWidth(1)
+  love.graphics.circle("line", cx, cy, 8)
+  love.graphics.setFont(Fonts.get(11))
+  set(Theme.text, TOOLTIP_HINT_ALPHA)
+  love.graphics.printf("?", cx - 6, cy - 6, 12, "center")
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
 -- ---------- unités (héros/ennemis) ----------
 
 local function draw_hero(controller, h, r)
@@ -482,6 +566,7 @@ local function draw_hero(controller, h, r)
   draw_badge_row(badges, 0, 111, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
 
   draw_shield_fx(controller, h.id, r)
+  draw_tooltip_hint(r.w, r.h)
 
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
@@ -537,6 +622,18 @@ local function enemy_telegraph_parts(state, e)
       return { title = "Riposte (touché)", body = adjusted(move.amount) .. " dégâts", target = target_name, target_class = target_class }
     end
     return { title = move.name, body = adjusted(move.amount) .. " si touché", target = target_name, target_class = target_class }
+  elseif move.kind == "dmg-all" then
+    -- Homme Arbre, "Onde Sylvestre" (2026-08-21) : pas de cible unique --
+    -- l'ajustement ne tient donc compte que des modificateurs côté attaquant
+    -- (Puissance/Incapacité), jamais de la Vulnérabilité d'un héros précis
+    -- (chacun peut différer), comme heal-self/heal-ally juste au-dessus.
+    return { title = move.name, body = Combat.round(move.amount * Combat.damage_multiplier(e, nil, "physique")) .. " dégâts à tous les aventuriers" }
+  elseif move.kind == "revive" then
+    -- Règle "invisible" côté joueur (2026-08-21, demande explicite) : le
+    -- texte de ce coup n'a jamais besoin de dire QUAND il est disponible
+    -- (indisponible si aucune Pousse n'est vaincue, voir enemies.lua), juste
+    -- ce qu'il fait -- la condition elle-même ne s'affiche nulle part.
+    return { title = move.name, body = "Ramène les Pousses d'Arbre vaincues à la vie" }
   end
   return nil
 end
@@ -597,6 +694,11 @@ local function draw_enemy(controller, e, r)
       if parts.body then text(parts.body, 0, 108, r.w, 9, Theme.accent) end
     end
     local badges = {}
+    -- Sensibilité au feu (2026-08-24, demande explicite) : pas un statut
+    -- temporaire (pas de valeur, jamais retiré) -- toujours en tête de rangée
+    -- tant que l'Homme Arbre est vivant, voir tooltip_lines pour le texte
+    -- complet et Combat.damage_multiplier pour le bonus réel.
+    if e.template_id == "homme-arbre" then badges[#badges + 1] = { key = "fireweak", abbr = "FEU" } end
     if e.defense > 0 then badges[#badges + 1] = { key = "defense", abbr = "DEF", value = e.defense } end
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
@@ -622,6 +724,7 @@ local function draw_enemy(controller, e, r)
   end
 
   draw_shield_fx(controller, e.id, r)
+  draw_tooltip_hint(r.w, r.h)
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setLineWidth(1)
@@ -663,9 +766,20 @@ local DAMAGE_KEYWORDS = { epee = true, etincelle = true, fireball = true }
 -- que l'aperçu et la résolution réelle ne puissent jamais donner un nombre
 -- différent. `target` peut être nil (héros pas encore assigné à une cible) --
 -- la Vulnérabilité n'entre alors simplement pas encore en compte.
+-- `is_fire` : même détection que Combat.deal_damage (def.cats contient "feu"),
+-- nécessaire pour que l'aperçu montre déjà le bonus de l'Homme Arbre (2026-08-24)
+-- sans attendre la résolution réelle.
+local function card_is_fire(def)
+  if not def.cats then return false end
+  for _, cat in ipairs(def.cats) do
+    if cat == "feu" then return true end
+  end
+  return false
+end
+
 local function preview_desc(def, hero, target)
   local text = def.desc
-  local dmg_mult = Combat.damage_multiplier(hero, target, def.dmg_type)
+  local dmg_mult = Combat.damage_multiplier(hero, target, def.dmg_type, card_is_fire(def))
   if dmg_mult ~= 1 then
     for kw in pairs(DAMAGE_KEYWORDS) do
       if Glossary.has_keyword(def.desc, kw) then text = scale_near_keyword(text, kw, dmg_mult) end
@@ -736,6 +850,8 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
     text(hero_name, 0, h - 15, w, 10, palette.border, "center")
   end
 
+  draw_tooltip_hint(w, h)
+
   -- Voile gris par-dessus tout le contenu déjà dessiné (cadre compris) quand
   -- le propriétaire est vaincu -- chaque élément ci-dessus fixe sa propre
   -- couleur, un voile en overlay évite de les reprendre un par un (même
@@ -766,6 +882,43 @@ local function draw_energy_display(state)
   text(tostring(state.energy), r.x, r.y + 32, r.w, 20, Theme.energy)
 end
 
+-- Gros chiffre d'énergie qui CHUTE sur sa pastille en début de tour
+-- (2026-08-21, redemandé explicitement -- la version précédente grossissait
+-- sur place, jugée pas assez marquante) : apparaît en très grand, tout en
+-- haut de la zone de jeu, puis descend et rétrécit jusqu'à se stabiliser
+-- exactement sur sa pastille -- une seule courbe (ease_out_back, même que le
+-- titre "Victoire !") pilote À LA FOIS l'échelle ET la position verticale,
+-- pour que la chute et le rétrécissement restent parfaitement synchronisés et
+-- "atterrissent" ensemble (le léger dépassement de la courbe fait rebondir le
+-- chiffre juste sous sa place avant de remonter s'y stabiliser -- l'impact
+-- attendu d'une chute, pas un bug). Voir Controller:spawn_energy_turn_anim
+-- pour le "Woosh" qui accompagne le début de la chute.
+local ENERGY_TURN_ANIM_START_SCALE = 8.0
+local ENERGY_TURN_ANIM_FALL_HEIGHT = 260 -- px au-dessus de la pastille, départ de la chute
+local function draw_energy_turn_anim(controller)
+  local a = controller.energy_turn_anim
+  if not a then return end
+  local r = View.energy_display_rect
+  local duration = controller.energy_turn_anim_duration
+  local settle = ease_out_back(a.t, duration) -- 0 -> dépasse ~1 -> 1
+  local scale = 1 + (ENERGY_TURN_ANIM_START_SCALE - 1) * (1 - settle)
+  local cx = r.x + r.w / 2
+  local landing_y = r.y + 32 + 10
+  local cy = landing_y - ENERGY_TURN_ANIM_FALL_HEIGHT * (1 - settle)
+
+  local glow_p = math.min(1, a.t / duration)
+  set(Theme.energy, 0.35 * (1 - glow_p))
+  love.graphics.circle("fill", cx, landing_y, 14 + 46 * glow_p)
+
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.scale(scale, scale)
+  love.graphics.translate(-cx, -cy)
+  text(tostring(a.value), r.x, cy - 10, r.w, 20, Theme.energy)
+  love.graphics.pop()
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
 --- Pioche/défausse (2026-08-24, demande explicite -- même taille que les
 -- cartes, voir View.deck_pile_rect/discard_pile_rect) : effet d'épaisseur
 -- quand `count` > 1 -- 1 à 2 rectangles décalés en bas-à-droite AVANT le
@@ -782,13 +935,31 @@ local function draw_pile(rect, icon, label, count)
   panel(rect.x, rect.y, rect.w, rect.h, Theme.panel_light)
   icon_text(icon, "", rect.x, rect.y + 20, rect.w, 22, Theme.muted)
   text(label, rect.x, rect.y + 54, rect.w, 9, Theme.muted)
-  text(tostring(count), rect.x, rect.y + rect.h + 4, rect.w, 12, Theme.text)
+  -- Nombre de cartes marqué DIRECTEMENT sur la pile (2026-08-21, revirement
+  -- explicite -- avant, une légende sous le panneau ; retiré de l'infobulle
+  -- au même moment, voir tooltip_lines) : pastille pleine en haut à gauche,
+  -- même famille que la pastille de coût des cartes (voir draw_card_face) --
+  -- coin opposé au "?" d'infobulle (bas-droite, voir draw_tooltip_hint) pour
+  -- ne jamais les confondre.
+  set(Theme.energy); love.graphics.circle("fill", rect.x + 14, rect.y + 14, 11)
+  set(Theme.bg); love.graphics.setFont(Fonts.get(11))
+  love.graphics.printf(tostring(count), rect.x + 4, rect.y + 8, 20, "center")
+  -- Infobulle pioche/défausse (2026-08-21, demande explicite) : le rect reste
+  -- non-cliquable (voir note ci-dessus), mais devient survolable pour
+  -- l'infobulle -- voir Input.mousemoved et tooltip_lines. draw_tooltip_hint
+  -- travaille en espace local [0,0]..[w,h], d'où le push/translate ici (seul
+  -- appelant de cette fonction à ne pas déjà être dans ce repère).
+  love.graphics.push()
+  love.graphics.translate(rect.x, rect.y)
+  draw_tooltip_hint(rect.w, rect.h)
+  love.graphics.pop()
 end
 
 local function draw_hand(controller)
   local state = controller.state
   local rects = View.hand_rects(state)
   draw_energy_display(state)
+  draw_energy_turn_anim(controller)
   draw_pile(View.deck_pile_rect, "\u{1F0A0}", "PIOCHE", #state.deck)
   draw_pile(View.discard_pile_rect, "\u{1F5D1}\u{FE0F}", "DEFAUSSE", #state.discard)
 
@@ -809,6 +980,13 @@ local function draw_hand(controller)
   for _, a in ipairs(controller.card_anims) do
     if a.fade_in and a.uid then hiding_uids[a.uid] = true end
   end
+  -- Cartes déjà dans state.hand mais dont le vol pioche -> main n'a pas
+  -- encore démarré (2026-08-21, bug signalé -- pendant l'attente de l'anim
+  -- d'énergie ou d'un remélange défausse -> pioche en cours de pioche) : sans
+  -- ça, elles s'affichaient "déjà là" en pleine opacité avant de disparaître
+  -- puis revoler depuis la pioche au moment où leur vol démarrait vraiment.
+  -- Voir Controller.pending_draw_uids.
+  for uid in pairs(controller.pending_draw_uids) do hiding_uids[uid] = true end
 
   local function draw_one(c, popped)
     local r = rects[c.uid]
@@ -853,6 +1031,9 @@ local function draw_hand(controller)
     love.graphics.push()
     love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift)
     love.graphics.scale(scale, scale)
+    -- La carte "spéciale" (survolée/sélectionnée) se redresse, comme dans
+    -- Slay the Spire -- l'éventail ne concerne que les cartes au repos.
+    if not popped and r.fan_angle then love.graphics.rotate(r.fan_angle) end
     love.graphics.translate(-r.w / 2, -r.h / 2)
 
     -- La sélection (`is_pending`) reste exclusivement signalée par l'or de
@@ -970,6 +1151,14 @@ local function tooltip_lines(controller)
     if not e then return nil end
     local template = Enemies.by_id(e.template_id)
     local lines = {}
+    -- Sensibilité au feu de l'Homme Arbre (2026-08-24, demande explicite --
+    -- "c'est indiqué dans sa description et par une icone dans son cadre") :
+    -- en tête d'infobulle, avant les coups, même esprit que la description de
+    -- classe côté héros (Heroes.class_description) -- voir aussi le badge
+    -- ajouté dans draw_enemy et le bonus réel dans Combat.damage_multiplier.
+    if e.template_id == "homme-arbre" then
+      lines[#lines + 1] = "Sensible au feu : les dégâts de feu infligent +50%."
+    end
     for _, m in ipairs(template.moves_info(e.level)) do
       lines[#lines + 1] = m.name .. " — " .. m.text
     end
@@ -990,6 +1179,13 @@ local function tooltip_lines(controller)
       lines[#lines + 1] = g.has_icon and { text = line_text, icon = Sprites.keyword(g.key) } or line_text
     end
     return def.name .. " — mots-clés", lines
+  elseif h.kind == "deck" then
+    -- Le nombre de cartes est déjà marqué directement sur la pioche elle-même
+    -- (2026-08-21, revirement explicite -- pas la peine de le répéter ici) :
+    -- l'infobulle ne porte plus que la règle, voir draw_pile.
+    return "Pioche", { "Cartes piochées par tour : " .. Deck.HAND_SIZE .. "." }
+  elseif h.kind == "discard" then
+    return "Défausse", { "Quand la pioche est vide, les cartes de la défausse sont remélangées dans la pioche." }
   end
   return nil
 end
@@ -1019,7 +1215,13 @@ local function draw_card_flights(controller)
   for _, a in ipairs(controller.card_anims) do
     if a.elapsed >= a.delay then
       local p = math.min(1, (a.elapsed - a.delay) / a.duration)
-      local ease = 1 - (1 - p) ^ 2 -- easeOutQuad, approxime le cubic-bezier CSS du prototype
+      -- Petit rebond d'arrivée sur la pioche (2026-08-21, demande explicite) :
+      -- ease_out_back (même courbe que le titre "Victoire !") dépasse
+      -- légèrement 1 avant de s'y stabiliser -- la carte "atterrit" dans la
+      -- main plutôt que de simplement s'arrêter. La défausse garde l'ancienne
+      -- décélération simple (easeOutQuad), moins de raison d'y mettre du jeu.
+      local ease = a.fade_in and ease_out_back(a.elapsed - a.delay, a.duration)
+        or (1 - (1 - p) ^ 2) -- easeOutQuad, approxime le cubic-bezier CSS du prototype
       local x = a.from.x + (a.to.x - a.from.x) * ease
       local y = a.from.y + (a.to.y - a.from.y) * ease
       local w = a.from.w + (a.to.w - a.from.w) * ease
@@ -1034,7 +1236,10 @@ local function draw_card_flights(controller)
         love.graphics.setColor(1, 1, 1, alpha)
         love.graphics.draw(card_flight_canvas, x, y, 0, w / CARD_W, h / CARD_H)
       else
-        -- Repli (garde-fou -- ne devrait plus arriver, toutes les entrées portent `def`).
+        -- Silhouette simple sans face précise (2026-08-21, cas volontaire
+        -- désormais -- voir Controller:animate_reshuffle : les "fantômes" du
+        -- remélange défausse -> pioche sont des cartes anonymes, en montrer
+        -- une face précise serait trompeur pour un tas qui repart mélangé).
         set(Theme.panel_light, alpha)
         love.graphics.rectangle("fill", x, y, w, h, 8, 8)
       end
@@ -1476,7 +1681,59 @@ local function draw_feu_de_camp(controller)
   end
 end
 
+-- Bouton plein, contour doré, texte centré (2026-08-21, demande explicite --
+-- menu/en travaux/options) : même style pour les 3 écrans, jamais un rendu
+-- dupliqué par écran.
+local function draw_menu_style_button(b)
+  set(Theme.panel_light)
+  love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 10, 10)
+  set(Theme.accent); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", b.x, b.y, b.w, b.h, 10, 10)
+  love.graphics.setLineWidth(1)
+  text(b.label, b.x, b.y + b.h / 2 - 8, b.w, 16, Theme.text, "center")
+end
+
+-- Menu principal (2026-08-21, demande explicite) : pas de fond dédié pour
+-- l'instant ("il y aura un background mais pas pour l'instant") -- même
+-- dégradé procédural par défaut que le combat (voir Background.draw,
+-- `enemies = nil` retombe sur BIOMES.defaut), pas un écran vide.
+local function draw_menu(controller)
+  Background.draw(nil, W, H)
+  text("Hero Card Game", 0, 90, W, 30, Theme.text)
+  text("Run Infini", 0, 130, W, 14, Theme.muted)
+  for _, b in ipairs(View.menu_buttons) do draw_menu_style_button(b) end
+end
+
+local function draw_options(controller)
+  Background.draw(nil, W, H)
+  text("Pas d'options pour le moment", 0, H / 2 - 60, W, 20, Theme.text)
+  draw_menu_style_button(View.back_button)
+end
+
+-- Victoire sur le boss (2026-08-21, demande explicite -- "il faut enlever le
+-- draft de carte et le feu de camp après le boss") : ni draft ni feu de camp
+-- après ce combat-là, juste ce bref titre (même zoom que "Victoire !" côté
+-- draft, voir controller.victory_anim/victory_title_duration) avant le retour
+-- automatique au menu (Controller:enter_boss_victory).
+local function draw_boss_victory(controller)
+  Background.draw(nil, W, H)
+  set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
+  local va = controller.victory_anim
+  local title_scale = va and ease_out_back(va.t, controller.victory_title_duration) or 1
+  love.graphics.push()
+  love.graphics.translate(W / 2, H / 2 - 20)
+  love.graphics.scale(title_scale, title_scale)
+  love.graphics.translate(-W / 2, -(H / 2 - 20))
+  text("Victoire !", 0, H / 2 - 32, W, 24, Theme.text)
+  love.graphics.pop()
+  text("Le Boss est vaincu !", 0, H / 2 + 10, W, 14, Theme.muted)
+end
+
 function View.draw(controller)
+  if controller.screen == "menu" then draw_menu(controller); return end
+  if controller.screen == "options" then draw_options(controller); return end
+  if controller.screen == "bossVictory" then draw_boss_victory(controller); return end
+
   local state = controller.state
   Background.draw(state.enemies, W, H)
 
@@ -1502,7 +1759,11 @@ function View.draw(controller)
   if controller.screen == "defeat" then
     set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
     text("Défaite…", 0, H / 2 - 40, W, 26, Theme.text)
-    text("Le run s'arrête après " .. combats_won_text(controller) .. " combat(s) remporté(s).", 0, H / 2, W, 12, Theme.muted)
+    -- Toujours au pluriel, jamais "(s)" (2026-08-21, demande explicite -- "je
+    -- déteste ça... il faut toujours choisir la version pluriel, quitte à
+    -- écrire des erreurs comme '1 chevaux'") : accepte l'accord fautif à 1
+    -- combat plutôt que la parenthèse.
+    text("Le run s'arrête après " .. combats_won_text(controller) .. " combats remportés.", 0, H / 2, W, 12, Theme.muted)
     local b = View.overlay_restart_button
     set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
     set(Theme.bg); text(b.label, b.x, b.y + 9, b.w, 12, Theme.bg)

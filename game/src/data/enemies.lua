@@ -141,11 +141,24 @@ Enemies.templates = {
   },
   {
     id = "necromancien", name = "Nécromancien Novice", icon = "\u{1F9D9}", label = "NEC", hp_base = 10, cost = 8, target_mode = "random",
+    -- Deux attaques désormais (2026-08-21, demande explicite -- avant,
+    -- Malédiction inconditionnelle) : Malédiction 2/3 du temps, Toucher
+    -- Nécrotique (dégâts) 1/3 du temps. La règle tacite "si aucun ennemi ne
+    -- fait de dégâts ce tour, force le Nécromancien sur son attaque à
+    -- dégâts" vit à part, dans Encounter.roll_telegraphs -- jamais ici, et
+    -- jamais dans moves_info ci-dessous (règle volontairement invisible pour
+    -- le joueur, ne doit apparaître dans aucun texte affiché).
     choose_move = function(e, all, rng)
+      if rng:random() < 1 / 3 then
+        return { kind = "dmg", name = "Toucher Nécrotique", icon = "\u{1F480}", amount = roll_scaled(3, e.level, rng) }
+      end
       return { kind = "debuff", name = "Malédiction", icon = "\u{1F52E}", status_key = "vulnerabilite", amount = roll_scaled(3, e.level, rng) }
     end,
     moves_info = function(level)
-      return { { icon = "\u{1F52E}", name = "Malédiction", text = "Vulnérabilité " .. range_text(3, level) .. ", pas de dégât direct (toujours)" } }
+      return {
+        { icon = "\u{1F52E}", name = "Malédiction", text = "Vulnérabilité " .. range_text(3, level) .. ", pas de dégât direct (fréquent)" },
+        { icon = "\u{1F480}", name = "Toucher Nécrotique", text = range_text(3, level) .. " dégâts (rare)" },
+      }
     end,
   },
   {
@@ -186,6 +199,65 @@ Enemies.templates = {
       return {
         { icon = "\u{1FA84}", name = "Chant Rituel", text = "Soigne un allié blessé de " .. range_text(5, level) .. " PV s'il y en a un" },
         { icon = "\u{2734}\u{FE0F}", name = "Chant Rituel (repli)", text = "Sinon, attaque pour " .. range_text(3, level) .. " dégâts" },
+      }
+    end,
+  },
+
+  -- ---------- Boss (2026-08-21, demande explicite) ----------
+  -- `boss_only = true` (les 2 templates ci-dessous) : jamais tirés par le
+  -- budget aléatoire du mode Infini -- voir Encounter.generate_encounter, qui
+  -- filtre ce champ hors de son pool. Rencontre fixe assemblée à part par
+  -- Encounter.boss_encounter (1 Homme Arbre + 4 Pousses d'Arbre), déclenchée
+  -- depuis "Tester le boss" au menu ou en fin d'un run borné à 5 combats --
+  -- jamais mêlée à la génération normale.
+  {
+    id = "pousse", name = "Pousse d'Arbre", icon = "\u{1F331}", label = "POU", hp_base = 3, cost = 3, target_mode = "random", boss_only = true,
+    choose_move = function(e, all, rng)
+      return { kind = "dmg", name = "Griffure de Ronce", icon = "\u{1F33F}", amount = roll_scaled(2, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{1F33F}", name = "Griffure de Ronce", text = range_text(2, level) .. " dégâts (toujours)" } }
+    end,
+  },
+  {
+    -- 3 coups (2026-08-21, demande explicite) : tape fort sur un aventurier
+    -- (1/2 du "reste" une fois l'invocation écartée) / attaque tous les
+    -- aventuriers plus faiblement (l'autre 1/2) / ramène les Pousses d'Arbre
+    -- vaincues à la vie -- PAS une invocation de nouvelles pousses (revirement
+    -- explicite du porteur de projet, 2026-08-21) : les 4 Pousses existent dès
+    -- le début du combat (voir Encounter.boss_encounter), ce 3ᵉ coup se
+    -- contente de repasser `hp` à `max_hp` sur celles tombées à 0 (voir
+    -- Game.resolve_enemy_action, kind == "revive") -- jamais de nouvelle
+    -- instance créée en cours de combat. Coup indisponible tant qu'aucune
+    -- Pousse n'est vaincue (rien à ranimer) -- même logique que le Troll qui
+    -- ne régénère jamais à PV pleins.
+    -- PV remontés à 80 (2026-08-24, demande explicite -- "peuvent être à
+    -- nouveau très élevés") après un premier ajustement à 50 : compensé
+    -- désormais par une vraie faiblesse exploitable (sensible au feu, +50%
+    -- dégâts de feu, voir Combat.damage_multiplier) plutôt que par un simple
+    -- plafond de PV bas -- les dégâts qu'il inflige restent réduits (8/3).
+    id = "homme-arbre", name = "Homme Arbre", icon = "\u{1F333}", label = "ARB", hp_base = 80, cost = 60, target_mode = "random", boss_only = true,
+    choose_move = function(e, all, rng)
+      local any_dead_pousse = false
+      for _, o in ipairs(all) do
+        if o.id ~= e.id and o.template_id == "pousse" and o.hp <= 0 then
+          any_dead_pousse = true
+          break
+        end
+      end
+      if any_dead_pousse and rng:random() < 1 / 3 then
+        return { kind = "revive", name = "Renaissance Sylvestre", icon = "\u{1F331}" }
+      end
+      if rng:random() < 1 / 2 then
+        return { kind = "dmg", name = "Coup de Branche", icon = "\u{1F9B4}", amount = roll_scaled(8, e.level, rng) }
+      end
+      return { kind = "dmg-all", name = "Onde Sylvestre", icon = "\u{1F343}", amount = roll_scaled(3, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F9B4}", name = "Coup de Branche", text = range_text(8, level) .. " dégâts à un aventurier" },
+        { icon = "\u{1F343}", name = "Onde Sylvestre", text = range_text(3, level) .. " dégâts à tous les aventuriers" },
+        { icon = "\u{1F331}", name = "Renaissance Sylvestre", text = "Ramène les Pousses d'Arbre vaincues à pleine vie, s'il y en a" },
       }
     end,
   },

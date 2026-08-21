@@ -393,3 +393,120 @@ describe("Flux de jeu : fin de tour et résolution ennemie", function()
     assert.equal(2, state.turn)
   end)
 end)
+
+-- Homme Arbre (boss, 2026-08-21, demande explicite) : 3 coups -- tape fort sur
+-- un aventurier ("dmg"), attaque tous les aventuriers plus faiblement
+-- ("dmg-all", nouveau kind), ramène les Pousses d'Arbre vaincues à la vie
+-- ("revive", nouveau kind aussi -- PAS une invocation, revirement explicite du
+-- porteur de projet : les 4 Pousses existent dès le début du combat).
+describe("Homme Arbre : Onde Sylvestre (dmg-all) touche tous les héros vivants", function()
+  local function make_hero(id, hp)
+    return {
+      id = id, class_id = "guerrier", name = id, icon = "", hp = hp, max_hp = 20,
+      defense = 0, esquive = 0, camoufle = 0, incapacite = 0, vulnerabilite = 0,
+      puissance = 0, saignements = 0,
+    }
+  end
+
+  it("inflige le même montant à chaque héros vivant, jamais à un héros déjà mort", function()
+    local state = Game.new_state()
+    state.heroes = { make_hero("h1", 20), make_hero("h2", 20), make_hero("h3", 0) }
+    local boss = Encounter.instantiate_enemy(Enemies.by_id("homme-arbre"), 1, function() return 1 end, Rng.new(1))
+    boss.next_move = { kind = "dmg-all", name = "Onde Sylvestre", icon = "", amount = 6 }
+    state.enemies = { boss }
+    Game.resolve_enemy_action(state, boss)
+    assert.equal(14, state.heroes[1].hp)
+    assert.equal(14, state.heroes[2].hp)
+    assert.equal(0, state.heroes[3].hp)
+  end)
+end)
+
+describe("Homme Arbre : Renaissance Sylvestre (revive) ramène les Pousses d'Arbre vaincues à la vie", function()
+  it("ressuscite à pleine vie chaque Pousse tombée à 0, sans toucher les Pousses vivantes ni les autres ennemis", function()
+    local state = Game.new_state()
+    state.heroes = {}
+    local boss = Encounter.instantiate_enemy(Enemies.by_id("homme-arbre"), 1, function() return 1 end, Rng.new(1))
+    local pousse_dead = Encounter.instantiate_enemy(Enemies.by_id("pousse"), 1, function() return 2 end, Rng.new(1))
+    pousse_dead.hp = 0
+    local pousse_alive = Encounter.instantiate_enemy(Enemies.by_id("pousse"), 1, function() return 3 end, Rng.new(1))
+    pousse_alive.hp = 1
+    local other_dead = Encounter.instantiate_enemy(Enemies.by_id("gobelin"), 1, function() return 4 end, Rng.new(1))
+    other_dead.hp = 0
+    boss.next_move = { kind = "revive", name = "Renaissance Sylvestre", icon = "" }
+    state.enemies = { boss, pousse_dead, pousse_alive, other_dead }
+    Game.resolve_enemy_action(state, boss)
+    assert.equal(pousse_dead.max_hp, pousse_dead.hp)
+    assert.equal(1, pousse_alive.hp) -- déjà vivante, jamais "soignée" au-delà de son hp actuel
+    assert.equal(0, other_dead.hp) -- un autre ennemi mort n'est jamais concerné
+  end)
+
+  it("ne fait rien si aucune Pousse n'est vaincue", function()
+    local state = Game.new_state()
+    state.heroes = {}
+    local boss = Encounter.instantiate_enemy(Enemies.by_id("homme-arbre"), 1, function() return 1 end, Rng.new(1))
+    local pousse_alive = Encounter.instantiate_enemy(Enemies.by_id("pousse"), 1, function() return 2 end, Rng.new(1))
+    boss.next_move = { kind = "revive", name = "Renaissance Sylvestre", icon = "" }
+    state.enemies = { boss, pousse_alive }
+    Game.resolve_enemy_action(state, boss)
+    assert.equal(pousse_alive.max_hp, pousse_alive.hp)
+  end)
+end)
+
+describe("Homme Arbre : choose_move n'offre Renaissance Sylvestre que si une Pousse est vaincue", function()
+  it("ne choisit jamais 'revive' quand toutes les Pousses sont vivantes", function()
+    local homme_arbre = Enemies.by_id("homme-arbre")
+    local e = { id = "boss", hp = 100, max_hp = 100, level = 1 }
+    local all = { e }
+    for i = 1, 4 do all[#all + 1] = { id = "pousse" .. i, template_id = "pousse", hp = 6, max_hp = 6 } end
+    for seed = 1, 40 do
+      local move = homme_arbre.choose_move(e, all, Rng.new(seed))
+      assert.is_false(move.kind == "revive")
+    end
+  end)
+
+  it("peut choisir 'revive' quand au moins une Pousse est vaincue", function()
+    local homme_arbre = Enemies.by_id("homme-arbre")
+    local e = { id = "boss", hp = 100, max_hp = 100, level = 1 }
+    local all = { e, { id = "pousse1", template_id = "pousse", hp = 0, max_hp = 6 } }
+    local saw_revive = false
+    for seed = 1, 40 do
+      local move = homme_arbre.choose_move(e, all, Rng.new(seed))
+      if move.kind == "revive" then saw_revive = true break end
+    end
+    assert.is_true(saw_revive)
+  end)
+end)
+
+describe("Encounter.boss_encounter : rencontre fixe du boss (2026-08-21)", function()
+  it("assemble exactement 1 Homme Arbre + 4 Pousses d'Arbre, tous niveau 1, pleine vie", function()
+    local uid = 0
+    local instances = Encounter.boss_encounter(function() uid = uid + 1 return uid end, Rng.new(1))
+    assert.equal(5, #instances)
+    -- Ordre [pousse, pousse, homme-arbre, pousse, pousse] (2026-08-21) : place
+    -- l'Homme Arbre au centre de la rangée d'ennemis (View.enemy_rects).
+    assert.equal("homme-arbre", instances[3].template_id)
+    local pousse_count = 0
+    for i, inst in ipairs(instances) do
+      if i ~= 3 then
+        assert.equal("pousse", inst.template_id)
+        pousse_count = pousse_count + 1
+      end
+    end
+    assert.equal(4, pousse_count)
+    for _, inst in ipairs(instances) do
+      assert.equal(1, inst.level)
+      assert.equal(inst.max_hp, inst.hp)
+    end
+  end)
+end)
+
+describe("Encounter.generate_encounter : ne tire jamais le boss (2026-08-21)", function()
+  it("aucune rencontre aléatoire ne contient l'Homme Arbre ou une Pousse d'Arbre", function()
+    for seed = 1, 30 do
+      local instances = Encounter.generate_encounter(Encounter.budget_for_combat(seed), Rng.new(seed))
+      for _, inst in ipairs(instances) do
+        assert.is_false(inst.template.boss_only == true)
+      end
+    end
+  end)
+end)

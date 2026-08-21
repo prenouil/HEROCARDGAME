@@ -16,15 +16,30 @@ function Encounter.budget_for_combat(n)
   return Enemies.round(Encounter.BUDGET_BASE * (1 + Encounter.BUDGET_GROWTH) ^ (n - 1))
 end
 
+-- Pool des templates réellement tirables au hasard (2026-08-21, demande
+-- explicite) : exclut les `boss_only` (Homme Arbre, Pousse d'Arbre) -- jamais
+-- mêlés à une rencontre normale du mode Infini, réservés à
+-- Encounter.boss_encounter ci-dessous. Recalculé à chaque appel plutôt que
+-- mis en cache : la liste Enemies.templates ne change jamais en cours de
+-- partie, le coût est négligeable (une douzaine d'entrées).
+local function random_pool()
+  local pool = {}
+  for _, t in ipairs(Enemies.templates) do
+    if not t.boss_only then pool[#pool + 1] = t end
+  end
+  return pool
+end
+
 -- 40 tentatives, garde la composition dont le coût total colle le mieux au budget.
 -- `rng` (2026-08-10, demande explicite -- tirages reproductibles) : voir Game.reset_run.
 function Encounter.generate_encounter(budget, rng)
+  local pool = random_pool()
   local best = nil
   for _ = 1, 40 do
     local count = rng:random(1, Encounter.MAX_ENEMIES_PER_COMBAT)
     local picks = {}
     for i = 1, count do
-      picks[i] = Enemies.templates[rng:random(#Enemies.templates)]
+      picks[i] = pool[rng:random(#pool)]
     end
     local per_slot = budget / count
     local instances = {}
@@ -51,6 +66,30 @@ function Encounter.instantiate_enemy(template, level, uid_gen, rng)
     defending = false, defend_cycle = false, took_damage_this_turn = false, took_fire_damage_this_turn = false,
     next_move = nil, target_hero_id = nil,
   }
+end
+
+--- Rencontre fixe du boss (2026-08-21, demande explicite) : 1 Homme Arbre +
+-- 4 Pousses d'Arbre, jamais tirée par le budget aléatoire (voir "boss_only"
+-- sur ces 2 templates dans enemies.lua, filtré hors du pool de
+-- Encounter.generate_encounter par random_pool ci-dessus) -- toujours niveau
+-- 1, que le combat soit lancé depuis "Tester le boss" ou en fin d'un run
+-- borné à 5 combats (voir Game.start_boss_test/Game.start_boss_combat).
+function Encounter.boss_encounter(uid_gen, rng)
+  local homme_arbre = Enemies.by_id("homme-arbre")
+  local pousse = Enemies.by_id("pousse")
+  -- Ordre [pousse, pousse, homme-arbre, pousse, pousse] (2026-08-21, demande
+  -- explicite) : View.enemy_rects place les ennemis dans l'ordre de cette
+  -- liste sur une rangée centrée, donc l'Homme Arbre (position 3/5) tombe
+  -- pile au centre avec 2 Pousses de chaque côté, sans logique de layout dédiée.
+  local instances = {}
+  for _ = 1, 2 do
+    instances[#instances + 1] = Encounter.instantiate_enemy(pousse, 1, uid_gen, rng)
+  end
+  instances[#instances + 1] = Encounter.instantiate_enemy(homme_arbre, 1, uid_gen, rng)
+  for _ = 1, 2 do
+    instances[#instances + 1] = Encounter.instantiate_enemy(pousse, 1, uid_gen, rng)
+  end
+  return instances
 end
 
 function Encounter.summary(enemies)
@@ -132,6 +171,30 @@ function Encounter.roll_telegraphs(state)
         e.target_hero_id = t and t.id or nil
       else
         e.target_hero_id = nil
+      end
+    end
+  end
+
+  -- Règle tacite du Nécromancien Novice (2026-08-21, demande explicite --
+  -- volontairement absente de tout texte affiché au joueur, voir moves_info
+  -- dans enemies.lua qui ne la mentionne pas) : si AUCUN ennemi vivant
+  -- n'inflige de dégâts directs ce tour (kind == "dmg", une fois tous les
+  -- télégraphes déjà tirés ci-dessus), chaque Nécromancien Novice présent
+  -- échange sa Malédiction contre Toucher Nécrotique -- jamais un tour
+  -- entièrement inoffensif côté monstres. `e.target_hero_id` reste celui déjà
+  -- tiré : Malédiction et Toucher Nécrotique partagent le même target_mode
+  -- ("random"), pas besoin de retirer une cible.
+  local any_damage = false
+  for _, e in ipairs(state.enemies) do
+    if e.hp > 0 and e.next_move and e.next_move.kind == "dmg" then
+      any_damage = true
+      break
+    end
+  end
+  if not any_damage then
+    for _, e in ipairs(state.enemies) do
+      if e.hp > 0 and e.template_id == "necromancien" and e.next_move and e.next_move.kind ~= "dmg" then
+        e.next_move = { kind = "dmg", name = "Toucher Nécrotique", icon = "\u{1F480}", amount = Enemies.roll_scaled(3, e.level, rng) }
       end
     end
   end

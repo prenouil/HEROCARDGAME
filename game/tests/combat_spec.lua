@@ -60,6 +60,35 @@ describe("Combat.deal_damage", function()
   end)
 end)
 
+describe("Combat.damage_multiplier : sensibilité au feu de l'Homme Arbre (2026-08-24)", function()
+  it("une carte taguée 'feu' inflige +50% à l'Homme Arbre", function()
+    local state = make_state()
+    local hero = make_hero("h1")
+    local target = make_enemy("boss", { template_id = "homme-arbre", hp = 80, max_hp = 80 })
+    local ctx = { card_def = { cats = { "melee", "degats", "feu" } } }
+    Combat.deal_damage(state, hero, target, 8, "magique", ctx)
+    assert.equal(68, target.hp) -- 80 - round(8*1.5=12)
+  end)
+
+  it("une carte non-feu n'a aucun bonus contre l'Homme Arbre", function()
+    local state = make_state()
+    local hero = make_hero("h1")
+    local target = make_enemy("boss", { template_id = "homme-arbre", hp = 80, max_hp = 80 })
+    local ctx = { card_def = { cats = { "melee", "degats" } } }
+    Combat.deal_damage(state, hero, target, 8, "physique", ctx)
+    assert.equal(72, target.hp) -- 80 - 8, aucun bonus
+  end)
+
+  it("une carte 'feu' n'a aucun bonus contre un ennemi qui n'est pas l'Homme Arbre", function()
+    local state = make_state()
+    local hero = make_hero("h1")
+    local target = make_enemy("e1", { template_id = "gobelin" })
+    local ctx = { card_def = { cats = { "sort", "feu" } } }
+    Combat.deal_damage(state, hero, target, 8, "magique", ctx)
+    assert.equal(12, target.hp) -- 20 - 8, aucun bonus
+  end)
+end)
+
 describe("Combat.grant_defense / grant_heal", function()
   it("grant_defense ajoute le montant donné, sans aucun modificateur de classe", function()
     local target = make_hero("h1", { defense = 0 })

@@ -18,12 +18,14 @@
 -- Mage) ciblent désormais un ALLIÉ (2026-08-24, confirmé explicitement par le
 -- porteur de projet) -- ne se donnent plus de bouclier à soi-même.
 --
--- Mage : "Coup direct"/"Encaisser" sont renommés "Flamèche"/"Barrière" (codes
--- "flameche"/"barriere", pas "coup-direct-mage"/"encaisser-mage") -- les
--- seules cartes de départ dont le nom diffère des 3 autres classes, en plus
--- d'accorder 1 mana à chaque jeu (voir hero.mana, ressource propre au Mage).
+-- Mage : "Coup direct"/"Encaisser" sont renommés "Main de feu"/"Barrière"
+-- (codes "flameche"/"barriere", pas "coup-direct-mage"/"encaisser-mage") --
+-- les seules cartes de départ dont le nom diffère des 3 autres classes, en
+-- plus d'accorder 1 mana à chaque jeu (voir hero.mana, ressource propre au
+-- Mage). "Main de feu" (ex-"Flamèche", renommée une 2ᵉ fois 2026-08-24 --
+-- voir sa def plus bas) est un vrai coup de feu, magique, tag "feu".
 -- Missile magique/Image miroir/Tornade de feu/Boule de feu ont désormais un
--- `mana_cost` en plus de `cost` (voir Combat.can_play). Flamèche/Barrière
+-- `mana_cost` en plus de `cost` (voir Combat.can_play). Main de feu/Barrière
 -- portent aussi `mana_cost = 0` (2026-08-24, ajouté par le porteur de projet
 -- par souci de cohérence visuelle -- la pastille de mana s'affiche sur les 6
 -- cartes du Mage, pas seulement les 4 qui en dépensent réellement).
@@ -251,23 +253,26 @@ Cards.list = {
   },
 
   -- ---------- Mage ----------
-  -- Flamèche/Barrière (2026-08-24, remplacent "Coup direct"/"Encaisser" --
-  -- seule classe dont les 2 cartes "de base" ont un nom propre) : mêmes mots-
-  -- clés/type de dégâts que Coup direct (physique/mêlée, confirmé explicitement,
-  -- pas une coquille malgré le thème "feu" du nom) -- la seule vraie différence
-  -- est le bonus "Gagne 1 mana" à chaque jeu.
+  -- "Main de feu"/Barrière (2026-08-24, remplacent "Coup direct"/"Encaisser" --
+  -- seule classe dont les 2 cartes "de base" ont un nom propre). Renommée
+  -- une 2ᵉ fois (2026-08-24, revirement explicite -- "Flamèche est un dégâts
+  -- de feu et se renomme 'Main de feu'") : d'abord gardée physique/mêlée
+  -- malgré son nom "feu" (voir git log), maintenant un VRAI coup de feu --
+  -- magique, tag "feu" (déclenche la sensibilité au feu de l'Homme Arbre, voir
+  -- Combat.damage_multiplier, ET la Régénération bloquée du Troll, déjà
+  -- existante) -- code interne "flameche" conservé (voir Deck.STARTING_DECK_CODES).
   {
-    code = "flameche", name = "Flamèche", class_id = "mage", tier = "depart", cost = 1, mana_cost = 0,
-    cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
-    desc = 'Inflige 2 "epee" à un ennemi. Gagne 1 mana.',
+    code = "flameche", name = "Main de feu", class_id = "mage", tier = "depart", cost = 1, mana_cost = 0,
+    cats = { "melee", "degats", "feu" }, dmg_type = "magique", target = "enemy",
+    desc = 'Inflige 2 "etincelle" à un ennemi. Gagne 1 mana.',
     effect = function(ctx)
-      Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 2, "physique", ctx)
+      Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 2, "magique", ctx)
       Combat.apply_status(ctx.hero, "mana", 1)
     end,
     upgrade = {
-      desc = 'Inflige 3 "epee" à un ennemi. Gagne 1 mana.',
+      desc = 'Inflige 3 "etincelle" à un ennemi. Gagne 1 mana.',
       effect = function(ctx)
-        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 3, "physique", ctx)
+        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 3, "magique", ctx)
         Combat.apply_status(ctx.hero, "mana", 1)
       end,
     },

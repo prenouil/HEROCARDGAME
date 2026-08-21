@@ -20,9 +20,34 @@ local ANIM_PULSE = 0.38 -- s, calque sur les 380ms de pulseUp/pulseDown du proto
 local ANIM_SHAKE = 1.0  -- s, calque sur les 1000ms de shakeUnit
 local HOVER_DELAY = 1.0 -- s, calque sur le délai d'infobulle du prototype
 local ENEMY_STEP_WAIT = 1.0 -- s, calque sur le sleep(1000) entre chaque ennemi
-local FLIGHT_DURATION = 0.38 -- s, calque sur FLIGHT_MS (380ms) du prototype
-local DRAW_STAGGER = 0.07 -- s entre deux cartes piochées, calque sur i*70ms
-local DISCARD_STAGGER = 0.06 -- s entre deux cartes défaussées, calque sur i*60ms
+local FLIGHT_DURATION = 0.38 -- s, calque sur FLIGHT_MS (380ms) du prototype -- utilisé
+-- UNIQUEMENT par la défausse d'une carte tout juste jouée (maybe_animate_played_discard,
+-- geste fréquent en cours de tour, doit rester vif) ; la pioche et la défausse de fin de
+-- tour ont chacune leur propre rythme plus lent ci-dessous (2026-08-21, séquence d'onboarding).
+
+-- Séquence de début/fin de tour redécoupée en étapes lisibles (2026-08-21,
+-- demande explicite -- onboarding) : chaque beat attend le précédent plutôt que
+-- de se chevaucher, pour que le regard du joueur puisse suivre "énergie -> pioche
+-- -> aventuriers prêts" en début de tour, et "défausse -> (pause) -> monstres" en
+-- fin de tour.
+local TURN_ENERGY_ANIM_DURATION = 0.9 -- s -- le gros chiffre d'énergie qui se pose sur sa pastille (accentué 2026-08-21, voir ENERGY_TURN_ANIM_START_SCALE côté view.lua)
+local DRAW_FLIGHT_STAGGER = 0.11 -- s entre deux cartes piochées en DÉBUT DE TOUR -- plus lent que l'ancien DRAW_STAGGER
+local DRAW_FLIGHT_DURATION = 0.5 -- s -- vol de pioche, plus lent que FLIGHT_DURATION, avec petit rebond d'arrivée (voir ease_out_back côté view.lua)
+local HERO_READY_STAGGER = 0.15 -- s entre le saut "prêt" de chaque aventurier vivant, gauche à droite
+local END_TURN_DISCARD_STAGGER = 0.09 -- s entre deux cartes défaussées en FIN DE TOUR -- plus lent que l'ancien DISCARD_STAGGER
+local END_TURN_DISCARD_FLIGHT_DURATION = 0.48 -- s -- vol de défausse de fin de tour, plus lent que FLIGHT_DURATION
+local END_TURN_TO_ENEMY_RESOLUTION_PAUSE = 1.0 -- s -- pause dédiée entre la fin de la défausse et le début de la résolution des monstres, pour ne jamais les confondre visuellement
+local ENEMY_TELEGRAPH_TO_ACTION_DELAY = 0.2 -- s entre le saut/télégraphe d'un monstre et l'action qui touche réellement sa cible
+
+-- Remélange défausse -> pioche (2026-08-21, demande explicite) : quelques
+-- "fantômes" de carte (pas de face précise -- ce sont des cartes anonymes
+-- qui repartent mélangées, montrer LAQUELLE serait trompeur) volent de la
+-- défausse vers la pioche pour rendre l'événement visible, plutôt qu'un
+-- remélange silencieux. Voir Controller:animate_reshuffle.
+local RESHUFFLE_GHOST_COUNT = 3
+local RESHUFFLE_GHOST_STAGGER = 0.08
+local RESHUFFLE_GHOST_FLIGHT_DURATION = 0.42
+local RESHUFFLE_TOTAL_DURATION = (RESHUFFLE_GHOST_COUNT - 1) * RESHUFFLE_GHOST_STAGGER + RESHUFFLE_GHOST_FLIGHT_DURATION
 
 -- Séquence d'entrée sur l'écran de draft (2026-08-08, demande explicite) :
 -- 1) titre "Victoire !" en zoom + bump (≤2s) -- rien d'autre à l'écran ;
@@ -37,6 +62,7 @@ local VICTORY_TITLE_DURATION = 1.4
 local DRAFT_FACEDOWN_PAUSE = 1.0
 local DRAFT_FLIP_DURATION = 0.5
 local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début du suivant
+local BOSS_VICTORY_HOLD_DURATION = 2.2 -- s -- temps où "Boss vaincu !" reste affiché avant le retour au menu
 
 -- Écran "feuDeCamp" (2026-08-10, demande explicite) : entre le draft de fin de
 -- combat et le combat suivant, s'intercale de façon transparente (n'avance
@@ -69,7 +95,15 @@ function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "playing" -- "playing" | "draft" | "feuDeCamp" | "defeat"
+  self.screen = "menu" -- "menu" | "options" | "playing" | "draft" | "feuDeCamp" | "bossVictory" | "defeat"
+  -- Mode de run choisi au menu (2026-08-21, demande explicite) : "infini"
+  -- (illimité, l'ancien comportement par défaut), "bounded" (5 combats puis
+  -- l'Homme Arbre, voir Controller:finish_feu_de_camp/Game.start_boss_combat)
+  -- ou "boss_test" (combat isolé contre le boss, voir
+  -- Controller:start_boss_test -- une victoire ramène au menu plutôt que
+  -- d'enchaîner un faux combat suivant). nil tant qu'aucun run n'a encore
+  -- démarré (écran "menu").
+  self.run_mode = nil
   self.draft_picks = nil
   self.feu_de_camp = nil -- { heal_target = hero|nil, upgrade_targets = {instance,instance}|nil }, voir enter_feu_de_camp_screen
   self.feu_de_camp_upgrade_anim = nil -- { base_defs = {def,def}, t = elapsed }, voir choose_feu_de_camp_upgrade
@@ -89,6 +123,23 @@ function Controller.new()
   self.particle_duration = PARTICLE_DURATION
   self.status_pop_duration = STATUS_POP_DURATION
   self.shield_fx_duration = SHIELD_FX_DURATION
+  -- Séquence de début de tour (2026-08-21, demande explicite -- onboarding) :
+  -- le gros chiffre d'énergie qui se pose sur sa pastille, voir
+  -- Controller:spawn_energy_turn_anim / draw_energy_turn_anim (view.lua).
+  self.energy_turn_anim = nil -- { t = elapsed, value = N }
+  self.energy_turn_anim_duration = TURN_ENERGY_ANIM_DURATION -- lu par view.lua pour l'easing
+  -- Cartes déjà dans state.hand mais dont le vol pioche -> main n'a pas encore
+  -- démarré visuellement (2026-08-21, bug signalé -- pendant l'attente de
+  -- l'anim d'énergie ou du remélange défausse -> pioche, Game.start_turn/
+  -- Deck.fill_hand ont déjà rempli state.hand mais aucun card_anims n'existe
+  -- encore pour ces uids) : la main les cache tant qu'ils y sont, voir
+  -- draw_hand (view.lua) et Controller:consume_drawn_animation/animate_draw.
+  self.pending_draw_uids = {}
+  -- Sons de vol de carte différés (2026-08-21, demande explicite -- "1 son par
+  -- carte, sans se superposer" : quand N cartes bougent d'un coup, N "flup"
+  -- espacés, pas un seul son joué pour tout le paquet) : liste de
+  -- { delay = secondes restantes, name }, décrémentée dans Controller:update.
+  self.pending_sfx = {}
   self.hover = { target = nil, kind = nil, t = 0 } -- kind: "hero"|"enemy"|"card"
   -- Mode d'entrée alterné (2026-08-09, spike) : "tap" = séquence à 3 clics
   -- (existant) ; "arrow" = sélection au survol + flèche dynamique façon Slay
@@ -96,7 +147,9 @@ function Controller.new()
   -- projet après playtest), "tap" reste disponible via le bouton de bascule.
   self.input_mode = "arrow"
   self.arrow_hand_hover_uid = nil -- carte de la main survolée en mode "arrow" (agrandissement immédiat, sans délai de tooltip)
-  self:reset_run()
+  -- Plus de run démarré automatiquement (2026-08-21, demande explicite --
+  -- l'appli s'ouvre désormais sur le menu principal) : `self:reset_run(mode)`
+  -- n'est appelé qu'au clic sur "Jouer un run"/"Mode infini", voir Input.mousepressed.
   return self
 end
 
@@ -109,8 +162,27 @@ function Controller:set_arrow_hand_hover(uid)
   self.arrow_hand_hover_uid = uid
 end
 
-function Controller:reset_run()
-  self.screen = "playing"
+-- ---------- menu ----------
+
+function Controller:enter_menu()
+  self.screen = "menu"
+end
+
+function Controller:enter_options()
+  self.screen = "options"
+end
+
+function Controller:back_to_menu()
+  self:enter_menu()
+end
+
+--- Remise à zéro de tout l'état d'animation du Controller (2026-08-21,
+-- factorisé -- avant, dupliqué à l'identique dans reset_run/restart_combat/
+-- restart_turn, et maintenant aussi start_boss_test). `self.screen` n'est PAS
+-- touché ici : chaque appelant sait mieux que cette fonction quel écran
+-- vient ensuite (souvent "playing", mais enter_draft_screen peut encore
+-- s'appliquer juste après selon `state.over`).
+function Controller:clear_animation_state()
   self.draft_picks = nil
   self.feu_de_camp = nil
   self.feu_de_camp_upgrade_anim = nil
@@ -124,25 +196,53 @@ function Controller:reset_run()
   self.particles = {}
   self.status_pop = {}
   self.shield_fx = {}
+  self.energy_turn_anim = nil
+  self.pending_draw_uids = {}
+  self.pending_sfx = {}
+end
+
+--- `mode` : "infini" | "bounded" (2026-08-21, demande explicite -- voir
+-- self.run_mode). Absent (ex. le bouton "Rejouer" de l'écran de défaite, voir
+-- Input.mousepressed), reconduit le dernier mode actif plutôt que d'en
+-- imposer un par défaut -- mourir en run borné puis "Rejouer" doit relancer
+-- un run borné, pas basculer sur l'infini.
+function Controller:reset_run(mode)
+  self.run_mode = mode or self.run_mode or "infini"
+  self.screen = "playing"
+  self:clear_animation_state()
   Game.reset_run(self.state)
-  self:consume_drawn_animation()
   -- Game.start_turn (appelé par reset_run) ne peut plus infliger de dégâts à
   -- ce jour -- garde-fou conservé par précaution, voir advance_after_discard_sequenced.
-  if self.state.over then self:enter_draft_screen() end
+  if self.state.over then self:handle_combat_victory(); return end
+  -- Séquence de début de tour rejouée dès le tout premier tour de la partie
+  -- (2026-08-21, demande explicite -- "l'animation pour l'énergie doit aussi
+  -- se faire au début de la partie") : même mise en scène que chaque tour
+  -- normal, voir Controller:play_turn_start_sequence.
+  self:play_turn_start_sequence()
+end
+
+--- "Tester le boss" au menu (2026-08-21, demande explicite) : combat autonome
+-- contre l'Homme Arbre + ses 4 Pousses d'Arbre (voir Game.start_boss_test),
+-- héros frais comme un nouveau run. `run_mode = "boss_test"` (ni "infini" ni
+-- "bounded") : "Rejouer" après une défaite relance le même test plutôt que de
+-- retomber sur le mode infini, et une victoire ramène au menu plutôt que
+-- d'enchaîner sur un faux "combat 2" -- voir Input.mousepressed et
+-- Controller:finish_feu_de_camp.
+function Controller:start_boss_test()
+  self.screen = "playing"
+  self.run_mode = "boss_test"
+  self:clear_animation_state()
+  Game.start_boss_test(self.state)
+  if self.state.over then self:handle_combat_victory(); return end
+  self:play_turn_start_sequence()
 end
 
 function Controller:restart_combat()
   self.screen = "playing"
-  self.seq:clear()
-  self.anim = {}
-  self.card_anims = {}
-  self.floaters = {}
-  self.particles = {}
-  self.status_pop = {}
-  self.shield_fx = {}
+  self:clear_animation_state()
   Game.restore_combat_snapshot(self.state)
   self:consume_drawn_animation()
-  if self.state.over then self:enter_draft_screen() end
+  if self.state.over then self:handle_combat_victory() end
 end
 
 --- Recommence uniquement le tour en cours (2026-08-10, demande explicite) --
@@ -150,16 +250,10 @@ end
 -- tour (Game.restore_turn_snapshot) plutôt que celle de combat.
 function Controller:restart_turn()
   self.screen = "playing"
-  self.seq:clear()
-  self.anim = {}
-  self.card_anims = {}
-  self.floaters = {}
-  self.particles = {}
-  self.status_pop = {}
-  self.shield_fx = {}
+  self:clear_animation_state()
   Game.restore_turn_snapshot(self.state)
   self:consume_drawn_animation()
-  if self.state.over then self:enter_draft_screen() end
+  if self.state.over then self:handle_combat_victory() end
 end
 
 --- Outil de test (2026-08-08) : termine le combat en cours par une victoire
@@ -170,7 +264,7 @@ end
 function Controller:trigger_instant_victory()
   if self.screen ~= "playing" or self.state.over then return end
   for _, e in ipairs(self.state.enemies) do e.hp = 0 end
-  if Game.check_victory(self.state) then self:enter_draft_screen() end
+  if Game.check_victory(self.state) then self:handle_combat_victory() end
 end
 
 -- ---------- cosmétique ----------
@@ -179,14 +273,31 @@ function Controller:pulse(unit_id, kind)
   self.anim[unit_id] = { kind = kind, t = 0 }
 end
 
+--- Joue un son après `delay` secondes plutôt qu'immédiatement (2026-08-21,
+-- demande explicite -- "1 son par carte, sans se superposer" : plusieurs
+-- cartes qui bougent d'un coup doivent s'entendre une par une, espacées,
+-- jamais un seul son joué pour tout le paquet). `delay <= 0` joue tout de
+-- suite, même résultat qu'un Sfx.play direct. Voir Controller:update pour le
+-- décompte.
+function Controller:schedule_sfx(name, delay)
+  if not delay or delay <= 0 then Sfx.play(name); return end
+  self.pending_sfx[#self.pending_sfx + 1] = { delay = delay, name = name }
+end
+
 -- ---------- vol de cartes (pioche <-> main <-> défausse) ----------
 
 --- Anime les cartes dont les uids sont donnés depuis la pioche vers leur
 -- emplacement ACTUEL dans state.hand (appelé APRÈS que la pioche a eu lieu :
 -- les cartes sont déjà dans state.hand, donc View.hand_rects reflète leur
--- position d'arrivée directement).
+-- position d'arrivée directement). Renvoie la durée totale du vol (2026-08-21,
+-- demande explicite -- la suite de la séquence de tour, ex. le saut "prêt" des
+-- aventuriers, doit attendre que la dernière carte soit arrivée avant de démarrer).
+-- Retire chaque uid de `pending_draw_uids` au moment où SON entrée de vol
+-- existe vraiment (2026-08-21, bug signalé -- voir le commentaire sur ce
+-- champ dans Controller.new) : c'est CE moment précis, pas l'appel global à
+-- consume_drawn_animation, qui doit faire réapparaître la carte en main.
 function Controller:animate_draw(drawn_uids)
-  if not drawn_uids or #drawn_uids == 0 then return end
+  if not drawn_uids or #drawn_uids == 0 then return 0 end
   local hand_rects = View.hand_rects(self.state)
   local origin = View.deck_pile_rect
   for i, uid in ipairs(drawn_uids) do
@@ -194,33 +305,95 @@ function Controller:animate_draw(drawn_uids)
     if dest then
       local def
       for _, c in ipairs(self.state.hand) do if c.uid == uid then def = c.def break end end
+      local delay = (i - 1) * DRAW_FLIGHT_STAGGER
       self.card_anims[#self.card_anims + 1] = {
-        from = origin, to = dest, elapsed = 0, delay = (i - 1) * DRAW_STAGGER,
-        duration = FLIGHT_DURATION, fade_in = true, def = def, uid = uid,
+        from = origin, to = dest, elapsed = 0, delay = delay,
+        duration = DRAW_FLIGHT_DURATION, fade_in = true, def = def, uid = uid,
       }
+      self.pending_draw_uids[uid] = nil
+      -- 1 "flup" PAR carte, espacé du même délai que son vol (2026-08-21,
+      -- demande explicite -- "sans se superposer") : jamais un seul son pour
+      -- tout le paquet, voir Controller:schedule_sfx.
+      self:schedule_sfx("flup", delay)
     end
   end
+  return (#drawn_uids - 1) * DRAW_FLIGHT_STAGGER + DRAW_FLIGHT_DURATION
+end
+
+--- Quelques cartes anonymes qui volent de la défausse vers la pioche
+-- (2026-08-21, demande explicite -- rendre visible le remélange défausse ->
+-- pioche quand le deck se vide en cours de pioche) : `def = nil`, dessiné en
+-- silhouette simple par draw_card_flights (view.lua), jamais une face
+-- précise -- ce sont des cartes qui repartent mélangées, en montrer une serait
+-- trompeur. Renvoie la durée totale, même contrat que animate_draw/
+-- animate_discard_snapshot.
+function Controller:animate_reshuffle()
+  local origin, dest = View.discard_pile_rect, View.deck_pile_rect
+  for i = 1, RESHUFFLE_GHOST_COUNT do
+    local delay = (i - 1) * RESHUFFLE_GHOST_STAGGER
+    self.card_anims[#self.card_anims + 1] = {
+      from = origin, to = dest, elapsed = 0, delay = delay,
+      duration = RESHUFFLE_GHOST_FLIGHT_DURATION, fade_in = false, def = nil,
+    }
+    self:schedule_sfx("flup", delay)
+  end
+  return RESHUFFLE_TOTAL_DURATION
 end
 
 --- Lit state.last_drawn_uids (posé par Deck.draw_cards/fill_hand, voir
 -- src/rules/deck.lua) et lance l'animation correspondante, puis le vide --
 -- point d'accroche unique pour tous les chemins de pioche (début de tour,
--- Clairvoyance en cours de tour), sans dupliquer l'appel dans chacun.
+-- Clairvoyance en cours de tour), sans dupliquer l'appel dans chacun. Renvoie
+-- la durée totale AVANT que la suite de la séquence (ex. le saut des
+-- aventuriers) ne puisse démarrer.
+--
+-- Remélange en cours de pioche (2026-08-21, demande explicite, ex. "pioche 2
+-- cartes, pioche vide, passage défausse -> pioche, pioche des 3 cartes
+-- restantes") : `state.last_draw_reshuffled_at` (voir Deck.lua) coupe alors le
+-- vol en 2 lots avec Controller:animate_reshuffle joué ENTRE les deux, plutôt
+-- qu'un seul vol qui ferait apparaître les cartes d'après-remélange comme si
+-- elles venaient d'un deck resté plein. Toutes les cartes concernées (les 2
+-- lots) restent marquées `pending_draw_uids` dès le départ -- voir plus bas --
+-- pour ne jamais apparaître "déjà en main" pendant l'attente du remélange.
 function Controller:consume_drawn_animation()
   local drawn = self.state.last_drawn_uids
+  local reshuffled_at = self.state.last_draw_reshuffled_at
   self.state.last_drawn_uids = nil
-  if drawn then
-    self:animate_draw(drawn)
-    if #drawn > 0 then Sfx.play("flush") end
+  self.state.last_draw_reshuffled_at = nil
+  if not drawn or #drawn == 0 then return 0 end
+  for _, uid in ipairs(drawn) do self.pending_draw_uids[uid] = true end
+
+  if reshuffled_at ~= nil then
+    local batch1, batch2 = {}, {}
+    for i, uid in ipairs(drawn) do
+      if i <= reshuffled_at then batch1[#batch1 + 1] = uid else batch2[#batch2 + 1] = uid end
+    end
+    local self_ = self
+    local d1 = #batch1 > 0 and self:animate_draw(batch1) or 0
+    self_.seq:push(function() end, d1)
+    self_.seq:push(function()
+      if self_.state.over then return end
+      self_:animate_reshuffle()
+    end, RESHUFFLE_TOTAL_DURATION)
+    self_.seq:push(function()
+      if self_.state.over then return end
+      if #batch2 > 0 then self_:animate_draw(batch2) end
+    end)
+    return d1 + RESHUFFLE_TOTAL_DURATION + (#batch2 > 0 and ((#batch2 - 1) * DRAW_FLIGHT_STAGGER + DRAW_FLIGHT_DURATION) or 0)
   end
+
+  return self:animate_draw(drawn)
 end
 
 --- Anime `cards` (liste de {uid, def, ...}, une COPIE de state.hand prise
 -- AVANT la défausse -- voir View.hand_rects_for) depuis leur position d'ORIGINE
 -- dans cette main-là vers la défausse. `exclude_uid` (optionnel) : carte à ne
--- pas animer (celle que le Mage garde).
+-- pas animer (celle que le Mage garde). Renvoie la durée totale du vol
+-- (2026-08-21, demande explicite -- la résolution des monstres doit attendre
+-- que cette défausse-ci soit visuellement finie, PLUS une pause dédiée, avant
+-- de démarrer -- voir END_TURN_TO_ENEMY_RESOLUTION_PAUSE dans end_turn).
 function Controller:animate_discard_snapshot(cards, exclude_uid)
-  if not cards or #cards == 0 then return end
+  if not cards or #cards == 0 then return 0 end
   local hand_rects = View.hand_rects_for(cards)
   local dest = View.discard_pile_rect
   local i = 0
@@ -229,13 +402,16 @@ function Controller:animate_discard_snapshot(cards, exclude_uid)
       i = i + 1
       local origin = hand_rects[c.uid]
       if origin then
+        local delay = (i - 1) * END_TURN_DISCARD_STAGGER
         self.card_anims[#self.card_anims + 1] = {
-          from = origin, to = dest, elapsed = 0, delay = (i - 1) * DISCARD_STAGGER,
-          duration = FLIGHT_DURATION, fade_in = false, def = c.def,
+          from = origin, to = dest, elapsed = 0, delay = delay,
+          duration = END_TURN_DISCARD_FLIGHT_DURATION, fade_in = false, def = c.def,
         }
+        self:schedule_sfx("flup", delay)
       end
     end
   end
+  return i > 0 and ((i - 1) * END_TURN_DISCARD_STAGGER + END_TURN_DISCARD_FLIGHT_DURATION) or 0
 end
 
 --- Anime une seule carte (celle qui vient d'être jouée, si elle a bien fini en
@@ -252,6 +428,7 @@ function Controller:maybe_animate_played_discard(played_uid, hand_before)
     from = origin, to = View.discard_pile_rect, elapsed = 0, delay = 0,
     duration = FLIGHT_DURATION, fade_in = false, def = last.def,
   }
+  Sfx.play("flup")
 end
 
 --- Capture PV + statuts de toutes les unités -- même principe que l'ancien
@@ -297,6 +474,76 @@ end
 function Controller:pop_status(unit_id, key)
   self.status_pop[unit_id] = self.status_pop[unit_id] or {}
   self.status_pop[unit_id][key] = 0
+end
+
+--- Gros chiffre d'énergie qui se pose sur sa pastille en début de tour
+-- (2026-08-21, demande explicite -- premier beat de la séquence de tour, amène
+-- le regard du joueur à cet endroit avant même que la pioche ne démarre). Expire
+-- tout seul dans Controller:update, comme victory_anim/floaters.
+function Controller:spawn_energy_turn_anim(value)
+  self.energy_turn_anim = { t = 0, value = value }
+  Sfx.play("woosh")
+end
+
+--- Chaque aventurier vivant saute un peu vers le haut, l'un après l'autre de
+-- gauche à droite (2026-08-21, demande explicite -- dernier beat de la séquence
+-- de début de tour, signale "prêt à jouer") -- réutilise l'anim "pulse-up"
+-- existante (celle jouée quand une carte se résout sur ce héros), jamais un
+-- second mécanisme de rebond à maintenir. `state.heroes` est déjà dans l'ordre
+-- d'affichage gauche->droite (voir View.hero_rects), donc une simple itération
+-- suffit -- pas besoin de trier.
+function Controller:play_hero_ready_hops()
+  local self_ = self
+  for _, h in ipairs(self_.state.heroes) do
+    if h.hp > 0 then
+      local hero_ref = h
+      self_.seq:push(function()
+        self_:pulse(hero_ref.id, "pulse-up")
+        Sfx.play("hop")
+      end, HERO_READY_STAGGER)
+    end
+  end
+end
+
+--- Les 3 beats de début de tour (2026-08-21, demande explicite -- énergie ->
+-- pioche -> aventuriers prêts), factorisés pour être rejoués identiques en
+-- tout début de partie (voir Controller:reset_run) et à chaque tour normal
+-- (voir advance_after_discard_sequenced) -- suppose que state.energy/
+-- state.hand/state.last_drawn_uids sont DÉJÀ à jour (Game.start_turn ou
+-- Game.reset_run déjà appelé) : ne fait que la mise en scène, aucune règle.
+-- `consume_drawn_animation` renvoie désormais sa VRAIE durée totale, remélange
+-- défausse -> pioche compris quand il y en a un (2026-08-21, voir son
+-- commentaire) -- le saut des aventuriers est donc poussé sur le séquenceur
+-- DEPUIS L'INTÉRIEUR de l'étape de pioche, avec cette durée comme attente,
+-- plutôt que précalculé à l'avance sur un simple compte de cartes (qui
+-- ignorerait un éventuel remélange et ferait sauter les aventuriers trop tôt,
+-- par-dessus la fin de la pioche).
+function Controller:play_turn_start_sequence()
+  local self_ = self
+  -- Marquer `pending_draw_uids` DÈS CE BEAT, pas seulement à l'intérieur de
+  -- consume_drawn_animation (2026-08-21, bug persistant -- root cause réelle :
+  -- Game.start_turn a déjà rempli state.hand de façon synchrone AVANT même que
+  -- ce beat démarre, mais l'ancien code ne peuplait pending_draw_uids qu'au
+  -- moment où consume_drawn_animation s'exécutait enfin, APRÈS l'attente de
+  -- l'anim d'énergie -- entre les deux, rien ne cachait ces cartes, d'où le
+  -- symptôme "déjà visibles, puis vol qui semble partir de zéro / zoomer" :
+  -- une carte pleinement affichée en main qui, une fois consume_drawn_animation
+  -- enfin lancé, se met soudain à "revoler" depuis la pioche par-dessus
+  -- elle-même -- le rebond d'arrivée (ease_out_back) sur une carte qui était
+  -- déjà là, à sa taille normale, donnait l'illusion d'un grossissement.
+  if self_.state.last_drawn_uids then
+    for _, uid in ipairs(self_.state.last_drawn_uids) do self_.pending_draw_uids[uid] = true end
+  end
+  self_:spawn_energy_turn_anim(self_.state.energy)
+  self_.seq:push(function() end, TURN_ENERGY_ANIM_DURATION)
+  self_.seq:push(function()
+    if self_.state.over then return end
+    local draw_total = self_:consume_drawn_animation()
+    self_.seq:push(function()
+      if self_.state.over then return end
+      self_:play_hero_ready_hops()
+    end, draw_total)
+  end)
 end
 
 -- `amount` (optionnel, 2026-08-24, demande explicite) : montant de Défense
@@ -387,7 +634,24 @@ function Controller:update(dt)
     s.t = s.t + dt
     if s.t >= self.shield_fx_duration then self.shield_fx[id] = nil end
   end
-  if self.hover.target then self.hover.t = self.hover.t + dt end
+  for i = #self.pending_sfx, 1, -1 do
+    local p = self.pending_sfx[i]
+    p.delay = p.delay - dt
+    if p.delay <= 0 then
+      Sfx.play(p.name)
+      table.remove(self.pending_sfx, i)
+    end
+  end
+  -- Teste `kind`, pas `target` (2ᵉ occurrence du même bug que hover_ready ci-
+  -- dessous -- la pioche/défausse ont `target = nil`, le minuteur ne montait
+  -- donc jamais et l'infobulle ne se déclenchait jamais, même après le premier
+  -- correctif) : c'est CE compteur qui alimente hover_ready, les deux doivent
+  -- utiliser la même condition.
+  if self.hover.kind then self.hover.t = self.hover.t + dt end
+  if self.energy_turn_anim then
+    self.energy_turn_anim.t = self.energy_turn_anim.t + dt
+    if self.energy_turn_anim.t >= self.energy_turn_anim_duration then self.energy_turn_anim = nil end
+  end
   if self.victory_anim then self.victory_anim.t = self.victory_anim.t + dt end
   for _, f in pairs(self.draft_flip) do f.t = f.t + dt end
   if self.feu_de_camp_upgrade_anim then self.feu_de_camp_upgrade_anim.t = self.feu_de_camp_upgrade_anim.t + dt end
@@ -400,8 +664,14 @@ function Controller:set_hover(kind, target)
   self.hover.t = 0
 end
 
+-- Teste `kind`, pas `target` (bug signalé 2026-08-21) : la pioche/défausse
+-- (voir Input.mousemoved) survolent avec `target = nil` -- il n'y a pas
+-- d'identifiant naturel à leur donner, contrairement à un héros/ennemi/carte.
+-- `set_hover(nil, nil)` (le seul appel qui efface vraiment le survol) laisse
+-- `kind` nil lui aussi, donc ce test reste équivalent à l'ancien pour hero/
+-- enemy/card, qui avaient toujours un `target` non-nil.
 function Controller:hover_ready()
-  return self.hover.target ~= nil and self.hover.t >= HOVER_DELAY
+  return self.hover.kind ~= nil and self.hover.t >= HOVER_DELAY
 end
 
 -- ---------- jouer une carte ----------
@@ -465,38 +735,56 @@ function Controller:resolve_target(kind, target_id)
 end
 
 function Controller:after_card_resolved()
-  if self.state.over then self:enter_draft_screen() end
+  if self.state.over then self:handle_combat_victory() end
 end
 
 -- ---------- fin de tour ----------
 
+-- Défausse de fin de tour puis résolution des monstres, avec une pause dédiée
+-- entre les deux (2026-08-21, demande explicite -- avant, la défausse ne
+-- faisait qu'animer pendant que la résolution des monstres démarrait déjà en
+-- arrière-plan sur la même frame ou presque, les deux se lisaient comme un
+-- seul événement confus). `animate_discard_snapshot` renvoie la durée totale
+-- de son propre vol -- on l'attend, PLUS END_TURN_TO_ENEMY_RESOLUTION_PAUSE,
+-- avant de lancer la suite.
 function Controller:end_turn()
   local hand_before = Game.shallow_copy(self.state.hand)
   if Game.end_turn_requested(self.state) then
-    self:animate_discard_snapshot(hand_before)
-    self:advance_after_discard_sequenced()
+    local discard_duration = self:animate_discard_snapshot(hand_before)
+    self:advance_after_discard_sequenced(discard_duration + END_TURN_TO_ENEMY_RESOLUTION_PAUSE)
   end
 end
 
 --- Équivalent discardThenAdvance + advanceAfterDiscard, paceé sur le séquenceur :
--- saignements -> vérifs -> un ennemi à la fois (1s d'écart) -> décroissance -> tour suivant.
-function Controller:advance_after_discard_sequenced()
+-- (pause dédiée après la défausse) -> saignements -> vérifs -> un ennemi à la
+-- fois (télégraphe -> petite pause -> action -> 1s d'écart) -> décroissance ->
+-- tour suivant (énergie -> pioche -> aventuriers prêts). `pre_pause` (2026-08-21,
+-- demande explicite) : temps d'attente avant même le premier beat, voir end_turn.
+function Controller:advance_after_discard_sequenced(pre_pause)
   local self_ = self
+  self_.seq:push(function() end, pre_pause or 0)
   self_.seq:push(function()
     local before = self_:snapshot_units()
     Game.tick_bleed(self_.state)
     self_:react_to_diff(before)
 
     if Game.check_defeat(self_.state) then self_:enter_defeat_screen(); return end
-    if Game.check_victory(self_.state) then self_:enter_draft_screen(); return end
+    if Game.check_victory(self_.state) then self_:handle_combat_victory(); return end
 
     for _, e in ipairs(self_.state.enemies) do
       if e.hp > 0 and e.next_move then
         local enemy_ref = e
+        -- Saut/télégraphe du monstre, PUIS une petite pause avant que l'action
+        -- ne touche réellement sa cible (2026-08-21, demande explicite --
+        -- avant, les deux se produisaient dans le même appel, sans transition,
+        -- ce qui ne laissait pas le temps de comprendre qui frappait quoi).
         self_.seq:push(function()
           if self_.state.over then return end
           self_:pulse(enemy_ref.id, "pulse-down")
           Sfx.play("enemy_telegraph")
+        end, ENEMY_TELEGRAPH_TO_ACTION_DELAY)
+        self_.seq:push(function()
+          if self_.state.over then return end
           local hp_before = self_:snapshot_units()
           Game.resolve_enemy_action(self_.state, enemy_ref)
           self_:react_to_diff(hp_before)
@@ -522,12 +810,13 @@ function Controller:advance_after_discard_sequenced()
       -- tour, pas un blocage de dégâts) -- sans cette garde, "shting" jouerait
       -- à chaque tour pour quiconque avait de la Défense restante.
       self_:react_to_diff(turn_before, { skip_shield_sfx = true })
-      self_:consume_drawn_animation()
       -- Game.start_turn ne peut plus, à ce jour, infliger de dégâts (les
       -- Pouvoirs de Classe qui le faisaient ont été retirés) -- ce garde-fou
       -- reste par précaution si un futur pouvoir redonnait ce pouvoir à
       -- start_turn, plutôt que d'être supprimé puis oublié le jour venu.
-      if self_.state.over then self_:enter_draft_screen() end
+      if self_.state.over then self_:handle_combat_victory(); return end
+
+      self_:play_turn_start_sequence()
     end)
   end)
 end
@@ -538,6 +827,31 @@ function Controller:enter_defeat_screen()
   self.screen = "defeat"
   self.seq:clear() -- inutile de finir de dérouler les ennemis restants une fois la défaite actée
   Sfx.play("defeat")
+end
+
+-- Dispatch central de toute victoire de combat (2026-08-21, demande explicite --
+-- "il faut enlever le draft de carte et le feu de camp après le boss") : tous
+-- les appels de victoire du contrôleur passent par ici plutôt que d'appeler
+-- enter_draft_screen directement, pour qu'un seul endroit décide entre le
+-- chemin normal (draft -> feu de camp -> combat suivant) et le boss (aucun des
+-- deux, juste un bref titre puis retour au menu -- state.run.is_boss est posé
+-- par Game.start_boss_test/start_boss_combat, jamais par ce fichier).
+function Controller:handle_combat_victory()
+  if self.state.run.is_boss then
+    self:enter_boss_victory()
+  else
+    self:enter_draft_screen()
+  end
+end
+
+function Controller:enter_boss_victory()
+  self.screen = "bossVictory"
+  self.card_anims = {}
+  self.victory_anim = { t = 0 }
+  Sfx.play("victory")
+  local self_ = self
+  self.seq:push(function() end, BOSS_VICTORY_HOLD_DURATION)
+  self.seq:push(function() self_:enter_menu() end)
 end
 
 function Controller:enter_draft_screen()
@@ -658,12 +972,28 @@ function Controller:finish_feu_de_camp(pause)
   self.seq:push(function()
     self_.feu_de_camp = nil
     self_.feu_de_camp_upgrade_anim = nil
+    self_.card_anims = {}
+    -- Le cas "Tester le boss" gagné ne passe plus jamais par ici (2026-08-21+ :
+    -- state.run.is_boss fait sortir la victoire du boss via
+    -- Controller:handle_combat_victory/enter_boss_victory bien avant
+    -- d'atteindre le draft ou le feu de camp, voir plus haut) -- cette fonction
+    -- ne gère donc plus que la progression ENTRE deux combats non-boss d'un
+    -- run normal, boss compris comme destination (pas comme victoire).
+    -- Run borné à 5 combats + 1 boss : le combat contre l'Homme Arbre
+    -- (Game.start_boss_combat) remplace le 6ᵉ combat classique --
+    -- `state.run.combat_index` porte encore le numéro du combat qui vient
+    -- d'être gagné (Game.start_next_combat/start_boss_combat, plus bas, sont
+    -- ce qui l'incrémente), donc >= 5 ici veut dire "le 5ᵉ combat vient
+    -- d'être bouclé".
     self_.screen = "playing"
     self_.state.over = false
-    self_.card_anims = {}
-    Game.start_next_combat(self_.state)
+    if self_.run_mode == "bounded" and self_.state.run.combat_index >= 5 then
+      Game.start_boss_combat(self_.state)
+    else
+      Game.start_next_combat(self_.state)
+    end
     self_:consume_drawn_animation()
-    if self_.state.over then self_:enter_draft_screen() end
+    if self_.state.over then self_:handle_combat_victory() end
   end)
 end
 

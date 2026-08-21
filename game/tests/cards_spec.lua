@@ -38,6 +38,28 @@ describe("Cards.upgraded_def", function()
     assert.equal(6, ally.defense)
   end)
 
+  it("Main de feu (ex-Flamèche, code 'flameche') est un coup de feu magique 2/3 dégâts (2026-08-24)", function()
+    local base = Cards.by_code("flameche")
+    assert.equal("Main de feu", base.name)
+    assert.equal("magique", base.dmg_type)
+    local has_feu = false
+    for _, cat in ipairs(base.cats) do if cat == "feu" then has_feu = true end end
+    assert.is_true(has_feu)
+
+    local state = { log = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "mage", mana = 2 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    base.effect({ state = state, hero = hero, target = target, card_def = base })
+    assert.equal(18, target.hp) -- 20 - 2
+    assert.equal(3, hero.mana) -- +1 mana
+
+    local up = Cards.upgraded_def(base)
+    local hero2 = { id = "h2", name = "h2", hp = 20, max_hp = 20, class_id = "mage", mana = 2 }
+    local target2 = { id = "e2", name = "e2", hp = 20, max_hp = 20, defense = 0 }
+    up.effect({ state = state, hero = hero2, target = target2, card_def = up })
+    assert.equal(17, target2.hp) -- 20 - 3
+  end)
+
   it("Assassinat non-Camouflé donne Discrétion/Puissance 2/2 en base, 3/3 amélioré (2026-08-24, plus de Camouflé direct)", function()
     local base = Cards.by_code("assassinat")
     local state = { log = {} }

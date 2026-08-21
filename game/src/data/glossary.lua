@@ -29,7 +29,9 @@ Glossary.terms = {
   { key = "soin", icon = "\u{1F49A}", label = "soin", has_icon = true, related = "soin", explain = "" },
   { key = "cibleennemi", icon = "\u{26A0}\u{FE0F}", label = "[ciblé]", has_icon = true, related = "", explain = "Ciblé par un ennemi.", aliases = { "cibleenemi", "ennemicible" } },
   { key = "alliecible", icon = "\u{1F91D}", label = "[allié]", has_icon = true, related = "", explain = "Cible un allié." },
-  { key = "pioche", icon = nil, has_icon = false, related = "", explain = "Pioche X carte(s)." },
+  -- Toujours au pluriel, jamais "(s)" (2026-08-21, demande explicite -- accord
+  -- fautif accepté à X=1 plutôt que la parenthèse, voir decision-log/mémoire).
+  { key = "pioche", icon = nil, has_icon = false, related = "", explain = "Pioche X cartes." },
   { key = "esquive", icon = nil, has_icon = false, related = "", explain = "Ne subit aucun dégât des X prochaines attaques (-1 Esquive à chaque attaque esquivée)." },
   { key = "saignement", icon = nil, has_icon = false, related = "", explain = "Inflige X dégâts brut à la fin du tour, -1 Saignement au début de chaque tour.", aliases = { "saignements" } },
   { key = "incapacite", icon = nil, has_icon = false, related = "", explain = "Inflige -25% de dégâts, -1 Incapacité au début de chaque tour." },

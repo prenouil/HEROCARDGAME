@@ -45,6 +45,16 @@ describe("Deck.draw_cards / fill_hand", function()
     assert.equal(Deck.HAND_SIZE, #drawn)
     assert.equal(Deck.HAND_SIZE, #state.hand)
     assert.equal(0, #state.discard) -- entièrement recyclée dans le deck puis piochée
+    -- 2026-08-21, demande explicite : la UI coupe l'animation de vol en 2 à cet
+    -- indice (2 cartes piochées AVANT le remélange, voir Controller:consume_drawn_animation).
+    assert.equal(2, state.last_draw_reshuffled_at)
+  end)
+
+  it("last_draw_reshuffled_at reste nil quand aucun remélange n'a lieu", function()
+    local state = make_state()
+    state.deck = fake_cards(5)
+    Deck.fill_hand(state)
+    assert.is_nil(state.last_draw_reshuffled_at)
   end)
 
   it("s'arrête proprement quand deck et défausse sont tous les deux vides", function()

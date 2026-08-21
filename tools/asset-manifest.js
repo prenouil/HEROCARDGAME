@@ -38,6 +38,10 @@ module.exports = [
     subject: 'a sneaky bandit enemy character, hood, holding a dagger, standing pose' },
   { id: 'chaman', grid: 'character', out: 'game/assets/characters/enemies/chaman.png',
     subject: 'a goblin shaman enemy character, tribal robe, holding a totem staff, standing pose' },
+  { id: 'homme-arbre', grid: 'character', out: 'game/assets/characters/enemies/homme-arbre.png',
+    subject: 'a massive tree ent boss enemy character, ancient treant made of thick gnarled bark and wood, glowing eyes, gnarled branch arms, hulking and imposing, character fills the frame edge to edge, full body clearly visible with head and feet inside the frame, not cropped, viewed from the front' },
+  { id: 'pousse', grid: 'character', out: 'game/assets/characters/enemies/pousse.png',
+    subject: 'a small animated tree sapling minion enemy character, tiny sprout creature with twiggy branch arms and a few green leaves, no human-like posture, no hands, no held weapon, viewed from the front' },
 
   // ---- Icônes de mots-clés (icon, 32x32) ----
   { id: 'energie', grid: 'icon', out: 'game/assets/icons/keywords/energie.png',

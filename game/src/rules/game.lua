@@ -249,7 +249,7 @@ function Game.reset_run(state, seed)
   local heroes = {}
   for i, def in ipairs(Heroes.defs) do heroes[i] = fresh_hero(def) end
   state.heroes = heroes
-  state.run = { combat_index = 1 }
+  state.run = { combat_index = 1, is_boss = false }
   state.rng = Game.new_rng_streams(seed)
   local budget = Encounter.budget_for_combat(1)
   local instances = Encounter.generate_encounter(budget, state.rng.encounter)
@@ -270,6 +270,7 @@ end
 --- Combat suivant dans la même run, après un draft de carte (équivalent startNextCombat).
 function Game.start_next_combat(state)
   state.run.combat_index = state.run.combat_index + 1
+  state.run.is_boss = false
   local budget = Encounter.budget_for_combat(state.run.combat_index)
   local heroes = {}
   for i, h in ipairs(state.heroes) do heroes[i] = carried_hero(h) end
@@ -289,6 +290,53 @@ function Game.start_next_combat(state)
   state.turn = 1; state.energy = 0
   state.log = {}
   Combat.log(state, "Combat " .. state.run.combat_index .. " (budget " .. budget .. ") : " .. Encounter.summary(state.enemies), "sys")
+  Game.snapshot_combat(state)
+  Game.start_turn(state)
+end
+
+--- Combat de boss autonome (2026-08-21, demande explicite) : bouton "Tester
+-- le boss" au menu -- mêmes fondations qu'un run normal (nouveaux héros
+-- pleine vie, nouveau deck, nouveaux flux aléatoires) mais rencontre FIXE
+-- (Encounter.boss_encounter) plutôt que tirée par le budget. Ne touche jamais
+-- `state.run.combat_index`/le mode de run -- ce n'est pas un run normal, voir
+-- Controller:start_boss_test (self.run_mode reste nil).
+function Game.start_boss_test(state, seed)
+  local heroes = {}
+  for i, def in ipairs(Heroes.defs) do heroes[i] = fresh_hero(def) end
+  state.heroes = heroes
+  state.run = { combat_index = 1, is_boss = true }
+  state.rng = Game.new_rng_streams(seed)
+  state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter)
+  state.deck = Deck.build_starting_deck(function() return Game.next_uid(state) end, state.rng.deck)
+  state.hand = {}; state.discard = {}; state.pending = nil
+  state.turn = 1; state.over = false; state.energy = 0
+  state.log = {}
+  Combat.log(state, "Test du boss : " .. Encounter.summary(state.enemies), "sys")
+  Game.snapshot_combat(state)
+  Game.start_turn(state)
+end
+
+--- Le boss d'un run borné à 5 combats (2026-08-21, demande explicite) :
+-- mêmes fondations que Game.start_next_combat (héros/deck reportés du combat
+-- précédent) mais rencontre FIXE (Encounter.boss_encounter) plutôt que tirée
+-- par le budget -- `combat_index` incrémenté quand même (6, pour l'affichage
+-- "Combat 6"), même si le budget de difficulté n'a pas de sens ici.
+function Game.start_boss_combat(state)
+  state.run.combat_index = state.run.combat_index + 1
+  state.run.is_boss = true
+  local heroes = {}
+  for i, h in ipairs(state.heroes) do heroes[i] = carried_hero(h) end
+  state.heroes = heroes
+  state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter)
+  local reclaimed = {}
+  for _, c in ipairs(state.deck) do reclaimed[#reclaimed + 1] = c end
+  for _, c in ipairs(state.hand) do reclaimed[#reclaimed + 1] = c end
+  for _, c in ipairs(state.discard) do reclaimed[#reclaimed + 1] = c end
+  state.deck = Deck.shuffle(reclaimed, state.rng.deck)
+  state.hand = {}; state.discard = {}; state.pending = nil
+  state.turn = 1; state.energy = 0
+  state.log = {}
+  Combat.log(state, "Le Boss : " .. Encounter.summary(state.enemies), "sys")
   Game.snapshot_combat(state)
   Game.start_turn(state)
 end
@@ -484,7 +532,9 @@ function Game.end_turn_requested(state)
   if state.over then return false end
   state.pending = nil
   if #state.hand > 0 then
-    Combat.log(state, #state.hand .. " carte(s) non jouée(s) défaussée(s).", "sys")
+    -- Toujours au pluriel, jamais "(s)" (2026-08-21, demande explicite --
+    -- accord fautif accepté à 1 carte plutôt que la parenthèse).
+    Combat.log(state, #state.hand .. " cartes non jouées défaussées.", "sys")
   end
   Game.discard_cards(state, Game.shallow_copy(state.hand))
   return true
@@ -541,6 +591,20 @@ local function resolve_enemy_attack(state, e, amount, brut)
   Combat.deal_damage(state, nil, target, amount, "physique", nil, { brut = brut, source_unit = e })
 end
 
+--- Attaque ennemie qui touche TOUS les héros vivants (2026-08-21, demande
+-- explicite -- Homme Arbre, "Onde Sylvestre") : même traitement Esquive que
+-- resolve_enemy_attack, héros par héros, jamais un seul jet groupé.
+local function resolve_enemy_attack_all(state, e, amount)
+  for _, h in ipairs(Combat.living_heroes(state)) do
+    if (h.esquive or 0) > 0 then
+      h.esquive = h.esquive - 1
+      Combat.log(state, e.name .. " utilise " .. e.next_move.name .. " sur " .. h.name .. "… esquivé !", "sys")
+    else
+      Combat.deal_damage(state, nil, h, amount, "physique", nil, { source_unit = e })
+    end
+  end
+end
+
 --- Résout l'action télégraphiée d'un seul ennemi (équivalent d'une itération
 -- de la boucle dans advanceAfterDiscard). Ne fait rien si l'ennemi est mort
 -- ou n'a pas d'action prévue. Fonction pure/déterministe une fois next_move
@@ -578,6 +642,23 @@ function Game.resolve_enemy_action(state, e)
     if move.bleed then
       local target = Combat.hero_by_id(state, e.target_hero_id)
       if target and target.hp > 0 then target.saignements = (target.saignements or 0) + move.bleed end
+    end
+  elseif move.kind == "dmg-all" then
+    resolve_enemy_attack_all(state, e, move.amount)
+  elseif move.kind == "revive" then
+    -- Homme Arbre, "Renaissance Sylvestre" (2026-08-21, demande explicite) :
+    -- ramène à pleine vie les Pousses d'Arbre DÉJÀ existantes et tombées à 0
+    -- -- jamais une nouvelle instance créée, voir enemies.lua. Toujours au
+    -- pluriel dans le journal, jamais "(s)" (préférence actée le 2026-08-21).
+    local revived = 0
+    for _, o in ipairs(state.enemies) do
+      if o.template_id == "pousse" and o.hp <= 0 then
+        o.hp = o.max_hp
+        revived = revived + 1
+      end
+    end
+    if revived > 0 then
+      Combat.log(state, e.name .. " ramène " .. revived .. " Pousses d'Arbre à la vie.", "foe")
     end
   end
   Game.sync_camoufle_visibility(state) -- un héros peut mourir de cette attaque

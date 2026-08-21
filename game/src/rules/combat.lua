@@ -70,7 +70,13 @@ end
 -- PAS forcément le `source_hero` passé à deal_damage, voir opts.source_unit
 -- ci-dessous (une attaque ennemie n'a pas de source_hero, mais l'ennemi qui
 -- frappe doit quand même voir SA PROPRE Incapacité réduire SES dégâts).
-function Combat.damage_multiplier(source_unit, target_unit, dmg_type)
+-- `is_fire` (optionnel, 2026-08-24, demande explicite) : vrai si LE COUP porte
+-- le tag "feu" (carte dont `cats` contient "feu", voir deal_damage) -- pas le
+-- même signal que `dmg_type` (une carte "feu" peut être dmg_type "magique" OU
+-- "physique", voir Main de feu côté cards.lua). Seule cible connue à ce jour :
+-- l'Homme Arbre, identifié par template_id (même convention que la Régénération
+-- du Troll un peu plus bas dans game.lua).
+function Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire)
   local pct = 0
   if source_unit and (source_unit.puissance or 0) > 0 and dmg_type == "physique" then
     pct = pct + 0.25 * source_unit.puissance -- Puissance (Assassin, via Assassinat/Dans les ombres) : par stack
@@ -81,6 +87,9 @@ function Combat.damage_multiplier(source_unit, target_unit, dmg_type)
   if target_unit and (target_unit.vulnerabilite or 0) > 0 then
     pct = pct + 0.25 -- Vulnérabilité : +25% flat
   end
+  if is_fire and target_unit and target_unit.template_id == "homme-arbre" then
+    pct = pct + 0.5 -- Sensibilité au feu de l'Homme Arbre (2026-08-24, demande explicite) : +50% flat
+  end
   return 1 + pct
 end
 
@@ -89,8 +98,10 @@ end
 -- conditionne aussi le texte/la couleur du log, ne PAS renommer en "source_unit"
 -- partout pour autant (voir opts.source_unit).
 -- target_unit: hero ou enemy table (les deux partagent hp/defense/incapacite/vulnerabilite).
--- ctx: {state, hero, target, card_def} ou nil — passé pour marquer les dégâts de
--- feu (voir plus bas), pas utilisé pour un bonus de dégâts.
+-- ctx: {state, hero, target, card_def} ou nil — sert à détecter les dégâts de
+-- feu (`card_def.cats` contient "feu") : marque la cible pour la Régénération
+-- du Troll (voir plus bas) ET alimente la sensibilité au feu de l'Homme Arbre
+-- via Combat.damage_multiplier ci-dessus (2026-08-24).
 -- opts: { brut = bool, source_unit = unit } — brut ignore la Défense ; source_unit
 -- (optionnel) précise QUI porte Puissance/Incapacité pour le calcul du multiplicateur
 -- quand ce n'est pas source_hero (une attaque ennemie passe l'ennemi qui frappe ici,
@@ -98,7 +109,13 @@ end
 function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx, opts)
   opts = opts or {}
   local source_unit = opts.source_unit or source_hero
-  local amount = round(base * Combat.damage_multiplier(source_unit, target_unit, dmg_type))
+  local is_fire = false
+  if ctx and ctx.card_def and ctx.card_def.cats then
+    for _, cat in ipairs(ctx.card_def.cats) do
+      if cat == "feu" then is_fire = true break end
+    end
+  end
+  local amount = round(base * Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire))
 
   local absorbed = 0
   if not opts.brut then
@@ -123,11 +140,7 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
   end
   if source_hero and is_enemy_target then
     target_unit.took_damage_this_turn = true
-    if ctx and ctx.card_def and ctx.card_def.cats then
-      for _, cat in ipairs(ctx.card_def.cats) do
-        if cat == "feu" then target_unit.took_fire_damage_this_turn = true end
-      end
-    end
+    if is_fire then target_unit.took_fire_damage_this_turn = true end
   end
 
   return shook

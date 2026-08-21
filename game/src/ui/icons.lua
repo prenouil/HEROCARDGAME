@@ -264,6 +264,22 @@ local function draw_status_vulnerabilite(cx, cy, r, color)
   love.graphics.setLineWidth(1)
 end
 
+--- Flamme simple (2026-08-24, sensibilité au feu de l'Homme Arbre) : repli
+-- vectoriel si Sprites.status("fireweak") (icônes/keywords/fireball.png) est
+-- absent, même principe que les autres statuts ci-dessus.
+local function draw_status_fireweak(cx, cy, r, color)
+  set(color)
+  love.graphics.polygon("fill",
+    cx, cy - r * 0.85,
+    cx + r * 0.5, cy + r * 0.1,
+    cx + r * 0.15, cy - r * 0.05,
+    cx + r * 0.3, cy + r * 0.55,
+    cx, cy + r * 0.8,
+    cx - r * 0.3, cy + r * 0.55,
+    cx - r * 0.15, cy - r * 0.05,
+    cx - r * 0.5, cy + r * 0.1)
+end
+
 local DRAW_BY_STATUS = {
   defense = draw_status_defense,
   esquive = draw_status_esquive,
@@ -272,6 +288,7 @@ local DRAW_BY_STATUS = {
   saignements = draw_status_saignements,
   incapacite = draw_status_incapacite,
   vulnerabilite = draw_status_vulnerabilite,
+  fireweak = draw_status_fireweak,
 }
 
 --- Dessine l'icône d'un statut (clé Lua, ex. "defense", "esquive"...) centrée
