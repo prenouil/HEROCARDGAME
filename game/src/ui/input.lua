@@ -1,10 +1,9 @@
 -- Traduit les clics/survol souris en appels au Controller. Toute la logique de
--- "qui est cliquable maintenant" est dérivée de state.pending, jamais dupliquée :
--- on relit les mêmes conditions que la séquence à 3 temps du prototype
--- (carte -> héros -> cible).
+-- "qui est cliquable maintenant" est dérivée de state.pending, jamais dupliquée.
+-- Sélectionner une carte assigne directement son propriétaire (2026-08-20,
+-- voir Game.select_card) : il ne reste que 2 temps, carte -> cible.
 
 local View = require("src.ui.view")
-local Combat = require("src.rules.combat")
 
 local Input = {}
 
@@ -15,12 +14,66 @@ local function find_rect(rects_by_id, x, y)
   return nil
 end
 
+-- Écrans "menu"/"options" (2026-08-21, demande explicite) : mêmes boutons
+-- quel que soit le mode d'entrée (tap/flèche), jamais de ciblage de carte en
+-- jeu -- factorisé une seule fois, comme feu_de_camp_hovering plus bas,
+-- réutilisé par mousepressed_tap/arrow ET is_hovering_clickable_tap/arrow.
+-- Renvoie true si le clic a été traité par un de ces 2 écrans (pour que
+-- l'appelant sache s'arrêter là, jamais retomber sur la logique "playing").
+local function menu_click(controller, x, y)
+  if controller.screen == "menu" then
+    for _, b in ipairs(View.menu_buttons) do
+      if View.point_in(b, x, y) then
+        if b.id == "boss" then controller:start_boss_test()
+        elseif b.id == "run" then controller:reset_run("bounded")
+        elseif b.id == "infini" then controller:reset_run("infini")
+        elseif b.id == "options" then controller:enter_options()
+        elseif b.id == "quit" then love.event.quit()
+        end
+        return true
+      end
+    end
+    return true
+  end
+  if controller.screen == "options" then
+    if View.point_in(View.back_button, x, y) then controller:back_to_menu() end
+    return true
+  end
+  return false
+end
+
+local function menu_hovering(controller, x, y)
+  if controller.screen == "menu" then
+    for _, b in ipairs(View.menu_buttons) do
+      if View.point_in(b, x, y) then return true end
+    end
+    return false
+  end
+  if controller.screen == "options" then
+    return View.point_in(View.back_button, x, y)
+  end
+  return false
+end
+
+--- "Rejouer" sur l'écran de défaite (2026-08-21, demande explicite) : relance
+-- le même mode qu'à la mort -- `run_mode == "boss_test"` relance le test du
+-- boss (Game.start_boss_test, jamais Game.reset_run, qui tirerait une
+-- rencontre normale par le budget), tout le reste (nil/infini/bounded) passe
+-- par reset_run(), qui reconduit déjà self.run_mode tout seul.
+local function restart_after_defeat(controller)
+  if controller.run_mode == "boss_test" then controller:start_boss_test()
+  else controller:reset_run()
+  end
+end
+
 local function mousepressed_tap(controller, x, y, button)
   if button ~= 1 then return end
+  if menu_click(controller, x, y) then return end
+  if controller.screen == "bossVictory" then return end
   local state = controller.state
 
   if controller.screen == "defeat" then
-    if View.point_in(View.overlay_restart_button, x, y) then controller:reset_run() end
+    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller) end
     return
   end
 
@@ -41,33 +94,30 @@ local function mousepressed_tap(controller, x, y, button)
   end
 
   -- screen == "playing"
+
+  -- Carte "sans cible" en attente de confirmation (2026-08-27, voir
+  -- Game.assign_hero/Controller:confirm_pending) : AVANT même les boutons
+  -- (Fin de tour compris) -- tout clic "consomme" d'abord cette confirmation
+  -- plutôt que de laisser `pending` bloqué non résolu si le joueur clique
+  -- ailleurs que sur la main. Reclique la même carte -> désélection (déjà géré
+  -- par Game.select_card) ; une autre carte -> échange la sélection ; tout le
+  -- reste -> valide la carte en attente.
+  if state.pending and state.pending.awaiting_confirm_kind then
+    local hand_id = View.hand_hit(state, x, y)
+    if hand_id then controller:select_card(hand_id)
+    else controller:confirm_pending() end
+    return
+  end
+
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
   if View.point_in(View.restart_turn_button, x, y) then controller:restart_turn(); return end
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
 
   local pending = state.pending
-  -- Boutons "Jouer"/"Se concentrer" par héros (2026-08-08) : un clic choisit
-  -- le mode ET le héros en un seul geste -- remplace l'ancienne rangée
-  -- globale + le clic-héros séparé qui suivait.
-  if pending and not pending.mode then
-    if View.point_in(View.cancel_button, x, y) then controller:cancel_pending(); return end
-    local buttons = View.hero_action_rects(state)
-    for _, h in ipairs(state.heroes) do
-      local btns = buttons[h.id]
-      if btns then
-        if View.point_in(btns.play, x, y) then
-          if Combat.can_play(h, pending) then controller:choose_mode_and_assign(h.id, "play") end
-          return
-        end
-        if View.point_in(btns.concentrate, x, y) then
-          if Combat.can_concentrate(h) then controller:choose_mode_and_assign(h.id, "concentrate") end
-          return
-        end
-      end
-    end
-  end
-
+  -- Sélectionner une carte l'assigne directement à son propriétaire
+  -- (2026-08-20, voir Game.select_card) : plus de bouton "Jouer" à choisir,
+  -- `pending` n'existe donc jamais sans `pending.hero_id` déjà fixé.
   if pending and pending.hero_id then
     if pending.def.target == "enemy" or pending.def.target == "conditional" then
       local enemy_id = find_rect(View.enemy_rects(state), x, y)
@@ -81,23 +131,25 @@ local function mousepressed_tap(controller, x, y, button)
 
   -- Sélection/désélection d'une carte de la main (toujours possible tant
   -- qu'aucune cible n'est en cours de résolution).
-  local hand_id = find_rect(View.hand_rects(state), x, y)
+  local hand_id = View.hand_hit(state, x, y)
   if hand_id then controller:select_card(hand_id) end
 end
 
 -- Mode "flèche" (2026-08-09, spike de ciblage dynamique demandé par le porteur
 -- de projet, inspiré de Slay the Spire) : réutilise EXACTEMENT le même moteur
--- de règles/pending que le mode à 3 clics (Game.select_card, choose_mode_and_assign,
--- resolve_target, cancel_pending) -- seule la façon de déclencher ces appels
--- change. Différence actée avec le porteur de projet : un clic sur une cible
--- invalide (héros/zone/cible finale) annule TOUT, retour à la main -- jamais
--- de retour en arrière d'un cran.
+-- de règles/pending que le mode tap (Game.select_card, resolve_target,
+-- cancel_pending) -- seule la façon de déclencher ces appels change.
+-- Différence actée avec le porteur de projet : un clic sur une cible invalide
+-- (ennemi/allié) annule TOUT, retour à la main -- jamais de retour en arrière
+-- d'un cran.
 local function mousepressed_arrow(controller, x, y, button)
   if button ~= 1 then return end
+  if menu_click(controller, x, y) then return end
+  if controller.screen == "bossVictory" then return end
   local state = controller.state
 
   if controller.screen == "defeat" then
-    if View.point_in(View.overlay_restart_button, x, y) then controller:reset_run() end
+    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller) end
     return
   end
 
@@ -118,6 +170,19 @@ local function mousepressed_arrow(controller, x, y, button)
   end
 
   -- screen == "playing"
+
+  -- Carte "sans cible" en attente de confirmation (2026-08-27) : même garde
+  -- qu'en mode tap ci-dessus (voir le commentaire détaillé dans
+  -- mousepressed_tap) -- délibérément AVANT la règle "clic hors cible valide
+  -- annule tout" du mode flèche (juste en dessous) : ici, un clic hors main
+  -- CONFIRME, il n'annule jamais.
+  if state.pending and state.pending.awaiting_confirm_kind then
+    local hand_id = View.hand_hit(state, x, y)
+    if hand_id then controller:select_card(hand_id)
+    else controller:confirm_pending() end
+    return
+  end
+
   if View.point_in(View.end_turn_button, x, y) then controller:end_turn(); return end
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
   if View.point_in(View.restart_turn_button, x, y) then controller:restart_turn(); return end
@@ -125,33 +190,11 @@ local function mousepressed_arrow(controller, x, y, button)
 
   local pending = state.pending
 
-  -- Étape 1 : carte sélectionnée, en attente du choix de l'aventurier. Un
-  -- clic sur une autre carte de la main change la sélection (comme en mode
-  -- tap) ; un clic sur une zone valide assigne héros+mode ; tout le reste
-  -- (zone invalide comprise) annule la sélection en cours.
-  if pending and not pending.mode then
-    local hand_id = find_rect(View.hand_rects(state), x, y)
-    if hand_id then controller:select_card(hand_id); return end
-
-    local zones = View.hero_zone_rects(state)
-    for _, h in ipairs(state.heroes) do
-      local z = zones[h.id]
-      if z and View.point_in(z.play, x, y) then
-        if Combat.can_play(h, pending) then controller:choose_mode_and_assign(h.id, "play") else controller:cancel_pending() end
-        return
-      end
-      if z and View.point_in(z.concentrate, x, y) then
-        if Combat.can_concentrate(h) then controller:choose_mode_and_assign(h.id, "concentrate") else controller:cancel_pending() end
-        return
-      end
-    end
-    controller:cancel_pending()
-    return
-  end
-
-  -- Étape 2 : aventurier choisi, en attente de la cible finale (ennemi/allié).
-  -- Un clic hors cible valide annule tout (décision explicite du porteur de
-  -- projet -- pas de retour en arrière d'un cran).
+  -- Sélectionner une carte l'assigne directement à son propriétaire
+  -- (2026-08-20, voir Game.select_card) : `pending` n'existe donc jamais sans
+  -- `pending.hero_id` déjà fixé, il ne reste que l'attente de la cible finale
+  -- (ennemi/allié). Un clic hors cible valide annule tout (décision explicite
+  -- du porteur de projet -- pas de retour en arrière d'un cran).
   if pending and pending.hero_id then
     if pending.def.target == "enemy" or pending.def.target == "conditional" then
       local enemy_id = find_rect(View.enemy_rects(state), x, y)
@@ -166,7 +209,7 @@ local function mousepressed_arrow(controller, x, y, button)
   end
 
   -- Pas de carte en attente : un clic sur la main la sélectionne.
-  local hand_id = find_rect(View.hand_rects(state), x, y)
+  local hand_id = View.hand_hit(state, x, y)
   if hand_id then controller:select_card(hand_id) end
 end
 
@@ -193,6 +236,10 @@ local function feu_de_camp_hovering(controller, x, y)
 end
 
 local function is_hovering_clickable_tap(controller, x, y)
+  if controller.screen == "menu" or controller.screen == "options" then
+    return menu_hovering(controller, x, y)
+  end
+  if controller.screen == "bossVictory" then return false end
   local state = controller.state
 
   if controller.screen == "defeat" then
@@ -209,24 +256,17 @@ local function is_hovering_clickable_tap(controller, x, y)
 
   if controller.screen == "feuDeCamp" then return feu_de_camp_hovering(controller, x, y) end
 
+  -- Carte "sans cible" en attente de confirmation (2026-08-27) : n'importe où
+  -- est cliquable (soit ça valide, soit ça échange/désélectionne, voir
+  -- mousepressed_tap) -- jamais un clic ignoré dans cet état.
+  if state.pending and state.pending.awaiting_confirm_kind then return true end
+
   if View.point_in(View.end_turn_button, x, y) then return true end
   if View.point_in(View.restart_button, x, y) then return true end
   if View.point_in(View.restart_turn_button, x, y) then return true end
   if View.point_in(View.instant_victory_button, x, y) then return true end
 
   local pending = state.pending
-  if pending and not pending.mode then
-    if View.point_in(View.cancel_button, x, y) then return true end
-    local buttons = View.hero_action_rects(state)
-    for _, h in ipairs(state.heroes) do
-      local btns = buttons[h.id]
-      if btns then
-        if View.point_in(btns.play, x, y) and Combat.can_play(h, pending) then return true end
-        if View.point_in(btns.concentrate, x, y) and Combat.can_concentrate(h) then return true end
-      end
-    end
-  end
-
   if pending and pending.hero_id then
     if pending.def.target == "enemy" or pending.def.target == "conditional" then
       if find_rect(View.enemy_rects(state), x, y) then return true end
@@ -236,13 +276,17 @@ local function is_hovering_clickable_tap(controller, x, y)
     end
   end
 
-  return find_rect(View.hand_rects(state), x, y) ~= nil
+  return View.hand_hit(state, x, y) ~= nil
 end
 
 -- Contrairement au mode tap, une zone/cible invalide ANNULE au clic (voir
 -- mousepressed_arrow) -- mais on ne l'annonce pas comme "cliquable" au survol
 -- (curseur main), le curseur ne réagit qu'aux vraies opportunités d'action.
 local function is_hovering_clickable_arrow(controller, x, y)
+  if controller.screen == "menu" or controller.screen == "options" then
+    return menu_hovering(controller, x, y)
+  end
+  if controller.screen == "bossVictory" then return false end
   local state = controller.state
 
   if controller.screen == "defeat" then
@@ -259,25 +303,16 @@ local function is_hovering_clickable_arrow(controller, x, y)
 
   if controller.screen == "feuDeCamp" then return feu_de_camp_hovering(controller, x, y) end
 
+  -- Carte "sans cible" en attente de confirmation (2026-08-27) : même garde
+  -- qu'en mode tap ci-dessus -- n'importe où est cliquable.
+  if state.pending and state.pending.awaiting_confirm_kind then return true end
+
   if View.point_in(View.end_turn_button, x, y) then return true end
   if View.point_in(View.restart_button, x, y) then return true end
   if View.point_in(View.restart_turn_button, x, y) then return true end
   if View.point_in(View.instant_victory_button, x, y) then return true end
 
   local pending = state.pending
-  if pending and not pending.mode then
-    if find_rect(View.hand_rects(state), x, y) then return true end
-    local zones = View.hero_zone_rects(state)
-    for _, h in ipairs(state.heroes) do
-      local z = zones[h.id]
-      if z then
-        if View.point_in(z.play, x, y) and Combat.can_play(h, pending) then return true end
-        if View.point_in(z.concentrate, x, y) and Combat.can_concentrate(h) then return true end
-      end
-    end
-    return false
-  end
-
   if pending and pending.hero_id then
     if pending.def.target == "enemy" or pending.def.target == "conditional" then
       if find_rect(View.enemy_rects(state), x, y) then return true end
@@ -288,7 +323,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
     return false
   end
 
-  return find_rect(View.hand_rects(state), x, y) ~= nil
+  return View.hand_hit(state, x, y) ~= nil
 end
 
 function Input.is_hovering_clickable(controller, x, y)
@@ -297,6 +332,11 @@ function Input.is_hovering_clickable(controller, x, y)
 end
 
 function Input.mousemoved(controller, x, y)
+  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
+    controller:set_hover(nil, nil)
+    return
+  end
+
   -- Écran de draft (2026-08-09, bug signalé) : aucune infobulle mot-clé sur les
   -- 3 cartes de loot, parce que cette fonction s'arrêtait net hors "playing".
   -- Gardé par draft_card_ready comme le clic -- pas de survol tant que la carte
@@ -335,7 +375,7 @@ function Input.mousemoved(controller, x, y)
   local state = controller.state
 
   if controller.input_mode == "arrow" then
-    local hovered_uid = find_rect(View.hand_rects(state), x, y)
+    local hovered_uid = View.hand_hit(state, x, y)
     controller:set_arrow_hand_hover(hovered_uid)
   end
 
@@ -345,10 +385,18 @@ function Input.mousemoved(controller, x, y)
   local enemy_id = find_rect(View.enemy_rects(state), x, y)
   if enemy_id then controller:set_hover("enemy", enemy_id); return end
 
-  local hand_rects = View.hand_rects(state)
-  for _, c in ipairs(state.hand) do
-    local r = hand_rects[c.uid]
-    if View.point_in(r, x, y) then controller:set_hover("card", c.def); return end
+  -- Pioche/défausse (2026-08-21, demande explicite) : survolables pour une
+  -- infobulle (nombre de cartes + règle associée, voir tooltip_lines dans
+  -- view.lua) -- ne deviennent pas cliquables pour autant, aucun mousepressed
+  -- ne les gère.
+  if View.point_in(View.deck_pile_rect, x, y) then controller:set_hover("deck", nil); return end
+  if View.point_in(View.discard_pile_rect, x, y) then controller:set_hover("discard", nil); return end
+
+  local hover_uid = View.hand_hit(state, x, y)
+  if hover_uid then
+    for _, c in ipairs(state.hand) do
+      if c.uid == hover_uid then controller:set_hover("card", c.def); return end
+    end
   end
 
   controller:set_hover(nil, nil)

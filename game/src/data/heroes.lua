@@ -1,27 +1,16 @@
--- Héros MVP et texte de Transcendance par classe.
--- Port fidèle de HERO_DEFS / CLASS_POWERS depuis proto-cartes-completes/index.html
--- (le Pouvoir de Classe d'origine a été retiré depuis, voir Heroes.class_powers).
+-- Héros MVP.
+-- Port fidèle de HERO_DEFS depuis proto-cartes-completes/index.html (le Pouvoir
+-- de Classe d'origine a été retiré le 2026-08-09, la Transcendance individuelle
+-- qui restait ensuite a été retirée à son tour le 2026-08-11 -- plus aucun
+-- bonus/malus lié à la classe du héros qui joue une carte, voir combat.lua).
 -- PV : aucun montant n'est fixé au canon (gdd.md, 2026-08-06) — ces valeurs restent
 -- les repères de test du prototype, pas des chiffres définitifs.
 --
 -- `icon` reste la vraie donnée de design (emoji, fidèle au tableur) ; `label`/
 -- `class_label` sont le repli texte utilisé par la UI LÖVE, dont la police par
--- défaut ne contient pas ces glyphes (voir README du dossier game/). Le texte
--- de transcendance ci-dessous n'utilise que ce repli directement, pour rester
--- lisible sans dépendre d'aucune police.
+-- défaut ne contient pas ces glyphes (voir README du dossier game/).
 
 local Heroes = {}
-
--- Pouvoir de Classe retiré (2026-08-09, décision explicite du porteur de
--- projet -- "ça ne marche pas pour l'instant", à repenser plus tard) : seule
--- la Transcendance individuelle reste. Ne conserve donc plus qu'un champ par
--- classe, pas une table {pouvoir, transcendance}.
-Heroes.class_powers = {
-  guerrier = { transcendance = "Transcendance — +50% dégâts \"épée\" (mêlée physique)." },
-  paladin = { transcendance = "Transcendance — +50% sur le bouclier gagné ET sur le soin prodigué." },
-  mage = { transcendance = "Transcendance — -2 coût en énergie sur tout \"sort\", pas seulement les sorts offensifs." },
-  assassin = { transcendance = "Transcendance — Double la quantité de tout statut qu'il applique." },
-}
 
 Heroes.defs = {
   { id = "guerrier", class_id = "guerrier", name = "Guerrier", icon = "\u{2694}\u{FE0F}", label = "GUE", max_hp = 18 },
@@ -44,6 +33,35 @@ Heroes.class_label = {
   paladin = "PAL",
   mage = "MAG",
   assassin = "ASS",
+}
+
+-- Nom complet par classe (2026-08-20, demande explicite -- indiquer sur
+-- chaque carte quel aventurier l'a fournie) : une seule classe = un seul
+-- héros, donc `def.class_id` d'une carte suffit à retrouver ce nom, pas
+-- besoin d'un champ dédié sur chaque carte dans src/data/cards.lua.
+Heroes.class_name = {
+  guerrier = "Guerrier",
+  paladin = "Paladin",
+  mage = "Mage",
+  assassin = "Assassin",
+}
+
+-- Description de classe (2026-08-24, demande explicite -- affichée en tête de
+-- l'infobulle d'un aventurier au survol, voir tooltip_lines dans view.lua) :
+-- coquilles corrigées au passage sur l'Assassin ("Devint" -> "Devient",
+-- "agit" -> "agi") -- sens inchangé. Un "\n" est un retour à la ligne FORCÉ
+-- (LÖVE respecte les "\n" dans Font:getWrap/love.graphics.printf en plus du
+-- retour automatique) -- une seule entrée de tableau `lines` par description,
+-- pas une par ligne visuelle.
+Heroes.class_description = {
+  guerrier = "Un combattant qui sait faire des dégâts",
+  paladin = "Un défenseur qui aime protéger ses alliés",
+  mage = "A besoin de Mana pour lancer de puissants sorts",
+  assassin = "Gagne de la Discrétion en laissant ses alliés agir :\n"
+    .. "- +1 Discrétion quand un autre allié agit\n"
+    .. "- +5 s'il passe son tour sans agir.\n"
+    .. "Devient Camouflé avec 10 de Discrétion\n"
+    .. "Discrétion revient à 0 après avoir agi",
 }
 
 return Heroes

@@ -29,9 +29,14 @@ local function draw_sword(cx, cy, r, color)
   love.graphics.setLineWidth(1)
 end
 
---- Bouclier : silhouette à 5 points (plat en haut, pointe en bas).
-local function draw_shield(cx, cy, r, color)
-  set(color)
+--- Bouclier : silhouette à 5 points (plat en haut, pointe en bas). `alpha`
+-- (optionnel, 2026-08-27, demande explicite -- le VFX de gain de Défense doit
+-- réutiliser cette MÊME icône plutôt qu'une silhouette dupliquée, voir
+-- draw_shield_fx dans view.lua) : sans ça, le fondu entrant/sortant du VFX
+-- serait impossible (alpha figé à 1 sinon) -- multiplie aussi le liseré blanc
+-- de reflet, pour qu'il s'estompe avec le reste plutôt que de rester fixe.
+local function draw_shield(cx, cy, r, color, alpha)
+  set(color, alpha)
   local hw, hh = r * 0.65, r * 0.85
   love.graphics.polygon("fill",
     cx - hw, cy - hh,
@@ -40,7 +45,7 @@ local function draw_shield(cx, cy, r, color)
     cx, cy + hh,
     cx - hw, cy - hh * 0.15
   )
-  set({ 1, 1, 1 }, 0.18)
+  set({ 1, 1, 1 }, 0.18 * (alpha or 1))
   love.graphics.polygon("line",
     cx - hw, cy - hh,
     cx + hw, cy - hh,
@@ -219,7 +224,7 @@ end
 
 -- ---------- statuts (badges) ----------
 
-local function draw_status_defense(cx, cy, r, color) draw_shield(cx, cy, r, color) end
+local function draw_status_defense(cx, cy, r, color, alpha) draw_shield(cx, cy, r, color, alpha) end
 
 local function draw_status_esquive(cx, cy, r, color)
   set(color)
@@ -264,6 +269,22 @@ local function draw_status_vulnerabilite(cx, cy, r, color)
   love.graphics.setLineWidth(1)
 end
 
+--- Flamme simple (2026-08-24, sensibilité au feu de l'Homme Arbre) : repli
+-- vectoriel si Sprites.status("fireweak") (icônes/keywords/fireball.png) est
+-- absent, même principe que les autres statuts ci-dessus.
+local function draw_status_fireweak(cx, cy, r, color)
+  set(color)
+  love.graphics.polygon("fill",
+    cx, cy - r * 0.85,
+    cx + r * 0.5, cy + r * 0.1,
+    cx + r * 0.15, cy - r * 0.05,
+    cx + r * 0.3, cy + r * 0.55,
+    cx, cy + r * 0.8,
+    cx - r * 0.3, cy + r * 0.55,
+    cx - r * 0.15, cy - r * 0.05,
+    cx - r * 0.5, cy + r * 0.1)
+end
+
 local DRAW_BY_STATUS = {
   defense = draw_status_defense,
   esquive = draw_status_esquive,
@@ -272,20 +293,25 @@ local DRAW_BY_STATUS = {
   saignements = draw_status_saignements,
   incapacite = draw_status_incapacite,
   vulnerabilite = draw_status_vulnerabilite,
+  fireweak = draw_status_fireweak,
 }
 
 --- Dessine l'icône d'un statut (clé Lua, ex. "defense", "esquive"...) centrée
--- en (cx, cy). Retourne false si non reconnu.
-function Icons.draw_status(status_key, cx, cy, r, color)
+-- en (cx, cy). Retourne false si non reconnu. `alpha` (optionnel, 2026-08-27,
+-- voir draw_shield ci-dessus) : forwardé aux deux chemins (sprite réel ET
+-- repli vectoriel) pour que les appelants qui ont besoin d'un fondu (ex.
+-- draw_shield_fx dans view.lua) n'aient pas à se soucier de savoir laquelle
+-- des deux voies "defense" emprunte réellement.
+function Icons.draw_status(status_key, cx, cy, r, color, alpha)
   local img = Sprites.status(status_key)
   if img then
-    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.setColor(1, 1, 1, alpha or 1)
     Sprites.draw_centered(img, cx, cy, r)
     return true
   end
   local fn = DRAW_BY_STATUS[status_key]
   if not fn then return false end
-  fn(cx, cy, r, color)
+  fn(cx, cy, r, color, alpha)
   love.graphics.setColor(1, 1, 1, 1)
   return true
 end

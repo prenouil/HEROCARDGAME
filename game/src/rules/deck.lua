@@ -8,10 +8,17 @@ local Deck = {}
 
 Deck.HAND_SIZE = 5
 
--- Run Infini : deck de départ à 10 cartes (3 Coup direct, 3 Encaisser, 1 carte
--- Départ par classe).
+-- Run Infini : deck de départ à 12 cartes (2026-08-11, plus de cartes
+-- génériques -- les 3 cartes "depart" de chaque classe, 1 exemplaire chacune :
+-- son "Coup direct", son "Encaisser", et sa carte "depart" propre). Guerrier :
+-- "coup-taille" (pas "coup-estoc", devenu "avance", 2026-08-24 -- voir
+-- cards.lua). Mage : "flameche"/"barriere" (renommées, pas
+-- "coup-direct-mage"/"encaisser-mage").
 Deck.STARTING_DECK_CODES = {
-  { "coup-direct", 3 }, { "encaisser", 3 }, { "coup-estoc", 1 }, { "rempart", 1 }, { "missile-magique", 1 }, { "strategie", 1 },
+  { "coup-direct-guerrier", 1 }, { "encaisser-guerrier", 1 }, { "coup-taille", 1 },
+  { "coup-direct-paladin", 1 }, { "encaisser-paladin", 1 }, { "rempart", 1 },
+  { "flameche", 1 }, { "barriere", 1 }, { "missile-magique", 1 },
+  { "coup-direct-assassin", 1 }, { "encaisser-assassin", 1 }, { "strategie", 1 },
 }
 
 -- `rng` (2026-08-10, demande explicite -- ordre du deck reproductible à l'identique
@@ -44,12 +51,22 @@ end
 -- cartes à défausser. Retourne la liste des uids piochés, dans l'ordre.
 function Deck.draw_cards(state, n)
   local drawn = {}
+  local reshuffled_at = nil
   for _ = 1, n do
     if #state.hand >= Deck.HAND_SIZE and n == Deck.HAND_SIZE then break end
     if #state.deck == 0 then
       if #state.discard == 0 then break end
       state.deck = Deck.shuffle(state.discard, state.rng.deck)
       state.discard = {}
+      -- `#drawn` cartes déjà piochées AVANT ce remélange (2026-08-21, demande
+      -- explicite) : la UI (Controller:consume_drawn_animation) en a besoin pour
+      -- couper l'animation de vol en 2 -- avant/après -- avec le remélange
+      -- défausse -> pioche joué entre les deux, plutôt qu'un seul vol qui
+      -- ferait apparaître les cartes d'après-remélange comme si elles
+      -- venaient d'un deck resté plein. Un seul point de coupure retenu (le
+      -- premier) : avec 12-24 cartes au total dans ce jeu, un deuxième
+      -- remélange au sein d'une même pioche n'arrive jamais en pratique.
+      reshuffled_at = reshuffled_at or #drawn
       Combat.log(state, "Le deck est vide : la défausse est remélangée.", "sys")
     end
     local c = table.remove(state.deck) -- .pop() : la fin du tableau est le dessus du deck
@@ -61,16 +78,19 @@ function Deck.draw_cards(state, n)
   -- valeur de retour -- la UI (controller.lua) lit ce champ après coup pour
   -- savoir quoi animer, quel que soit le chemin d'appel.
   state.last_drawn_uids = drawn
+  state.last_draw_reshuffled_at = reshuffled_at
   return drawn
 end
 
 function Deck.fill_hand(state)
   local drawn = {}
+  local reshuffled_at = nil
   while #state.hand < Deck.HAND_SIZE do
     if #state.deck == 0 then
       if #state.discard == 0 then break end
       state.deck = Deck.shuffle(state.discard, state.rng.deck)
       state.discard = {}
+      reshuffled_at = reshuffled_at or #drawn -- voir le commentaire équivalent dans Deck.draw_cards
       Combat.log(state, "Le deck est vide : la défausse est remélangée.", "sys")
     end
     local c = table.remove(state.deck)
@@ -78,6 +98,7 @@ function Deck.fill_hand(state)
     drawn[#drawn + 1] = c.uid
   end
   state.last_drawn_uids = drawn
+  state.last_draw_reshuffled_at = reshuffled_at
   return drawn
 end
 

@@ -61,6 +61,44 @@ BUILDERS.shield = function()
   })
 end
 
+-- "woosh" -- le gros chiffre d'énergie qui chute sur sa pastille en début de
+-- tour (2026-08-21, demande explicite) : bruit sous une enveloppe en cloche
+-- (monte puis retombe, façon d'air qui passe -- pas de filtre passe-bande
+-- disponible dans ce synthé minimaliste, l'enveloppe fait l'essentiel du
+-- travail) doublé d'une tonalité carrée qui descend en hauteur, comme un
+-- objet qui tombe.
+BUILDERS.woosh = function()
+  return Chiptune.render(0.45, function(t)
+    local p = math.min(1, t / 0.45)
+    local swell = math.sin(p * math.pi) -- 0 -> 1 -> 0
+    local tone_freq = 700 - 500 * p
+    return (Chiptune.noise() * 0.7 + Chiptune.square(tone_freq, t, 0.35) * 0.3) * swell
+  end, 0.4)
+end
+
+-- "flup" -- déplacement de cartes entre piles (2026-08-21, demande explicite --
+-- pioche -> main, main -> défausse, défausse -> pioche) : bruit filtré avec un
+-- souffle triangle grave en dessous. Volume et durée relevés (2026-08-21,
+-- signalé inaudible -- 0.4/0.14s à l'origine, noyé notamment par le son de
+-- dégâts qui joue quasi simultanément quand une carte jouée part en défausse,
+-- voir Controller:select_card -- react_to_diff puis maybe_animate_played_discard
+-- dans la foulée) : 0.65/0.20s désormais, volume comparable à "plarf" (0.55)
+-- plutôt qu'en retrait, pour percer même superposé à un autre son.
+BUILDERS.flup = function()
+  return Chiptune.render(0.20, function(t)
+    return (Chiptune.noise() * 0.55 + Chiptune.triangle(180, t) * 0.45) * Chiptune.decay(t, 0.20, 1.4)
+  end, 0.65)
+end
+
+-- "hop" -- un aventurier prêt à jouer en début de tour (2026-08-21, demande
+-- explicite) : blip carré très court, aigu, énergique -- un par héros, au
+-- rythme du saut échelonné (voir Controller:play_hero_ready_hops).
+BUILDERS.hop = function()
+  return Chiptune.render(0.09, function(t)
+    return Chiptune.square(700, t, 0.4) * Chiptune.decay(t, 0.09, 1.8)
+  end, 0.35)
+end
+
 -- "roar" -- avant qu'un ennemi n'agisse : grondement grave, bruit + trémolo.
 BUILDERS.enemy_telegraph = function()
   return Chiptune.render(0.4, function(t)
@@ -69,17 +107,9 @@ BUILDERS.enemy_telegraph = function()
   end, 0.45)
 end
 
--- "amah" -- concentration : triangle chaud, montée douce, volume bas.
-BUILDERS.concentrate = function()
-  return Chiptune.render(0.3, function(t)
-    local freq = 300 + (420 - 300) * math.min(1, t / 0.3)
-    return Chiptune.triangle(freq, t) * Chiptune.decay(t, 0.3, 0.8)
-  end, 0.35)
-end
-
 -- "essor" -- soin/résurrection au feu de camp (2026-08-10) : glissando
--- triangle montant, plus ample que "concentrate" (celui-ci referme un état
--- de combat entier, pas un simple +1 énergie).
+-- triangle montant, ample et chaud -- referme un état de combat entier,
+-- pas un petit geste ponctuel.
 BUILDERS.heal = function()
   return Chiptune.render(0.42, function(t)
     local freq = 260 + (520 - 260) * math.min(1, t / 0.42)

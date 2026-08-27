@@ -2,5 +2,10 @@
 -- trop petits en playtest (2026-08-08). Un seul facteur, utilisé à la fois pour
 -- la taille de fenêtre (conf.lua) et le love.graphics.scale() qui l'affiche
 -- (main.lua), pour ne jamais désynchroniser la fenêtre réelle de l'espace de
--- coordonnées logique 960x700 sur lequel tout le layout de view.lua est écrit.
-return 1.4
+-- coordonnées logique 960x660 sur lequel tout le layout de view.lua est écrit
+-- (H ramené de 700 à 660 le 2026-08-24, voir view.lua/conf.lua).
+-- Redescendu de 1.4 à 1.15 (demande explicite -- fenêtre jugée trop grande à
+-- l'usage) : les portraits/barres/texte individuels ont depuis été agrandis
+-- directement dans l'espace logique (voir UNIT_H, tailles d'icône dans
+-- view.lua), donc ce facteur global peut redescendre sans redevenir illisible.
+return 1.15

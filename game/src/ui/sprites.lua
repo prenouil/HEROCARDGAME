@@ -60,6 +60,9 @@ local HERO_PATH = {
 -- réutilise l'icône du mot-clé "bouclier" (même symbole, pas de doublon généré) ;
 -- "saignements" (pluriel côté code) pointe vers l'asset "saignement" (singulier,
 -- convention du glossaire).
+-- "fireweak" (2026-08-24, demande explicite -- sensibilité au feu de l'Homme
+-- Arbre) réutilise l'icône du mot-clé "fireball" (même symbole, pas de badge
+-- dédié généré), même principe que "defense" ci-dessus.
 local STATUS_PATH = {
   defense = "icons/keywords/bouclier.png",
   esquive = "icons/status/esquive.png",
@@ -68,6 +71,7 @@ local STATUS_PATH = {
   saignements = "icons/status/saignement.png",
   incapacite = "icons/status/incapacite.png",
   vulnerabilite = "icons/status/vulnerabilite.png",
+  fireweak = "icons/keywords/fireball.png",
 }
 
 function Sprites.hero(class_id)

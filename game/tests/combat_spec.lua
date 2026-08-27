@@ -1,11 +1,15 @@
 local Combat = require("src.rules.combat")
 
-local function make_state()
-  return { heroes = {}, enemies = {}, log = {} }
+-- `energy` (2026-08-11) : réserve globale, pas un champ par héros -- voir
+-- Combat.can_play.
+local function make_state(overrides)
+  local s = { heroes = {}, enemies = {}, log = {}, energy = 0 }
+  for k, v in pairs(overrides or {}) do s[k] = v end
+  return s
 end
 
 local function make_hero(id, overrides)
-  local h = { id = id, name = id, class_id = "guerrier", hp = 20, max_hp = 20, defense = 0, energy = 0 }
+  local h = { id = id, name = id, class_id = "guerrier", hp = 20, max_hp = 20, defense = 0 }
   for k, v in pairs(overrides or {}) do h[k] = v end
   return h
 end
@@ -54,86 +58,115 @@ describe("Combat.deal_damage", function()
     Combat.deal_damage(state, hero, target, 4, "physique", nil)
     assert.equal(17, target.hp) -- 20 - round(4*0.75=3)
   end)
+end)
 
-  it("Transcendance Guerrier : +50% sur une carte 'epee' jouée par le Guerrier", function()
+describe("Combat.damage_multiplier : sensibilité au feu de l'Homme Arbre (2026-08-24)", function()
+  it("une carte taguée 'feu' inflige +50% à l'Homme Arbre", function()
     local state = make_state()
-    local hero = make_hero("h1", { class_id = "guerrier" })
-    local target = make_enemy("e1")
-    local ctx = { card_def = { desc = 'Inflige 4 "epee".' } }
-    Combat.deal_damage(state, hero, target, 4, "physique", ctx)
-    assert.equal(14, target.hp) -- 20 - round(4*1.5=6)
+    local hero = make_hero("h1")
+    local target = make_enemy("boss", { template_id = "homme-arbre", hp = 80, max_hp = 80 })
+    local ctx = { card_def = { cats = { "melee", "degats", "feu" } } }
+    Combat.deal_damage(state, hero, target, 8, "magique", ctx)
+    assert.equal(68, target.hp) -- 80 - round(8*1.5=12)
   end)
 
-  it("pas de bonus Transcendance si le Guerrier joue une carte sans le mot-clé epee", function()
+  it("une carte non-feu n'a aucun bonus contre l'Homme Arbre", function()
     local state = make_state()
-    local hero = make_hero("h1", { class_id = "guerrier" })
-    local target = make_enemy("e1")
-    local ctx = { card_def = { desc = 'Gagne "Esquive" 2.' } }
-    Combat.deal_damage(state, hero, target, 4, "physique", ctx)
-    assert.equal(16, target.hp)
+    local hero = make_hero("h1")
+    local target = make_enemy("boss", { template_id = "homme-arbre", hp = 80, max_hp = 80 })
+    local ctx = { card_def = { cats = { "melee", "degats" } } }
+    Combat.deal_damage(state, hero, target, 8, "physique", ctx)
+    assert.equal(72, target.hp) -- 80 - 8, aucun bonus
   end)
 
-  it("le coup gratuit du Pouvoir de Classe (ctx=nil) ne reçoit pas la Transcendance", function()
+  it("une carte 'feu' n'a aucun bonus contre un ennemi qui n'est pas l'Homme Arbre", function()
     local state = make_state()
-    local hero = make_hero("h1", { class_id = "guerrier" })
-    local target = make_enemy("e1")
-    Combat.deal_damage(state, hero, target, 2, "physique", nil)
-    assert.equal(18, target.hp) -- pas de x1.5, ctx est nil
-  end)
-
-  it("Transcendance Assassin : une carte 'epee' jouée par l'Assassin inflige Incapacité 1 + Vulnérabilité 1", function()
-    local state = make_state()
-    local hero = make_hero("h1", { class_id = "assassin" })
-    local target = make_enemy("e1")
-    local ctx = { card_def = { desc = 'Inflige 6 "epee".' } }
-    Combat.deal_damage(state, hero, target, 6, "physique", ctx)
-    assert.equal(1, target.incapacite)
-    assert.equal(1, target.vulnerabilite)
+    local hero = make_hero("h1")
+    local target = make_enemy("e1", { template_id = "gobelin" })
+    local ctx = { card_def = { cats = { "sort", "feu" } } }
+    Combat.deal_damage(state, hero, target, 8, "magique", ctx)
+    assert.equal(12, target.hp) -- 20 - 8, aucun bonus
   end)
 end)
 
 describe("Combat.grant_defense / grant_heal", function()
-  it("Transcendance Paladin : +50% sur le bouclier d'une carte 'bouclier' jouée par le Paladin", function()
-    local hero = make_hero("h1", { class_id = "paladin" })
+  it("grant_defense ajoute le montant donné, sans aucun modificateur de classe", function()
     local target = make_hero("h1", { defense = 0 })
-    local ctx = { hero = hero, card_def = { desc = 'Gagne 4 "bouclier".' } }
-    local amount = Combat.grant_defense(target, 4, ctx)
-    assert.equal(6, amount)
-    assert.equal(6, target.defense)
-  end)
-
-  it("pas de bonus Paladin si la carte n'a pas le mot-clé bouclier", function()
-    local hero = make_hero("h1", { class_id = "paladin" })
-    local target = make_hero("h1", { defense = 0 })
-    local ctx = { hero = hero, card_def = { desc = 'Gagne "Esquive" 2.' } }
-    local amount = Combat.grant_defense(target, 4, ctx)
+    local amount = Combat.grant_defense(target, 4)
     assert.equal(4, amount)
+    assert.equal(4, target.defense)
   end)
 
   it("le soin ne dépasse jamais max_hp", function()
     local target = make_hero("h1", { hp = 19, max_hp = 20 })
-    Combat.grant_heal(target, 10, nil)
+    Combat.grant_heal(target, 10)
     assert.equal(20, target.hp)
   end)
 end)
 
-describe("Combat.effective_cost / required_cost", function()
-  it("Transcendance Mage : -2 sur tout sort joué par le Mage", function()
-    local hero = make_hero("h1", { class_id = "mage" })
-    local def = { cost = 8, cats = { "sort", "distance", "degats" } }
-    assert.equal(6, Combat.effective_cost(hero, def))
+describe("Combat.apply_status", function()
+  it("ajoute le montant donné au champ de statut, sans aucun modificateur de classe", function()
+    local unit = make_hero("h1", { camoufle = 0 })
+    local applied = Combat.apply_status(unit, "camoufle", 1)
+    assert.equal(1, applied)
+    assert.equal(1, unit.camoufle)
+  end)
+end)
+
+describe("Combat.can_play", function()
+  it("refuse si la réserve d'énergie globale (state.energy) est sous le coût de la carte", function()
+    local state = make_state({ energy = 2 })
+    local hero = make_hero("h1")
+    local pending = { def = { cost = 3, requires_camouflage = false } }
+    assert.is_false(Combat.can_play(state, hero, pending))
   end)
 
-  it("le coût ne descend jamais sous 0", function()
-    local hero = make_hero("h1", { class_id = "mage" })
-    local def = { cost = 1, cats = { "sort" } }
-    assert.equal(0, Combat.effective_cost(hero, def))
+  it("autorise si la réserve globale couvre le coût, peu importe l'énergie -- il n'y en a plus par héros", function()
+    local state = make_state({ energy = 3 })
+    local hero = make_hero("h1")
+    local pending = { def = { cost = 3, requires_camouflage = false } }
+    assert.is_true(Combat.can_play(state, hero, pending))
   end)
 
-  it("se concentrer ne coûte jamais rien, quel que soit le coût imprimé", function()
-    local hero = make_hero("h1", { class_id = "guerrier" })
-    local pending = { mode = "concentrate", def = { cost = 8, cats = {} } }
-    assert.equal(0, Combat.required_cost(hero, pending))
+  it("refuse un héros mort, même avec assez d'énergie", function()
+    local state = make_state({ energy = 3 })
+    local pending = { def = { cost = 0, requires_camouflage = false } }
+    assert.is_false(Combat.can_play(state, make_hero("h1", { hp = 0 }), pending))
+  end)
+
+  it("autorise un héros ayant déjà joué une carte ce tour (2026-08-20, plus de notion de \"a déjà agi\")", function()
+    local state = make_state({ energy = 3 })
+    local hero = make_hero("h1")
+    local pending = { def = { cost = 0, requires_camouflage = false } }
+    assert.is_true(Combat.can_play(state, hero, pending))
+  end)
+
+  it("refuse une carte 'requires_camouflage' si le héros n'est pas Camouflé", function()
+    local state = make_state({ energy = 3 })
+    local hero = make_hero("h1", { camoufle = 0 })
+    local pending = { def = { cost = 0, requires_camouflage = true } }
+    assert.is_false(Combat.can_play(state, hero, pending))
+  end)
+
+  it("refuse une carte 'mana_cost' si la mana du héros (propre au Mage) est insuffisante, même avec assez d'énergie", function()
+    local state = make_state({ energy = 3 })
+    local hero = make_hero("h1", { class_id = "mage", mana = 1 })
+    local pending = { def = { cost = 0, mana_cost = 2 } }
+    assert.is_false(Combat.can_play(state, hero, pending))
+  end)
+
+  it("autorise une carte 'mana_cost' si énergie ET mana couvrent tous les deux le coût", function()
+    local state = make_state({ energy = 3 })
+    local hero = make_hero("h1", { class_id = "mage", mana = 2 })
+    local pending = { def = { cost = 0, mana_cost = 2 } }
+    assert.is_true(Combat.can_play(state, hero, pending))
+  end)
+
+  it("refuse une carte 'mana_cost' pour un héros sans mana (mana == nil, pas le Mage)", function()
+    local state = make_state({ energy = 3 })
+    local hero = make_hero("h1") -- class_id = "guerrier" par défaut, pas de champ mana
+    local pending = { def = { cost = 0, mana_cost = 1 } }
+    assert.is_false(Combat.can_play(state, hero, pending))
   end)
 end)
 
