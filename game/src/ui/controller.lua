@@ -135,6 +135,17 @@ local TEAM_HERO_MOVE_DURATION_SLOW = 0.9
 -- Annuler/changement de focus, qui gardent un envol groupé instantané).
 local TEAM_CARD_GATHER_DURATION = 0.7
 local TEAM_CARD_GATHER_STAGGER = 0.12
+-- "J'adore le son des cartes qui vont dans le deck. Je voudrais le même
+-- quand elles arrivent à l'écran et quand elles en partent" (2026-08-30),
+-- puis corrigé aussitôt après ("c'était une erreur... pas 6 fois, 2-3 fois,
+-- sinon ça surcharge -- par contre c'est très bien pour le deck") : contraste
+-- volontaire avec le rassemblement vers le deck (1 "flup" PAR carte, décalé
+-- -- voir TEAM_CARD_GATHER_STAGGER, gardé tel quel) -- ici les 6 cartes
+-- s'envolent toutes EN MÊME TEMPS (aucun décalage visuel), donc seulement
+-- TEAM_CARD_BURST_COUNT flups en rafale suffisent à évoquer le mouvement,
+-- sans le surcharger -- voir Controller:team_select_play_card_burst.
+local TEAM_CARD_BURST_COUNT = 3
+local TEAM_CARD_BURST_STAGGER = 0.07
 
 -- VFX de lisibilité (2026-08-09, party "amélioration des visuels") : tous
 -- dérivés du même mécanisme de diff avant/après déjà en place pour la
@@ -360,7 +371,11 @@ function Controller:team_select_fly_out_current(gather_target)
         a.delay = (i - 1) * TEAM_CARD_GATHER_STAGGER
         -- 1 "flup" PAR carte, espacé du même délai que son vol (2026-08-30,
         -- demande explicite -- même idiome que Controller:animate_draw pour
-        -- la pioche en rafale) : jamais un seul son pour tout le lot.
+        -- la pioche en rafale) : jamais un seul son pour tout le lot. Cas
+        -- SPÉCIAL au rassemblement vers le deck seulement -- voir le
+        -- commentaire sur TEAM_CARD_BURST_COUNT : les 6 cartes s'envolent ici
+        -- réellement l'une après l'autre, contrairement au bloc `else`
+        -- ci-dessous.
         self:schedule_sfx("flup", a.delay)
       else
         a.to = View.team_select_offscreen_rect(a.to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
@@ -369,6 +384,24 @@ function Controller:team_select_fly_out_current(gather_target)
       end
       a.elapsed = 0
     end
+  end
+  -- Rafale courte, pas 1 son par carte (2026-08-30, "c'était une erreur...
+  -- pas 6 fois, 2-3 fois, sinon ça surcharge") : les 6 cartes s'envolent
+  -- TOUTES EN MÊME TEMPS ici (aucun a.delay), un flup par carte sonnait donc
+  -- comme 6 échos simultanés plutôt qu'un mouvement décalé -- jamais pour le
+  -- rassemblement (gather_target), qui garde son flup par carte ci-dessus,
+  -- explicitement approuvé tel quel.
+  if i > 0 and not gather_target then self:team_select_play_card_burst() end
+end
+
+--- Rafale courte de "flup" (2026-08-30, voir team_select_fly_out_current/
+-- team_select_spawn_cards) : TEAM_CARD_BURST_COUNT sons rapprochés, jamais
+-- un par carte -- pour toute volée de cartes qui bouge TOUTE ENSEMBLE (pas
+-- de décalage visuel entre elles), contrairement au rassemblement vers le
+-- deck qui a son propre rythme carte par carte.
+function Controller:team_select_play_card_burst()
+  for j = 1, TEAM_CARD_BURST_COUNT do
+    self:schedule_sfx("flup", (j - 1) * TEAM_CARD_BURST_STAGGER)
   end
 end
 
@@ -393,6 +426,9 @@ function Controller:team_select_spawn_cards(id)
       duration = TEAM_CARD_FLY_DURATION, mode = "in",
     }
   end
+  -- Rafale courte, pas 1 flup par carte (2026-08-30 -- voir le commentaire
+  -- sur TEAM_CARD_BURST_COUNT) : les 6 cartes arrivent toutes ensemble.
+  self:team_select_play_card_burst()
 end
 
 --- Clique un aventurier (disponible OU déjà dans l'équipe -- "il peut être
@@ -428,7 +464,9 @@ end
 function Controller:team_select_cancel()
   local ts = self.team_select
   if not ts or not ts.focused_id then return end
-  Sfx.play("flup")
+  -- Pas de "flup" générique ici (2026-08-30, retiré -- team_select_fly_out_current
+  -- en joue désormais un PAR carte, décalé, ça suffit largement, un de plus
+  -- ferait doublon/surcharge).
   self:team_select_fly_out_current()
   local id = ts.focused_id
   self:team_select_move_hero(id, View.team_select_spotlight_rect, self:team_select_home_rect(id))
@@ -466,7 +504,11 @@ function Controller:team_select_confirm()
     if index_in_available then table.remove(ts.available_ids, index_in_available) end
     adding = true
   end
-  Sfx.play(adding and "upgrade" or "flup")
+  -- "flup" retiré ici pour le retrait (2026-08-30) : team_select_fly_out_current
+  -- (appelée juste en dessous) en joue désormais un PAR carte qui s'envole,
+  -- suffisant à lui seul -- garde "upgrade" pour l'ajout (fanfare distincte
+  -- de tout son de carte, propre au fait de rejoindre l'équipe).
+  if adding then Sfx.play("upgrade") end
   self:team_select_move_hero(id, View.team_select_spotlight_rect, self:team_select_home_rect(id),
     adding and TEAM_HERO_MOVE_DURATION_SLOW or nil)
   if adding then

@@ -68,8 +68,15 @@ local function post_combat_click(controller, x, y)
   if controller.screen == "forge" then
     local f = controller.forge
     if f and #f.choices > 0 then
+      -- Les 2 cartes de la colonne (base ET améliorée, 2026-08-30, voir
+      -- View.forge_upgraded_card_rects) sélectionnent le même choix --
+      -- cliquer l'une ou l'autre revient au même, jamais seulement la base.
       local rects = View.forge_card_rects(controller)
       for i, r in ipairs(rects) do
+        if View.point_in(r, x, y) then controller:choose_forge_card(i); return true end
+      end
+      local up_rects = View.forge_upgraded_card_rects(controller)
+      for i, r in ipairs(up_rects) do
         if View.point_in(r, x, y) then controller:choose_forge_card(i); return true end
       end
     elseif f and View.point_in(View.forge_skip_button, x, y) then
@@ -299,6 +306,8 @@ local function post_combat_hovering(controller, x, y)
     if #f.choices == 0 then return View.point_in(View.forge_skip_button, x, y) end
     local rects = View.forge_card_rects(controller)
     for _, r in ipairs(rects) do if View.point_in(r, x, y) then return true end end
+    local up_rects = View.forge_upgraded_card_rects(controller)
+    for _, r in ipairs(up_rects) do if View.point_in(r, x, y) then return true end end
     return false
   end
   if controller.screen == "temple" then

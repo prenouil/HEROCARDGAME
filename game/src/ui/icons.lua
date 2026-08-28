@@ -129,11 +129,17 @@ local DRAW_BY_CLASS = {
 --- Dessine l'icône de classe centrée en (cx, cy) avec un rayon approximatif r.
 -- Retourne false si class_id n'est pas reconnu (rien dessiné, l'appelant
 -- garde son repli texte).
-function Icons.draw_class(class_id, cx, cy, r, color)
+-- `alpha` (optionnel, 2026-08-30, Temple -- fondu des aventuriers non
+-- choisis, voir draw_temple) : par défaut 1 -- sans lui, un portrait réel
+-- (les 6 héros en ont désormais un, voir game/assets/characters/heroes/)
+-- s'affichait TOUJOURS en pleine opacité quel que soit le fondu demandé par
+-- l'appelant, puisque cette branche fixait la couleur en dur avant de
+-- dessiner le sprite.
+function Icons.draw_class(class_id, cx, cy, r, color, alpha)
   if r >= SPRITE_MIN_RADIUS then
     local img = Sprites.hero(class_id)
     if img then
-      love.graphics.setColor(1, 1, 1, 1)
+      love.graphics.setColor(1, 1, 1, alpha or 1)
       Sprites.draw_centered(img, cx, cy, r)
       return true
     end
@@ -402,16 +408,20 @@ local function draw_status_temple_blessing(cx, cy, r, color, alpha)
     cx + r * 0.32, cy - r * 0.05, cx + r * 0.5, cy + r * 0.75)
 end
 
---- Silhouette de statue "maudite" (2026-08-29) : pareil, mais anguleuse avec
--- 2 pointes façon cornes/gargouille -- distincte au premier coup d'œil de la
--- version bénie ci-dessus même en silhouette pure, sans dépendre de la couleur.
+--- Silhouette de statue "maudite" (2026-08-29, corrigée 2026-08-30 -- bug
+-- signalé : l'ancienne silhouette avait sa seule pointe EN HAUT, ce qui se
+-- lisait comme une flèche vers le haut malgré les "cornes" -- donnait une
+-- impression positive alors que c'est une malédiction). Couronne d'épines à
+-- 3 pointes en haut, resserrée vers UNE SEULE pointe en bas -- silhouette
+-- qui "tombe"/"transperce vers le bas", sans ambiguïté avec un symbole
+-- positif, distincte au premier coup d'œil du dôme arrondi de la bénédiction
+-- même en silhouette pure, sans dépendre de la couleur.
 local function draw_status_temple_curse(cx, cy, r, color, alpha)
   set(color, alpha)
   love.graphics.polygon("fill",
-    cx, cy - r * 0.85,
-    cx - r * 0.5, cy - r * 0.15, cx - r * 0.25, cy - r * 0.15,
-    cx - r * 0.45, cy + r * 0.8, cx + r * 0.45, cy + r * 0.8,
-    cx + r * 0.25, cy - r * 0.15, cx + r * 0.5, cy - r * 0.15)
+    cx - r * 0.55, cy - r * 0.75, cx - r * 0.2, cy - r * 0.4, cx, cy - r * 0.7,
+    cx + r * 0.2, cy - r * 0.4, cx + r * 0.55, cy - r * 0.75,
+    cx + r * 0.35, cy + r * 0.15, cx, cy + r * 0.85, cx - r * 0.35, cy + r * 0.15)
 end
 
 --- Étincelle d'Inspiration (Barde, 2026-08-29) : losange à 4 pointes (2 axes

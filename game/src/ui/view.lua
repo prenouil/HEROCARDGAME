@@ -269,19 +269,36 @@ View.back_button = { x = W / 2 - 90, y = H / 2 + 40, w = 180, h = 40, label = "R
 
 -- Écran "La Forge" (2026-08-28, demande explicite -- remplace l'ancien
 -- panneau "Forge" de feuDeCamp, voir Controller:enter_forge_screen) : jusqu'à
--- Forge.CHOICE_COUNT (4) cartes en rangée, chacune déjà affichée dans sa
--- version améliorée (voir draw_forge) -- le nombre de rects dépend du nombre
--- RÉEL de choix proposés (0 à 4, moins si le deck n'a pas assez de cartes
--- améliorables), donc calculé à la demande depuis controller.forge plutôt
--- qu'une position fixe.
-local FORGE_CARD_Y = 260
+-- Forge.CHOICE_COUNT (4) cartes en rangée -- le nombre de rects dépend du
+-- nombre RÉEL de choix proposés (0 à 4, moins si le deck n'a pas assez de
+-- cartes améliorables), donc calculé à la demande depuis controller.forge
+-- plutôt qu'une position fixe. Chaque colonne montre sa carte de BASE (ces
+-- rects-ci) PUIS, en dessous d'une flèche, sa version améliorée (voir
+-- View.forge_upgraded_card_rects -- 2026-08-30, demande explicite : "chacune
+-- des 4 cartes au choix doit présenter sa version améliorée, reliée par une
+-- flèche" -- avant, seule la version améliorée était montrée, empilement
+-- VERTICAL plutôt qu'un 2ᵉ jeu de 4 cartes à côté, qui ne tiendrait pas sur
+-- la largeur de l'écran, voir l'historique de ce commentaire).
+local FORGE_CARD_Y = 170
+local FORGE_ARROW_H = 40
 local FORGE_CARD_GAP = 30
 function View.forge_card_rects(controller)
   local f = controller.forge
   if not f then return {} end
   return centered_row(#f.choices, CARD_W, CARD_H, FORGE_CARD_Y, FORGE_CARD_GAP)
 end
-View.forge_skip_button = { x = W / 2 - 100, y = FORGE_CARD_Y + CARD_H + 40, w = 200, h = 44, label = "Passer" }
+
+--- Rects de la version AMÉLIORÉE, même colonnes que View.forge_card_rects,
+-- juste en dessous (2026-08-30, voir son commentaire ci-dessus).
+function View.forge_upgraded_card_rects(controller)
+  local f = controller.forge
+  if not f then return {} end
+  return centered_row(#f.choices, CARD_W, CARD_H, FORGE_CARD_Y + CARD_H + FORGE_ARROW_H, FORGE_CARD_GAP)
+end
+
+View.forge_skip_button = {
+  x = W / 2 - 100, y = FORGE_CARD_Y + CARD_H + FORGE_ARROW_H + CARD_H + 30, w = 200, h = 44, label = "Passer",
+}
 
 -- Écran "Le Temple" (2026-08-29, refonte complète -- demande explicite) :
 -- jusqu'à 3 statues d'effet EN LIGNE au-dessus des 4 aventuriers (toujours
@@ -456,8 +473,10 @@ View.point_in = point_in
 
 local function set(c, a) love.graphics.setColor(c[1], c[2], c[3], a or 1) end
 
-local function panel(x, y, w, h, color)
-  set(color or Theme.panel)
+-- `alpha` (optionnel, 2026-08-30, Temple -- fondu des aventuriers non
+-- choisis) : par défaut 1, tous les appels existants restent inchangés.
+local function panel(x, y, w, h, color, alpha)
+  set(color or Theme.panel, alpha)
   love.graphics.rectangle("fill", x, y, w, h, 10, 10)
 end
 
@@ -519,8 +538,9 @@ end
 
 --- Icône de classe (épée/bouclier/orbe/dague, voir src/ui/icons.lua) centrée
 -- dans la zone (x, y, w, size) ; repli sur icon_text si la classe est inconnue.
-local function draw_class_icon(class_id, icon, label, x, y, w, size, color)
-  local drawn = Icons.draw_class(class_id, x + w / 2, y + size / 2, size / 2, color or Theme.text)
+-- `alpha` (optionnel, 2026-08-30 -- voir Icons.draw_class) : par défaut 1.
+local function draw_class_icon(class_id, icon, label, x, y, w, size, color, alpha)
+  local drawn = Icons.draw_class(class_id, x + w / 2, y + size / 2, size / 2, color or Theme.text, alpha)
   if not drawn then icon_text(icon, label, x, y, w, size, color) end
 end
 
@@ -2262,6 +2282,20 @@ end
 -- forge_upgrade_anim), celle choisie reste affichée seule, sans déplacement
 -- (contrairement à l'ancien panneau qui recentrait la carte choisie -- plus
 -- la place pour ça à 4 cartes).
+--- Flèche simple pointant vers le bas (2026-08-30, Forge -- "chacune des 4
+-- cartes au choix doit présenter sa version améliorée, reliée par une
+-- flèche") : relie la carte de base à sa version améliorée juste en dessous,
+-- silhouette neutre (ni bonus ni malus, contrairement à Icons.draw_status_
+-- bonus/malus) -- une amélioration n'est ni "positive" ni "négative" en soi
+-- ici, juste "ce que cette carte va devenir".
+local function draw_forge_arrow(cx, cy, alpha)
+  set(Theme.accent, alpha)
+  love.graphics.setLineWidth(3)
+  love.graphics.line(cx, cy - 12, cx, cy + 6)
+  love.graphics.polygon("fill", cx - 8, cy, cx + 8, cy, cx, cy + 14)
+  love.graphics.setLineWidth(1)
+end
+
 local function draw_forge(controller)
   local f = controller.forge
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
@@ -2276,18 +2310,39 @@ local function draw_forge(controller)
   end
 
   text("Choisis une carte à améliorer.", 0, 92, W, 12, Theme.muted)
-  local rects = View.forge_card_rects(controller)
+  local base_rects = View.forge_card_rects(controller)
+  local up_rects = View.forge_upgraded_card_rects(controller)
   local anim = controller.forge_upgrade_anim
   for i, instance in ipairs(f.choices) do
-    local r = rects[i]
+    local br, ur = base_rects[i], up_rects[i]
     local preview_def = forge_preview_def(instance.def)
     if anim and anim.chosen_index ~= i then
+      -- Choix déjà fait, mais PAS celui-ci (2026-08-30, étendu aux 2 cartes
+      -- de la colonne -- avant, seule la version améliorée existait ici) :
+      -- base ET améliorée s'effacent ENSEMBLE, même fondu.
       local p = math.min(1, anim.t / (controller.forge_upgrade_anim_duration or 1))
       local alpha = 1 - p
-      if alpha > 0 then draw_faded_card(preview_def, r.x, r.y, alpha, Theme.text, true) end
+      if alpha > 0 then
+        draw_faded_card(instance.def, br.x, br.y, alpha, Theme.muted, false)
+        draw_forge_arrow(br.x + CARD_W / 2, br.y + CARD_H + FORGE_ARROW_H / 2, alpha)
+        draw_faded_card(preview_def, ur.x, ur.y, alpha, Theme.text, true)
+      end
+    elseif anim then
+      -- La colonne CHOISIE (2026-08-30) : la comparaison n'a plus lieu d'être
+      -- une fois le choix fait -- seul le résultat final reste affiché, comme
+      -- avant ce changement (single card, pas de flèche/base à montrer).
+      love.graphics.push()
+      love.graphics.translate(ur.x, ur.y)
+      draw_card_face(preview_def, CARD_W, CARD_H, preview_def.cost, preview_def.desc, Theme.text, true)
+      love.graphics.pop()
     else
       love.graphics.push()
-      love.graphics.translate(r.x, r.y)
+      love.graphics.translate(br.x, br.y)
+      draw_card_face(instance.def, CARD_W, CARD_H, instance.def.cost, instance.def.desc, Theme.muted, false)
+      love.graphics.pop()
+      draw_forge_arrow(br.x + CARD_W / 2, br.y + CARD_H + FORGE_ARROW_H / 2, 1)
+      love.graphics.push()
+      love.graphics.translate(ur.x, ur.y)
       draw_card_face(preview_def, CARD_W, CARD_H, preview_def.cost, preview_def.desc, Theme.text, true)
       love.graphics.pop()
     end
@@ -2357,21 +2412,74 @@ local function draw_temple(controller)
     local eligible = false
     for _, e in ipairs(t.eligible) do if e.id == h.id then eligible = true end end
     local selected = t.chosen_hero_id == h.id
-    panel(r.x, r.y, r.w, r.h, eligible and Theme.panel_light or Theme.panel)
-    set(selected and Theme.accent or (eligible and Theme.accent or Theme.muted))
-    love.graphics.setLineWidth(selected and 4 or 2)
-    love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
-    love.graphics.setLineWidth(1)
-    local portrait_size = 70
-    draw_class_icon(h.class_id, h.icon, h.label,
-      r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size,
-      eligible and Theme.text or Theme.muted)
-    local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
-    name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
-    if h.hp <= 0 then
-      text("Mort", r.x, r.y + 112, r.w, 11, Theme.muted)
-    elseif not eligible then
-      text(t.type == "blessing" and "Déjà béni" or "Déjà maudit", r.x, r.y + 112, r.w, 11, Theme.muted)
+    -- Aventuriers NON choisis s'effacent aussi (2026-08-30, demande explicite
+    -- -- avant, seules les statues non choisies s'effaçaient) : même fondu
+    -- que les statues, sur la même durée -- l'aventurier choisi, lui, reste
+    -- pleinement visible (c'est lui qui reçoit l'effet).
+    local hero_alpha = 1
+    if anim and t.chosen_hero_id ~= h.id then
+      hero_alpha = 1 - math.min(1, anim.t / (controller.temple_choice_anim_duration or 1))
+    end
+    if hero_alpha > 0 then
+      panel(r.x, r.y, r.w, r.h, eligible and Theme.panel_light or Theme.panel, hero_alpha)
+      set(selected and Theme.accent or (eligible and Theme.accent or Theme.muted), hero_alpha)
+      love.graphics.setLineWidth(selected and 4 or 2)
+      love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
+      love.graphics.setLineWidth(1)
+      local portrait_size = 70
+      draw_class_icon(h.class_id, h.icon, h.label,
+        r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size,
+        eligible and Theme.text or Theme.muted, hero_alpha)
+      local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
+      name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+      if h.hp <= 0 then
+        text("Mort", r.x, r.y + 112, r.w, 11, Theme.muted)
+      elseif not eligible then
+        text(t.type == "blessing" and "Déjà béni" or "Déjà maudit", r.x, r.y + 112, r.w, 11, Theme.muted)
+      end
+    end
+  end
+
+  -- Fusion (2026-08-30, demande explicite -- "les 2 choix s'alignent puis
+  -- fusionnent, pour montrer que l'aventurier a reçu la bénédiction/
+  -- malédiction") : une COPIE de l'icône de l'effet choisi voyage de sa
+  -- statue jusqu'au portrait de l'aventurier choisi, en rétrécissant, PUIS
+  -- une brève lueur de la couleur de l'effet marque l'"impact" une fois
+  -- arrivée -- la statue/le panneau d'origine restent statiques et lisibles
+  -- (on garde "quel effet a été choisi" affiché), seule cette copie bouge.
+  if anim then
+    local chosen_effect = t.choices[anim.chosen_index]
+    local statue_r = effect_rects[anim.chosen_index]
+    local hero_r = hero_rects[t.chosen_hero_id]
+    if chosen_effect and statue_r and hero_r then
+      local duration = controller.temple_choice_anim_duration or 1
+      local p = math.min(1, anim.t / duration)
+      local color = TEMPLE_STATUE_COLORS[chosen_effect.color] or Theme.accent
+      if p < 1 then
+        local ease = p * p -- accélère vers la fusion (easeInQuad -- "aspiré" par l'aventurier)
+        local from_cx, from_cy = statue_r.x + statue_r.w / 2, statue_r.y + 55
+        local to_cx, to_cy = hero_r.x + hero_r.w / 2, hero_r.y + hero_r.h / 2
+        local cx = from_cx + (to_cx - from_cx) * ease
+        local cy = from_cy + (to_cy - from_cy) * ease
+        local scale = 1 - 0.7 * ease
+        -- Ne commence à s'estomper que sur le dernier tiers du trajet
+        -- (absorption progressive à l'arrivée, pas un simple fondu linéaire
+        -- sur tout le vol).
+        local travel_alpha = p < 0.7 and 1 or (1 - (p - 0.7) / 0.3)
+        Icons.draw_status(icon_key, cx, cy, 38 * math.max(0.1, scale), color, travel_alpha)
+      else
+        -- Lueur d'impact (2026-08-30) : brève, indépendante de la durée
+        -- totale de la pause -- juste de quoi marquer "c'est arrivé", pas
+        -- besoin qu'elle dure tout le temps où "Bonne chance" reste affiché.
+        local GLOW_DURATION = 0.4
+        local glow_t = anim.t - duration
+        if glow_t < GLOW_DURATION then
+          local glow_alpha = 1 - glow_t / GLOW_DURATION
+          local to_cx, to_cy = hero_r.x + hero_r.w / 2, hero_r.y + hero_r.h / 2
+          set(color, glow_alpha * 0.6)
+          love.graphics.circle("fill", to_cx, to_cy, hero_r.w * 0.6 * (1 + 0.3 * (1 - glow_alpha)))
+        end
+      end
     end
   end
 
@@ -2729,6 +2837,23 @@ function View.draw(controller)
           love.graphics.setLineWidth(1)
           set(Theme.energy); love.graphics.circle("fill", 16, 14, 10)
           set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), 6, 7, 20, "center")
+          -- Pastilles mana/Corruption (2026-08-30, bug signalé -- absentes de
+          -- ce bloc, jamais mises à jour depuis leur ajout à draw_card_face :
+          -- une carte du Mage/du Nécromancien proposée au draft n'affichait ni
+          -- son coût en mana ni son plafond de Corruption). Mêmes règles,
+          -- juste repositionnées/agrandies pour cette carte 130x190 (au lieu
+          -- de CARD_W/CARD_H) -- voir le commentaire plus haut sur pourquoi ce
+          -- bloc reste dupliqué plutôt que réutiliser draw_card_face.
+          if def.mana_cost then
+            set(Theme.mana); love.graphics.circle("fill", 38, 14, 9)
+            set(Theme.bg); love.graphics.setFont(Fonts.get(11))
+            love.graphics.printf(tostring(def.mana_cost), 30, 9, 16, "center")
+          end
+          if def.corruption_cost_cap then
+            set(Theme.corruption); love.graphics.ellipse("fill", 46, 14, 20, 10)
+            set(Theme.bg); love.graphics.setFont(Fonts.get(10))
+            love.graphics.printf("X(0-" .. def.corruption_cost_cap .. ")", 26, 9, 40, "center")
+          end
           name_badge(def.name, 4, 26, r.w - 8, 16, palette.border, Theme.bg, 2, 2)
           RichText.draw(def.desc, 4, 50, r.w - 8, 11, Theme.muted)
           -- Même origine que draw_card_face (voir plus haut, y compris le
