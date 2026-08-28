@@ -450,9 +450,9 @@ function Input.mousemoved(controller, x, y)
     local ts = controller.team_select
     if ts then
       local available_id = find_rect(View.team_select_available_rects(controller), x, y)
-      if available_id then controller:set_hover("team_hero", available_id); return end
+      if available_id then controller:team_select_hover(available_id); return end
       local party_id = find_rect(View.team_select_party_rects(controller), x, y)
-      if party_id then controller:set_hover("team_hero", party_id); return end
+      if party_id then controller:team_select_hover(party_id); return end
     end
     controller:set_hover(nil, nil)
     return

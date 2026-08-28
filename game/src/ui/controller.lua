@@ -110,9 +110,31 @@ local TEMPLE_CHOICE_HOLD_PAUSE = 1.0
 -- Écran "Choisis ton équipe" (2026-08-29, demande explicite -- avant chaque
 -- run, choisir 4 des 6 `Heroes.defs`) : durée du vol des cartes du héros mis
 -- en avant, entrant OU sortant (même durée dans les 2 sens, voir
--- Controller:team_select_spawn_cards/team_select_fly_out_current).
+-- Controller:team_select_spawn_cards/team_select_fly_out_current) -- SAUF le
+-- rassemblement vers le deck (voir TEAM_CARD_GATHER_* plus bas), qui a son
+-- propre rythme, plus lent.
 local TEAM_CARD_FLY_DURATION = 0.4
 local TEAM_CARD_SIDES = { "left", "right", "top", "bottom" }
+-- Déplacement d'un PORTRAIT de héros (2026-08-30, demande explicite --
+-- "quand je sélectionne un aventurier, il se déplace sur le côté droit, le
+-- déplacement est visible" / "quand je valide, il se déplace en bas") : plus
+-- lent que le vol des cartes, un personnage a plus de "poids" visuel qu'une carte.
+local TEAM_HERO_MOVE_DURATION = 0.45
+-- "Quand on sélectionne [valide] un aventurier, le mouvement vers le groupe
+-- du bas doit être plus lent... Par contre, pour retirer un aventurier, on
+-- ne change pas la vitesse actuelle" (2026-08-30, demande explicite) : un
+-- 2ᵉ rythme, UNIQUEMENT pour Controller:team_select_confirm quand il AJOUTE
+-- (jamais quand il retire, qui garde TEAM_HERO_MOVE_DURATION ci-dessus,
+-- jamais non plus pour team_select_focus/team_select_cancel).
+local TEAM_HERO_MOVE_DURATION_SLOW = 0.9
+-- "Les cartes doivent rejoindre le deck une par une, plus lentement"
+-- (2026-08-30, demande explicite) : durée de vol individuelle allongée
+-- (0.4 -> 0.7) PLUS un décalage croissant entre chaque carte -- voir
+-- Controller:team_select_fly_out_current(gather_target), déclenché
+-- uniquement par une VALIDATION qui ajoute (jamais un retrait, jamais
+-- Annuler/changement de focus, qui gardent un envol groupé instantané).
+local TEAM_CARD_GATHER_DURATION = 0.7
+local TEAM_CARD_GATHER_STAGGER = 0.12
 
 -- VFX de lisibilité (2026-08-09, party "amélioration des visuels") : tous
 -- dérivés du même mécanisme de diff avant/après déjà en place pour la
@@ -240,8 +262,58 @@ function Controller:enter_team_select(mode)
   for _, def in ipairs(Heroes.defs) do available[#available + 1] = def.id end
   self.team_select = {
     mode = mode, available_ids = available, selected_ids = {},
-    focused_id = nil, card_anims = {},
+    focused_id = nil, card_anims = {}, hero_anims = {},
   }
+end
+
+--- Survol d'un aventurier sur l'écran de choix d'équipe (2026-08-30, demande
+-- explicite -- "il n'y a aucun son dans cette fenêtre, il faut en ajouter à
+-- toutes les actions joueurs : survol, clic, déplacement...") : un seul
+-- "flush" au moment où le survol COMMENCE sur ce héros précis, jamais répété
+-- tant qu'on reste dessus -- Controller:set_hover ignore déjà un appel
+-- répété avec la même cible (voir son commentaire), donc comparer AVANT de
+-- l'appeler est le seul moyen de détecter "ça vient de changer" ici.
+function Controller:team_select_hover(id)
+  if not (self.hover.kind == "team_hero" and self.hover.target == id) then
+    Sfx.play("flush")
+  end
+  self:set_hover("team_hero", id)
+end
+
+--- Position ACTUELLE (rangée disponible OU équipe confirmée -- les 2 listes
+-- sont mutuellement exclusives, voir enter_team_select) du héros `id`
+-- (2026-08-30) -- jamais la position projecteur, qui n'est jamais son
+-- emplacement "de rangement", juste où il se trouve pendant qu'on le regarde.
+function Controller:team_select_home_rect(id)
+  local avail = View.team_select_available_rects(self)
+  if avail[id] then return avail[id] end
+  return View.team_select_party_rects(self)[id]
+end
+
+--- Fait voyager le portrait de `id` de `from` à `to` (2026-08-30, voir
+-- ts.hero_anims/draw_team_select) -- si une anim était déjà en cours pour ce
+-- même héros (reclic rapide avant la fin du mouvement précédent), capture sa
+-- position ACTUELLE interpolée comme nouveau départ plutôt que de sauter
+-- depuis `from` (même principe que team_select_fly_out_current pour les
+-- cartes) : `from` n'est donc qu'un repli pour le cas normal (aucune anim en
+-- cours).
+-- `duration` (optionnel, 2026-08-30 -- "le mouvement vers le groupe du bas
+-- doit être plus lent" à la validation, jamais au retrait) : par défaut
+-- TEAM_HERO_MOVE_DURATION (mise en avant, Annuler, retrait -- vitesse
+-- inchangée dans ces 3 cas), TEAM_HERO_MOVE_DURATION_SLOW passé
+-- explicitement par team_select_confirm uniquement quand il AJOUTE.
+function Controller:team_select_move_hero(id, from, to, duration)
+  local ts = self.team_select
+  for i = #ts.hero_anims, 1, -1 do
+    if ts.hero_anims[i].id == id then
+      local a = ts.hero_anims[i]
+      local p = math.min(1, a.elapsed / a.duration)
+      from = { x = a.from.x + (a.to.x - a.from.x) * p, y = a.from.y + (a.to.y - a.from.y) * p, w = to.w, h = to.h }
+      table.remove(ts.hero_anims, i)
+      break
+    end
+  end
+  ts.hero_anims[#ts.hero_anims + 1] = { id = id, from = from, to = to, elapsed = 0, duration = duration or TEAM_HERO_MOVE_DURATION }
 end
 
 --- Toutes les cartes de `class_id` (Départ + Avancé, 6 au total) -- ordre de
@@ -254,25 +326,48 @@ local function cards_of_class(class_id)
   return out
 end
 
---- Bascule chaque vol "in" encore actif en vol "out" vers un NOUVEAU bord
--- aléatoire (2026-08-29) : point commun à "changer de héros mis en avant",
--- "Annuler" et "Valider" -- capture la position ACTUELLE de la carte (elle
--- peut être interrompue en plein vol d'entrée, pas seulement déjà posée) pour
--- que le vol de sortie reparte de là, jamais un saut brusque vers sa
--- position cible d'abord. Les entrées déjà "out" (un 2ᵉ changement avant la
--- fin de la 1ʳᵉ sortie) restent telles quelles, jamais relancées.
-function Controller:team_select_fly_out_current()
+--- Bascule chaque vol "in" encore actif en vol "out" (2026-08-29) : point
+-- commun à "changer de héros mis en avant", "Annuler" et "Valider" -- capture
+-- la position ACTUELLE de la carte (elle peut être interrompue en plein vol
+-- d'entrée, pas seulement déjà posée) pour que le vol de sortie reparte de
+-- là, jamais un saut brusque vers sa position cible d'abord. Les entrées déjà
+-- "out" (un 2ᵉ changement avant la fin de la 1ʳᵉ sortie) restent telles
+-- quelles, jamais relancées.
+-- `gather_target` (optionnel, 2026-08-30, "Valider" qui AJOUTE un héros à
+-- l'équipe -- "ses cartes se regroupent pour aller rejoindre le deck [...]
+-- une par une, plus lentement") : toutes les cartes convergent vers CE
+-- rectangle unique au lieu de partir chacune vers un bord aléatoire, chacune
+-- DÉCALÉE d'un cran (`a.delay`, lu par Controller:update pour la suppression
+-- et par draw_team_select pour l'interpolation -- même champ/même
+-- convention que `controller.card_anims` en combat, voir animate_draw) et
+-- avec un vol individuel plus lent (TEAM_CARD_GATHER_DURATION). Absent
+-- (Annuler/Retirer/changement de focus) : comportement inchangé, envol
+-- groupé instantané vers un bord aléatoire, vitesse normale.
+function Controller:team_select_fly_out_current(gather_target)
   local ts = self.team_select
   if not ts then return end
+  local i = 0
   for _, a in ipairs(ts.card_anims) do
     if a.mode == "in" then
+      i = i + 1
       local p = math.min(1, a.elapsed / a.duration)
       local cur = { x = a.from.x + (a.to.x - a.from.x) * p, y = a.from.y + (a.to.y - a.from.y) * p, w = a.to.w, h = a.to.h }
       a.mode = "out"
       a.from = cur
-      a.to = View.team_select_offscreen_rect(a.to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
+      if gather_target then
+        a.to = { x = gather_target.x, y = gather_target.y, w = gather_target.w, h = gather_target.h }
+        a.duration = TEAM_CARD_GATHER_DURATION
+        a.delay = (i - 1) * TEAM_CARD_GATHER_STAGGER
+        -- 1 "flup" PAR carte, espacé du même délai que son vol (2026-08-30,
+        -- demande explicite -- même idiome que Controller:animate_draw pour
+        -- la pioche en rafale) : jamais un seul son pour tout le lot.
+        self:schedule_sfx("flup", a.delay)
+      else
+        a.to = View.team_select_offscreen_rect(a.to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
+        a.duration = TEAM_CARD_FLY_DURATION
+        a.delay = 0
+      end
       a.elapsed = 0
-      a.duration = TEAM_CARD_FLY_DURATION
     end
   end
 end
@@ -301,16 +396,25 @@ function Controller:team_select_spawn_cards(id)
 end
 
 --- Clique un aventurier (disponible OU déjà dans l'équipe -- "il peut être
--- resélectionné normalement", 2026-08-29) : le met en avant, fait sortir les
--- cartes actuellement affichées (s'il y en a) puis entrer les siennes --
--- l'entrée est différée d'exactement la durée du vol de sortie via self.seq,
--- pour ne jamais les faire se croiser au même endroit en même temps.
--- Re-cliquer le héros DÉJÀ mis en avant ne fait rien (idempotent).
+-- resélectionné normalement", 2026-08-29) : le met en avant -- SON PORTRAIT
+-- se déplace réellement vers le projecteur à droite (2026-08-30, demande
+-- explicite -- "le déplacement est visible"), l'ancien mis en avant (s'il y
+-- en avait un) repart vers sa rangée d'origine -- fait sortir les cartes
+-- actuellement affichées (s'il y en a) puis entrer les siennes -- l'entrée
+-- est différée d'exactement la durée du vol de sortie via self.seq, pour ne
+-- jamais les faire se croiser au même endroit en même temps. Re-cliquer le
+-- héros DÉJÀ mis en avant ne fait rien (idempotent).
 function Controller:team_select_focus(id)
   local ts = self.team_select
   if not ts or ts.focused_id == id then return end
+  Sfx.play("hop")
   local had_focus = ts.focused_id ~= nil
   self:team_select_fly_out_current()
+  if had_focus then
+    local prev_id = ts.focused_id
+    self:team_select_move_hero(prev_id, View.team_select_spotlight_rect, self:team_select_home_rect(prev_id))
+  end
+  self:team_select_move_hero(id, self:team_select_home_rect(id), View.team_select_spotlight_rect)
   ts.focused_id = id
   local self_ = self
   if had_focus then self.seq:push(function() end, TEAM_CARD_FLY_DURATION) end
@@ -318,11 +422,16 @@ function Controller:team_select_focus(id)
 end
 
 --- "Annuler" (2026-08-29) : referme le focus sans rien changer à l'équipe --
--- fait juste sortir les cartes affichées.
+-- fait sortir les cartes affichées et renvoie le portrait vers sa rangée
+-- d'origine (2026-08-30, "le déplacement est visible", même mouvement que
+-- team_select_focus quand un autre héros prend sa place).
 function Controller:team_select_cancel()
   local ts = self.team_select
   if not ts or not ts.focused_id then return end
+  Sfx.play("flup")
   self:team_select_fly_out_current()
+  local id = ts.focused_id
+  self:team_select_move_hero(id, View.team_select_spotlight_rect, self:team_select_home_rect(id))
   ts.focused_id = nil
 end
 
@@ -331,24 +440,40 @@ end
 -- l'équipe compte déjà 4 -- bouton visuellement désactivé dans ce cas, voir
 -- draw_team_select), ou l'en RETIRE s'il y était déjà ("resélectionné
 -- normalement pour être sorti du groupe" -- le bouton se relabellise
--- "Retirer" côté vue). Referme le focus dans les 2 cas, comme "Annuler".
+-- "Retirer" côté vue). Le portrait se déplace vers sa NOUVELLE rangée
+-- (2026-08-30, "il se déplace en bas") -- calculée APRÈS la bascule de
+-- liste, donc déjà la rangée équipe en cas d'ajout. En cas d'AJOUT
+-- seulement, ses cartes convergent vers le deck (grossi d'un cran, voir
+-- View.team_select_deck_rect) plutôt que de partir vers des bords aléatoires
+-- -- un retrait n'alimente jamais le deck, il se contente de refermer le
+-- focus normalement. Referme le focus dans les 2 cas, comme "Annuler".
 function Controller:team_select_confirm()
   local ts = self.team_select
   if not ts or not ts.focused_id then return end
   local id = ts.focused_id
   local index_in_selected
   for i, sid in ipairs(ts.selected_ids) do if sid == id then index_in_selected = i break end end
+  local adding
   if index_in_selected then
     table.remove(ts.selected_ids, index_in_selected)
     ts.available_ids[#ts.available_ids + 1] = id
+    adding = false
   else
     if #ts.selected_ids >= 4 then return end
     ts.selected_ids[#ts.selected_ids + 1] = id
     local index_in_available
     for i, aid in ipairs(ts.available_ids) do if aid == id then index_in_available = i break end end
     if index_in_available then table.remove(ts.available_ids, index_in_available) end
+    adding = true
   end
-  self:team_select_fly_out_current()
+  Sfx.play(adding and "upgrade" or "flup")
+  self:team_select_move_hero(id, View.team_select_spotlight_rect, self:team_select_home_rect(id),
+    adding and TEAM_HERO_MOVE_DURATION_SLOW or nil)
+  if adding then
+    self:team_select_fly_out_current(View.team_select_deck_rect(#ts.selected_ids))
+  else
+    self:team_select_fly_out_current()
+  end
   ts.focused_id = nil
 end
 
@@ -359,6 +484,7 @@ end
 function Controller:team_select_launch()
   local ts = self.team_select
   if not ts or #ts.selected_ids ~= 4 then return end
+  Sfx.play("woosh")
   local mode, selected_ids = ts.mode, ts.selected_ids
   self.team_select = nil
   self:reset_run(mode, selected_ids)
@@ -925,7 +1051,21 @@ function Controller:update(dt)
     for i = #ts_anims, 1, -1 do
       local a = ts_anims[i]
       a.elapsed = a.elapsed + dt
-      if a.mode == "out" and a.elapsed >= a.duration then table.remove(ts_anims, i) end
+      -- `a.delay` (2026-08-30, rassemblement vers le deck décalé carte par
+      -- carte -- voir team_select_fly_out_current) : nil/0 dans tous les
+      -- autres cas, la comparaison reste équivalente à avant.
+      if a.mode == "out" and a.elapsed >= (a.delay or 0) + a.duration then table.remove(ts_anims, i) end
+    end
+    -- Portraits en transit (2026-08-30) : contrairement aux cartes "in",
+    -- jamais figés indéfiniment sur place -- une fois l'anim finie, le héros
+    -- est exactement à `to` (rangée ou projecteur), la logique de rendu
+    -- normale (draw_team_select) prend le relais sans discontinuité visible,
+    -- donc l'entrée peut toujours être supprimée dès `elapsed >= duration`.
+    local hero_anims = self.team_select.hero_anims
+    for i = #hero_anims, 1, -1 do
+      local a = hero_anims[i]
+      a.elapsed = a.elapsed + dt
+      if a.elapsed >= a.duration then table.remove(hero_anims, i) end
     end
   end
   for i = #self.floaters, 1, -1 do

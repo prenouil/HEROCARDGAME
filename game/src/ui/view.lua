@@ -319,14 +319,18 @@ View.temple_confirm_button = {
 local TEAM_HERO_W, TEAM_HERO_H = 108, 120
 local TEAM_HERO_GAP = 18
 local TEAM_AVAILABLE_Y = 66
--- 420, pas 486 (2026-08-29, bug signalé -- chevauchait le bouton "Partir à
--- l'aventure" en bas à droite : un clic dessus touchait en fait le 4ᵉ
--- portrait de la rangée, jamais le bouton) : la rangée du bas doit tenir
--- ENTIÈREMENT au-dessus de lui, marge comprise -- voir
--- View.team_select_launch_button plus bas, calculé À PARTIR de cette valeur
--- plutôt que du bas de l'écran, pour que les deux ne puissent plus jamais
--- diverger silencieusement.
-local TEAM_PARTY_Y = 420
+-- Rangée "équipe confirmée" ET bouton "Partir à l'aventure" ancrés sur LA
+-- MÊME valeur (2026-08-30, demande explicite -- "les aventuriers sélectionnés
+-- doivent être situés tout en bas de l'écran, au même niveau que Partir à
+-- l'aventure") : les 2 partagent désormais TEAM_BOTTOM_Y, plutôt que l'un
+-- calculé à partir de l'autre (ancien schéma, qui les gardait séparés
+-- verticalement). Rangée ANCRÉE À GAUCHE (pas centrée, contrairement à la
+-- rangée du haut) -- demande explicite ci-dessus + bug signalé (une rangée
+-- centrée à 4 aventuriers déborde jusqu'à x~723, en plein sur le bouton, qui
+-- commence à x=670) : décalée pour ne jamais pouvoir le recouvrir, quel que
+-- soit le nombre d'aventuriers déjà confirmés.
+local TEAM_BOTTOM_Y = 520
+local TEAM_PARTY_LEFT = 170
 
 function View.team_select_available_rects(controller)
   local ts = controller.team_select
@@ -340,19 +344,44 @@ end
 function View.team_select_party_rects(controller)
   local ts = controller.team_select
   if not ts then return {} end
-  local rects = centered_row(#ts.selected_ids, TEAM_HERO_W, TEAM_HERO_H, TEAM_PARTY_Y, TEAM_HERO_GAP)
   local out = {}
-  for i, id in ipairs(ts.selected_ids) do out[id] = rects[i] end
+  for i, id in ipairs(ts.selected_ids) do
+    out[id] = {
+      x = TEAM_PARTY_LEFT + (i - 1) * (TEAM_HERO_W + TEAM_HERO_GAP), y = TEAM_BOTTOM_Y,
+      w = TEAM_HERO_W, h = TEAM_HERO_H,
+    }
+  end
   return out
 end
 
--- Cartes du héros mis en avant (2026-08-29) : TOUTES les siennes (Départ +
--- Avancé, 6 au total), en ligne centrée -- positions CIBLES seulement ; leur
--- origine (un bord aléatoire, hors-écran) est calculée au vol par
--- Controller:team_select_spawn_cards, jamais ici.
-local TEAM_CARD_Y = 246
+-- Cartes du héros mis en avant (2026-08-29, puis 2026-08-30 -- "2 rangées de
+-- 3 cartes" ET "les cartes doivent être plus bas", demandes explicites) :
+-- TOUTES les siennes (Départ + Avancé, 6 au total, toujours exactement 3+3 --
+-- voir l'en-tête de src/data/cards.lua), en grille 3 colonnes x 2 rangées
+-- entre les boutons Annuler/Valider (gauche) et le projecteur (droite) --
+-- positions CIBLES seulement ; leur origine (un bord aléatoire, hors-écran)
+-- est calculée au vol par Controller:team_select_spawn_cards, jamais ici.
+-- y=210, pas 140 (2026-08-30, "plus bas" + bug signalé -- à 140 la 2ᵉ rangée
+-- descendait jusqu'à y=432, empiétant sur la rangée "équipe" juste en
+-- dessous) : la grille tient maintenant ENTIÈREMENT entre la rangée du haut
+-- (finit à 186) et la rangée du bas (commence à TEAM_BOTTOM_Y=520), marge
+-- des deux côtés.
+local TEAM_CARD_COLS = 3
+local TEAM_CARD_ROW_GAP = 16
+local TEAM_CARD_Y = 210
+local TEAM_CARD_GRID_X = 330
 function View.team_select_card_rects(count)
-  return centered_row(count, CARD_W, CARD_H, TEAM_CARD_Y)
+  local rects = {}
+  for i = 1, count do
+    local col = (i - 1) % TEAM_CARD_COLS
+    local row = math.floor((i - 1) / TEAM_CARD_COLS)
+    rects[i] = {
+      x = TEAM_CARD_GRID_X + col * (CARD_W + ROW_GAP),
+      y = TEAM_CARD_Y + row * (CARD_H + TEAM_CARD_ROW_GAP),
+      w = CARD_W, h = CARD_H,
+    }
+  end
+  return rects
 end
 
 --- Rectangle hors-écran de même taille que `to`, positionné sur le bord
@@ -367,14 +396,56 @@ function View.team_select_offscreen_rect(to, side)
   return { x = to.x, y = H + margin, w = to.w, h = to.h }
 end
 
-View.team_select_cancel_button = { x = 40, y = TEAM_CARD_Y, w = 150, h = 44, label = "Annuler" }
-View.team_select_confirm_button = { x = 40, y = TEAM_CARD_Y + 56, w = 150, h = 44, label = "Valider" }
+-- Plus étroits et plus à gauche (2026-08-30, demande explicite -- 150->110,
+-- x=40->20) : moins d'empiètement visuel sur la grille de cartes qui
+-- commence juste à côté.
+View.team_select_cancel_button = { x = 20, y = 210, w = 110, h = 44, label = "Annuler" }
+View.team_select_confirm_button = { x = 20, y = 266, w = 110, h = 44, label = "Valider" }
 
+-- "Projecteur" (2026-08-30, demande explicite -- "quand je sélectionne un
+-- aventurier, il se déplace sur le côté droit, le déplacement est visible") :
+-- emplacement fixe où le héros survolé/sélectionné SE DÉPLACE réellement
+-- (voir Controller:team_select_move_hero), plus grand que sa case d'origine
+-- pour bien marquer "c'est celui-ci qu'on regarde en ce moment".
+-- y=200, pas 130 (2026-08-30, bug signalé en revue -- avec 5-6 aventuriers
+-- encore disponibles, la rangée du haut s'étire jusqu'à x~850 et chevauchait
+-- verticalement le projecteur) : reste ENTIÈREMENT sous la rangée du haut
+-- (qui s'arrête à TEAM_AVAILABLE_Y + TEAM_HERO_H = 186), quelle que soit sa
+-- largeur -- jamais de dépendance à combien de héros y restent.
+local TEAM_SPOTLIGHT_W, TEAM_SPOTLIGHT_H = 170, 190
+View.team_select_spotlight_rect = {
+  x = W - TEAM_SPOTLIGHT_W - 40, y = 200, w = TEAM_SPOTLIGHT_W, h = TEAM_SPOTLIGHT_H,
+}
+
+-- Ancré sur TEAM_BOTTOM_Y, comme la rangée "équipe" juste à gauche (2026-08-30,
+-- demande explicite -- "au même niveau que Partir à l'aventure") : les deux
+-- partagent maintenant la même origine verticale plutôt que l'un dérivé de
+-- l'autre -- voir le commentaire sur TEAM_BOTTOM_Y plus haut.
 local TEAM_LAUNCH_W, TEAM_LAUNCH_H = 260, 64
 View.team_select_launch_button = {
-  x = W - TEAM_LAUNCH_W - 30, y = TEAM_PARTY_Y + TEAM_HERO_H + 24, w = TEAM_LAUNCH_W, h = TEAM_LAUNCH_H,
+  x = W - TEAM_LAUNCH_W - 30, y = TEAM_BOTTOM_Y, w = TEAM_LAUNCH_W, h = TEAM_LAUNCH_H,
   label = "Partir à l'aventure",
 }
+
+-- "Deck" de l'écran de choix d'équipe (2026-08-30, demande explicite --
+-- "ses cartes se regroupent pour aller rejoindre le deck situé en bas à
+-- gauche, ce deck grossit à chaque nouvel aventurier") : PURE mise en scène,
+-- aucun lien avec Deck.build_starting_deck (qui ne prendra que les 3 cartes
+-- "depart" par héros -- ici on anime les 6 cartes déjà montrées à l'écran,
+-- une convention visuelle propre à cet écran, pas une prévisualisation
+-- littérale du deck de départ réel). Ancré par son coin bas-gauche, sur le
+-- même bord bas que la rangée "équipe"/le bouton (TEAM_BOTTOM_Y +
+-- TEAM_HERO_H) -- grossit vers le haut, jamais vers la rangée "équipe" à sa
+-- droite (colonne x=20-138 max, largement sous TEAM_PARTY_LEFT=170).
+local TEAM_DECK_LEFT = 20
+local TEAM_DECK_BOTTOM = TEAM_BOTTOM_Y + TEAM_HERO_H
+local TEAM_DECK_BASE_W, TEAM_DECK_BASE_H = 70, 90
+local TEAM_DECK_GROWTH = 12 -- px par aventurier validé
+function View.team_select_deck_rect(hero_count)
+  local w = TEAM_DECK_BASE_W + TEAM_DECK_GROWTH * hero_count
+  local h = TEAM_DECK_BASE_H + TEAM_DECK_GROWTH * hero_count
+  return { x = TEAM_DECK_LEFT, y = TEAM_DECK_BOTTOM - h, w = w, h = h }
+end
 
 local function point_in(r, x, y)
   return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h
@@ -2313,21 +2384,40 @@ local function draw_temple(controller)
   end
 end
 
+-- Durée du rebond d'agrandissement au survol (2026-08-30, demande explicite
+-- -- "tout le cadre doit réagir et grandir avec un effet de rebond") :
+-- pilotée par controller.hover.t (déjà le temps depuis que CE survol précis
+-- a commencé, remis à 0 par Controller:set_hover dès que la cible change --
+-- voir son commentaire dans controller.lua) -- aucun état d'animation à part
+-- à tenir ici, juste relire ce compteur déjà tenu à jour.
+local TEAM_HOVER_BOUNCE_DURATION = 0.28
+local TEAM_HOVER_BOUNCE_SCALE = 0.16
+
 --- Un cadre d'aventurier de l'écran de choix d'équipe (2026-08-29) --
--- portrait + nom, contour or si mis en avant, léger bump vers le haut au
--- survol ("quand je les survole, ils réagissent"), pastille verte si déjà
--- dans l'équipe confirmée (utile côté rangée du bas ET, brièvement, pendant
--- qu'un membre déjà confirmé est remis en avant pour être retiré).
-local function draw_team_hero_slot(r, def, hovered, focused, in_party)
+-- portrait + nom, contour or si mis en avant, pastille verte si déjà dans
+-- l'équipe confirmée. `hover_t` (2026-08-30, nil ou 0 si pas survolé) :
+-- TOUT le cadre grandit avec un effet de rebond au survol (ease_out_back,
+-- même courbe que le titre "Victoire !"), plus seulement le portrait qui
+-- montait de quelques pixels avant.
+local function draw_team_hero_slot(r, def, hover_t, focused, in_party)
+  local scale = 1
+  if hover_t and hover_t > 0 then
+    scale = 1 + TEAM_HOVER_BOUNCE_SCALE * ease_out_back(hover_t, TEAM_HOVER_BOUNCE_DURATION)
+  end
+  local cx, cy = r.x + r.w / 2, r.y + r.h / 2
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.scale(scale, scale)
+  love.graphics.translate(-cx, -cy)
+
   panel(r.x, r.y, r.w, r.h, Theme.panel_light)
-  set(focused and Theme.accent or (hovered and Theme.text or Theme.muted))
+  set(focused and Theme.accent or (hover_t and hover_t > 0 and Theme.text or Theme.muted))
   love.graphics.setLineWidth(focused and 4 or 2)
   love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
   love.graphics.setLineWidth(1)
-  local bump = hovered and -5 or 0
   local portrait_size = 58
   draw_class_icon(def.class_id, def.icon, def.label,
-    r.x + (r.w - portrait_size) / 2, r.y + 10 + bump, portrait_size, portrait_size, Theme.text)
+    r.x + (r.w - portrait_size) / 2, r.y + 10, portrait_size, portrait_size, Theme.text)
   local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
   name_badge(def.name, r.x + 6, r.y + r.h - 26, r.w - 12, 12, palette.border, Theme.bg, 2, 2)
   if in_party then
@@ -2336,6 +2426,8 @@ local function draw_team_hero_slot(r, def, hovered, focused, in_party)
   love.graphics.push()
   love.graphics.translate(r.x, r.y)
   draw_tooltip_hint(r.w, r.h)
+  love.graphics.pop()
+
   love.graphics.pop()
 end
 
@@ -2352,31 +2444,95 @@ end
 -- normalement pour être sorti du groupe", le bouton se relabellise "Retirer"
 -- dans ce cas). Le gros bouton "Partir à l'aventure" ne s'active (et ne
 -- clignote) qu'à 4 aventuriers confirmés.
+--- Anim de déplacement d'UN portrait de héros (2026-08-30, voir
+-- Controller:team_select_move_hero/ts.hero_anims) : `ease_out_back`, même
+-- courbe que le vol des cartes -- le héros "atterrit" avec un léger rebond
+-- plutôt que de simplement s'arrêter.
+local function team_select_hero_anim_rect(a)
+  local ease = ease_out_back(a.elapsed, a.duration)
+  return {
+    x = a.from.x + (a.to.x - a.from.x) * ease,
+    y = a.from.y + (a.to.y - a.from.y) * ease,
+    w = a.to.w, h = a.to.h,
+  }
+end
+
+local function team_select_find_hero_anim(ts, id)
+  for _, a in ipairs(ts.hero_anims) do if a.id == id then return a end end
+  return nil
+end
+
+--- "Deck" de mise en scène de l'écran de choix d'équipe (2026-08-30) : pile
+-- à étages (même esprit que draw_pile en combat, voir plus haut dans ce
+-- fichier) dont le RECTANGLE lui-même grossit avec le nombre d'aventuriers
+-- confirmés (voir View.team_select_deck_rect), pas seulement l'effet
+-- d'épaisseur -- "ce deck grossit à chaque nouvel aventurier", demande
+-- explicite.
+local function draw_team_deck(rect, card_count)
+  local layers = math.min(2, math.max(0, math.floor(card_count / 6) - 1))
+  for i = layers, 1, -1 do
+    panel(rect.x + i * 3, rect.y - i * 3, rect.w, rect.h, Theme.panel)
+  end
+  panel(rect.x, rect.y, rect.w, rect.h, Theme.panel_light)
+  set(Theme.accent); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", rect.x, rect.y, rect.w, rect.h, 8, 8)
+  love.graphics.setLineWidth(1)
+  text("DECK", rect.x, rect.y + 8, rect.w, 9, Theme.muted, "center")
+  text(tostring(card_count), rect.x, rect.y + rect.h / 2 - 4, rect.w, 16, Theme.text, "center")
+end
+
 local function draw_team_select(controller)
   local ts = controller.team_select
   Background.draw(nil, W, H)
   text("Choisis ton équipe", 0, 18, W, 22, Theme.text)
   text(#ts.selected_ids .. " / 4 aventuriers", 0, 44, W, 12, Theme.muted)
 
+  -- Héros "en transit" entre 2 emplacements (2026-08-30, voir
+  -- Controller:team_select_move_hero) : masqués de leur rangée d'origine ET
+  -- de destination tant que l'anim n'est pas finie, dessinés uniquement via
+  -- team_select_hero_anim_rect plus bas -- jamais les deux à la fois.
+  local moving_ids = {}
+  for _, a in ipairs(ts.hero_anims) do moving_ids[a.id] = true end
+
+  local function hover_t_for(id)
+    if controller.hover.kind == "team_hero" and controller.hover.target == id then
+      return controller.hover.t
+    end
+    return nil
+  end
+
   local available_rects = View.team_select_available_rects(controller)
   for _, id in ipairs(ts.available_ids) do
-    local def = Heroes.by_id(id)
-    local r = available_rects[id]
-    local hovered = controller.hover.kind == "team_hero" and controller.hover.target == id
-    draw_team_hero_slot(r, def, hovered, ts.focused_id == id, false)
+    if id ~= ts.focused_id and not moving_ids[id] then
+      draw_team_hero_slot(available_rects[id], Heroes.by_id(id), hover_t_for(id), false, false)
+    end
   end
 
   -- Cartes en vol (voir le commentaire de fonction) : "in" se fige à sa
   -- position cible une fois l'animation finie (elapsed clampé à duration =>
   -- p=1, plus aucun mouvement) -- pas besoin d'un 2ᵉ système pour "les cartes
   -- au repos", cette même liste EST l'état affiché tant qu'un focus est actif.
+  -- `a.delay` (2026-08-30, rassemblement vers le deck décalé carte par
+  -- carte -- voir Controller:team_select_fly_out_current) : reste VISIBLE,
+  -- immobile à son point de départ, tant que son tour n'est pas venu (bug
+  -- signalé, 2026-08-30 -- "les cartes disparaissent avant de faire le
+  -- mouvement" : avant ce correctif, une carte dont `elapsed < delay`
+  -- n'était pas dessinée DU TOUT, jamais juste figée -- même principe que
+  -- draw_card_flights (combat) pour la pioche en rafale, qui ne fait
+  -- disparaître aucune carte en attente non plus).
   for _, a in ipairs(ts.card_anims) do
-    local p = math.min(1, a.elapsed / a.duration)
-    local ease = a.mode == "in" and ease_out_back(a.elapsed, a.duration) or (1 - (1 - p) ^ 2)
-    local x = a.from.x + (a.to.x - a.from.x) * ease
-    local y = a.from.y + (a.to.y - a.from.y) * ease
-    local alpha = a.mode == "in" and math.min(1, p * 1.6) or (1 - p)
-    if alpha > 0 then draw_faded_card(a.def, x, y, alpha) end
+    local delay = a.delay or 0
+    if a.elapsed < delay then
+      draw_faded_card(a.def, a.from.x, a.from.y, 1)
+    else
+      local elapsed_since_start = a.elapsed - delay
+      local p = math.min(1, elapsed_since_start / a.duration)
+      local ease = a.mode == "in" and ease_out_back(elapsed_since_start, a.duration) or (1 - (1 - p) ^ 2)
+      local x = a.from.x + (a.to.x - a.from.x) * ease
+      local y = a.from.y + (a.to.y - a.from.y) * ease
+      local alpha = a.mode == "in" and math.min(1, p * 1.6) or (1 - p)
+      if alpha > 0 then draw_faded_card(a.def, x, y, alpha) end
+    end
   end
 
   if ts.focused_id then
@@ -2394,16 +2550,34 @@ local function draw_team_select(controller)
     set(blocked and Theme.panel or Theme.accent)
     love.graphics.rectangle("fill", vb.x, vb.y, vb.w, vb.h, 8, 8)
     text(already_in and "Retirer" or "Valider", vb.x, vb.y + 14, vb.w, 14, blocked and Theme.muted or Theme.bg, "center")
+
+    -- Projecteur (2026-08-30) : le héros mis en avant SE DÉPLACE réellement
+    -- ici (interpolé tant que l'anim d'arrivée n'est pas finie, sinon posé
+    -- pile sur View.team_select_spotlight_rect -- même valeur au repos).
+    local anim = team_select_find_hero_anim(ts, ts.focused_id)
+    local r = anim and team_select_hero_anim_rect(anim) or View.team_select_spotlight_rect
+    draw_team_hero_slot(r, Heroes.by_id(ts.focused_id), hover_t_for(ts.focused_id), true, false)
   end
 
   local party_rects = View.team_select_party_rects(controller)
-  text("Ton équipe", 20, TEAM_PARTY_Y - 16, 200, 10, Theme.muted, "left")
+  text("Ton équipe", TEAM_PARTY_LEFT, TEAM_BOTTOM_Y - 16, 200, 10, Theme.muted, "left")
   for _, id in ipairs(ts.selected_ids) do
-    local def = Heroes.by_id(id)
-    local r = party_rects[id]
-    local hovered = controller.hover.kind == "team_hero" and controller.hover.target == id
-    draw_team_hero_slot(r, def, hovered, ts.focused_id == id, true)
+    if id ~= ts.focused_id and not moving_ids[id] then
+      draw_team_hero_slot(party_rects[id], Heroes.by_id(id), hover_t_for(id), false, true)
+    end
   end
+
+  -- Héros en transit (2026-08-30) : ni dans une rangée, ni dans le
+  -- projecteur (il vient de le quitter) -- dessiné à sa position interpolée.
+  for _, a in ipairs(ts.hero_anims) do
+    if a.id ~= ts.focused_id then
+      local in_party = false
+      for _, sid in ipairs(ts.selected_ids) do if sid == a.id then in_party = true end end
+      draw_team_hero_slot(team_select_hero_anim_rect(a), Heroes.by_id(a.id), hover_t_for(a.id), false, in_party)
+    end
+  end
+
+  draw_team_deck(View.team_select_deck_rect(#ts.selected_ids), #ts.selected_ids * 6)
 
   local lb = View.team_select_launch_button
   local ready = #ts.selected_ids == 4
