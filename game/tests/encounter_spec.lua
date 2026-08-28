@@ -74,6 +74,55 @@ describe("Encounter.pick_hero_target : pondération par Discrétion (2026-08-24)
   end)
 end)
 
+-- Provocation (2026-08-28, statut du Paladin, clarifié après coup) : +50%
+-- FIXE de chance relative d'être ciblé tant que provocation > 0, quel que
+-- soit le nombre de stacks (voir Encounter.pick_hero_target).
+describe("Encounter.pick_hero_target : pondération par Provocation (2026-08-28)", function()
+  it("un candidat en Provocation est statistiquement plus souvent ciblé (poids x1.5)", function()
+    local low = make_hero("low") -- pas de Provocation -> poids 1
+    local high = make_hero("high", { provocation = 2 }) -- poids 1.5
+    local state = { heroes = { low, high } }
+    local rng = Rng.new(1)
+    local counts = { low = 0, high = 0 }
+    for _ = 1, 500 do
+      local t = Encounter.pick_hero_target(state, "random", rng)
+      counts[t.id] = counts[t.id] + 1
+    end
+    -- Poids 1 vs 1.5 -> ~40%/~60% attendu ; marge large pour la variance.
+    assert.is_true(counts.high > counts.low)
+  end)
+
+  it("le bonus est FIXE (+50%), pas cumulatif par stack -- 2 et 5 Provocation pèsent pareil", function()
+    local two = make_hero("two", { provocation = 2 })
+    local five = make_hero("five", { provocation = 5 })
+    local state = { heroes = { two, five } }
+    local rng = Rng.new(1)
+    local counts = { two = 0, five = 0 }
+    for _ = 1, 500 do
+      local t = Encounter.pick_hero_target(state, "random", rng)
+      counts[t.id] = counts[t.id] + 1
+    end
+    assert.is_true(counts.two > 150 and counts.five > 150)
+  end)
+
+  it("Provocation et Discrétion se combinent (multiplicatif, pas juste l'un des deux qui l'emporte)", function()
+    -- plain : poids 1. both : (1 - 0.1*5) * 1.5 = 0.75 -- reste plus ciblé que
+    -- rien du tout, malgré 5 Discrétion, grâce à la Provocation.
+    local plain = make_hero("plain")
+    local both = make_hero("both", { provocation = 2, discretion = 5 })
+    local state = { heroes = { plain, both } }
+    local rng = Rng.new(1)
+    local counts = { plain = 0, both = 0 }
+    for _ = 1, 500 do
+      local t = Encounter.pick_hero_target(state, "random", rng)
+      counts[t.id] = counts[t.id] + 1
+    end
+    -- 1 vs 0.75 -> ~57%/~43% attendu : both reste ciblé une part significative
+    -- du temps (pas écrasé par la Discrétion), mais un peu moins que plain.
+    assert.is_true(counts.both > 150 and counts.both < counts.plain)
+  end)
+end)
+
 -- Règle tacite du Nécromancien Novice (2026-08-21, demande explicite -- ne
 -- doit jamais apparaître dans un texte affiché au joueur, voir enemies.lua) :
 -- si aucun ennemi ne fait de dégâts directs ce tour, tout Nécromancien

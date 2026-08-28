@@ -230,8 +230,14 @@ end
 
 local function draw_status_defense(cx, cy, r, color, alpha) draw_shield(cx, cy, r, color, alpha) end
 
-local function draw_status_esquive(cx, cy, r, color)
-  set(color)
+-- `alpha` (optionnel, 2026-08-28, demande explicite -- effet de rémanence sur
+-- l'arrivée de tout badge de statut, voir status_badge dans view.lua) : sans
+-- ça, l'écho fantôme dessiné par-dessus/derrière l'icône réelle serait
+-- toujours à alpha 1 (set(color) l'écraserait), rendant le fondu impossible --
+-- même raison d'être que sur draw_shield ci-dessus, étendue à TOUTES les
+-- icônes de statut vectorielles de ce fichier.
+local function draw_status_esquive(cx, cy, r, color, alpha)
+  set(color, alpha)
   love.graphics.setLineWidth(math.max(1, r * 0.16))
   love.graphics.line(cx - r * 0.6, cy - r * 0.25, cx + r * 0.15, cy - r * 0.25)
   love.graphics.line(cx - r * 0.6, cy + r * 0.25, cx + r * 0.15, cy + r * 0.25)
@@ -239,8 +245,8 @@ local function draw_status_esquive(cx, cy, r, color)
   love.graphics.setLineWidth(1)
 end
 
-local function draw_status_camouflage(cx, cy, r, color)
-  set(color)
+local function draw_status_camouflage(cx, cy, r, color, alpha)
+  set(color, alpha)
   love.graphics.ellipse("line", cx, cy, r * 0.7, r * 0.4)
   love.graphics.circle("fill", cx, cy, r * 0.18)
   love.graphics.setLineWidth(math.max(1, r * 0.14))
@@ -248,23 +254,23 @@ local function draw_status_camouflage(cx, cy, r, color)
   love.graphics.setLineWidth(1)
 end
 
-local function draw_status_puissance(cx, cy, r, color)
-  set(color)
+local function draw_status_puissance(cx, cy, r, color, alpha)
+  set(color, alpha)
   love.graphics.polygon("fill", cx, cy - r * 0.75, cx - r * 0.55, cy + r * 0.35, cx + r * 0.55, cy + r * 0.35)
 end
 
-local function draw_status_saignements(cx, cy, r, color)
-  set(color)
+local function draw_status_saignements(cx, cy, r, color, alpha)
+  set(color, alpha)
   love.graphics.polygon("fill", cx, cy - r * 0.75, cx - r * 0.45, cy + r * 0.2, cx, cy + r * 0.55, cx + r * 0.45, cy + r * 0.2)
 end
 
-local function draw_status_incapacite(cx, cy, r, color)
-  set(color)
+local function draw_status_incapacite(cx, cy, r, color, alpha)
+  set(color, alpha)
   love.graphics.polygon("fill", cx, cy + r * 0.75, cx - r * 0.55, cy - r * 0.35, cx + r * 0.55, cy - r * 0.35)
 end
 
-local function draw_status_vulnerabilite(cx, cy, r, color)
-  set(color)
+local function draw_status_vulnerabilite(cx, cy, r, color, alpha)
+  set(color, alpha)
   love.graphics.setLineWidth(math.max(1, r * 0.12))
   love.graphics.circle("line", cx, cy, r * 0.7)
   love.graphics.circle("line", cx, cy, r * 0.32)
@@ -276,8 +282,8 @@ end
 --- Flamme simple (2026-08-24, sensibilité au feu de l'Homme Arbre) : repli
 -- vectoriel si Sprites.status("fireweak") (icônes/keywords/fireball.png) est
 -- absent, même principe que les autres statuts ci-dessus.
-local function draw_status_fireweak(cx, cy, r, color)
-  set(color)
+local function draw_status_fireweak(cx, cy, r, color, alpha)
+  set(color, alpha)
   love.graphics.polygon("fill",
     cx, cy - r * 0.85,
     cx + r * 0.5, cy + r * 0.1,
@@ -287,6 +293,18 @@ local function draw_status_fireweak(cx, cy, r, color)
     cx - r * 0.3, cy + r * 0.55,
     cx - r * 0.15, cy - r * 0.05,
     cx - r * 0.5, cy + r * 0.1)
+end
+
+--- Sablier simple (2026-08-28, demande explicite -- "icone dédiée" pour le
+-- bouclier programmé d'Infranchissable, voir hero.scheduled_shields dans
+-- game.lua) : 2 triangles opposés, symbole générique "à venir/en attente" --
+-- distinct du bouclier plein (draw_shield) déjà utilisé pour la Défense
+-- ACTIVE, pour ne jamais confondre "j'ai du bouclier maintenant" et "j'en
+-- aurai bientôt".
+local function draw_status_scheduled_shield(cx, cy, r, color, alpha)
+  set(color, alpha)
+  love.graphics.polygon("fill", cx - r * 0.55, cy - r * 0.75, cx + r * 0.55, cy - r * 0.75, cx, cy)
+  love.graphics.polygon("fill", cx - r * 0.55, cy + r * 0.75, cx + r * 0.55, cy + r * 0.75, cx, cy)
 end
 
 --- Flèche vers le haut, légèrement inclinée -- jamais parfaitement verticale
@@ -329,6 +347,17 @@ local function draw_status_malus(cx, cy, r)
   love.graphics.pop()
 end
 
+--- Point d'exclamation simple (2026-08-28, statut Provocation du Paladin) :
+-- barre + point, symbole générique d'alerte/menace -- distinct du motif
+-- cercle+croix de Vulnérabilité juste au-dessus, pas de confusion possible.
+local function draw_status_provocation(cx, cy, r, color, alpha)
+  set(color, alpha)
+  love.graphics.setLineWidth(math.max(1, r * 0.28))
+  love.graphics.line(cx, cy - r * 0.75, cx, cy + r * 0.15)
+  love.graphics.setLineWidth(1)
+  love.graphics.circle("fill", cx, cy + r * 0.55, r * 0.14)
+end
+
 local DRAW_BY_STATUS = {
   defense = draw_status_defense,
   esquive = draw_status_esquive,
@@ -337,6 +366,8 @@ local DRAW_BY_STATUS = {
   saignements = draw_status_saignements,
   incapacite = draw_status_incapacite,
   vulnerabilite = draw_status_vulnerabilite,
+  provocation = draw_status_provocation,
+  shield_pending = draw_status_scheduled_shield,
   fireweak = draw_status_fireweak,
   bonus = draw_status_bonus,
   malus = draw_status_malus,

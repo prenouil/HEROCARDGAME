@@ -22,6 +22,10 @@ local Theme = {
   -- Ressource propre à l'Assassin (2026-08-24) : même principe que Theme.mana
   -- -- teinte reprise du liseré de ses cartes (Theme.card_class.assassin.border).
   discretion = hex("5cae6e"),
+  -- Cendres d'une carte "Amnésie" qui se disperse (2026-08-28) : gris chaud
+  -- neutre, jamais utilisé ailleurs (Theme.muted est un lavande éteint, pas un
+  -- vrai gris) -- doit se lire comme "matière consumée", pas comme un statut.
+  ash = hex("8a8378"),
   text = hex("f1e9f7"),
   muted = hex("a996b3"),
   def = hex("7f9ccf"),

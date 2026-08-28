@@ -153,26 +153,15 @@ Cards.list = {
   },
 
   -- ---------- Paladin ----------
-  {
-    code = "coup-direct-paladin", name = "Coup direct", class_id = "paladin", tier = "depart", cost = 1,
-    cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
-    desc = 'Inflige 4 "epee".',
-    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 4, "physique", ctx) end,
-    upgrade = {
-      desc = 'Inflige 6 "epee".',
-      effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "physique", ctx) end,
-    },
-  },
-  {
-    code = "encaisser-paladin", name = "Encaisser", class_id = "paladin", tier = "depart", cost = 1,
-    cats = { "defense" }, dmg_type = nil, target = "ally",
-    desc = 'L\'allié gagne 4 "bouclier".',
-    effect = function(ctx) Combat.grant_defense(ctx.target, 4) end,
-    upgrade = {
-      desc = 'L\'allié gagne 6 "bouclier".',
-      effect = function(ctx) Combat.grant_defense(ctx.target, 6) end,
-    },
-  },
+  -- Refonte des 3 cartes "depart" restantes + Provocation/Clairvoyance/Lumière
+  -- divine (2026-08-28, demande explicite -- tableur fourni) : "Coup direct"/
+  -- "Encaisser" disparaissent complètement (remplacées par Provocateur/
+  -- Infranchissable, en plus de Rempart déjà propre au Paladin) -- le Paladin
+  -- n'a donc plus AUCUNE carte de dégâts, devient un pur tank/support. Nouveau
+  -- statut "Provocation" (+50% de chances d'être ciblé par les ennemis, -1 par
+  -- tour -- voir Encounter.pick_hero_target/Game.start_turn) distinct de
+  -- l'ancienne carte "Provocation" (renommée "Raillerie" pour éviter la
+  -- confusion des noms, effet inchangé : redirection immédiate d'UN ennemi).
   {
     code = "rempart", name = "Rempart", class_id = "paladin", tier = "depart", cost = 1,
     cats = { "defense" }, dmg_type = nil, target = "ally",
@@ -192,19 +181,68 @@ Cards.list = {
     },
   },
   {
-    code = "provocation", name = "Provocation", class_id = "paladin", tier = "avance", cost = 2,
-    cats = { "defense" }, dmg_type = nil, target = "enemy",
-    desc = 'L\'ennemi ciblé cible le Paladin. Gagne 6 "bouclier".',
+    -- Provocation accordée au LANCEUR (le Paladin), pas à l'allié qui reçoit le
+    -- bouclier (2026-08-28, lecture retenue -- "je protège mon allié ET
+    -- j'attire l'attention sur moi" ; cohérent avec Infranchissable ci-dessous,
+    -- où tout s'applique à soi). Coût confirmé explicitement à 1 (vide dans le
+    -- tableur fourni).
+    code = "provocateur", name = "Provocateur", class_id = "paladin", tier = "depart", cost = 1,
+    cats = { "defense" }, dmg_type = nil, target = "ally",
+    desc = 'L\'allié ciblé gagne 4 "bouclier". Gagne "Provocation" 2.',
     effect = function(ctx)
-      Combat.grant_defense(ctx.hero, 6)
+      Combat.grant_defense(ctx.target, 4)
+      Combat.apply_status(ctx.hero, "provocation", 2)
+    end,
+    upgrade = {
+      desc = 'L\'allié ciblé gagne 6 "bouclier". Gagne "Provocation" 3.',
+      effect = function(ctx)
+        Combat.grant_defense(ctx.target, 6)
+        Combat.apply_status(ctx.hero, "provocation", 3)
+      end,
+    },
+  },
+  {
+    -- Bouclier "programmé" (2026-08-28, voir Game.schedule_shield) : la
+    -- version améliorée programme 2 gains DISTINCTS (au début du tour+1 ET du
+    -- tour+2), pas un seul gain doublé plus tard.
+    code = "infranchissable", name = "Infranchissable", class_id = "paladin", tier = "depart", cost = 1,
+    cats = { "defense" }, dmg_type = nil, target = "self",
+    desc = 'Gagne 10 "bouclier". Gagne 10 "bouclier" au début du prochain tour. Gagne "Provocation" 2.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Combat.grant_defense(ctx.hero, 10)
+      Game.schedule_shield(ctx.hero, 10, 1)
+      Combat.apply_status(ctx.hero, "provocation", 2)
+    end,
+    upgrade = {
+      desc = 'Gagne 15 "bouclier". Gagne 15 "bouclier" au début des 2 prochains tours. Gagne "Provocation" 3.',
+      effect = function(ctx)
+        Game = Game or require("src.rules.game")
+        Combat.grant_defense(ctx.hero, 15)
+        Game.schedule_shield(ctx.hero, 15, 1)
+        Game.schedule_shield(ctx.hero, 15, 2)
+        Combat.apply_status(ctx.hero, "provocation", 3)
+      end,
+    },
+  },
+  {
+    -- Renommée "Raillerie" (2026-08-28, remplace "Provocation" -- ce nom
+    -- désigne désormais le nouveau statut, voir plus haut) : effet identique à
+    -- avant (redirection immédiate d'UN ennemi vers le Paladin, sans passer
+    -- par le statut Provocation), juste rééquilibrée 6/9 -> 8/12.
+    code = "raillerie", name = "Raillerie", class_id = "paladin", tier = "avance", cost = 2,
+    cats = { "defense" }, dmg_type = nil, target = "enemy",
+    desc = 'L\'ennemi ciblé cible le Paladin. Gagne 8 "bouclier".',
+    effect = function(ctx)
+      Combat.grant_defense(ctx.hero, 8)
       if ctx.target.next_move and Combat.TARGETABLE_MOVE_KINDS[ctx.target.next_move.kind] then
         ctx.target.target_hero_id = ctx.hero.id
       end
     end,
     upgrade = {
-      desc = 'L\'ennemi ciblé cible le Paladin. Gagne 9 "bouclier".',
+      desc = 'L\'ennemi ciblé cible le Paladin. Gagne 12 "bouclier".',
       effect = function(ctx)
-        Combat.grant_defense(ctx.hero, 9)
+        Combat.grant_defense(ctx.hero, 12)
         if ctx.target.next_move and Combat.TARGETABLE_MOVE_KINDS[ctx.target.next_move.kind] then
           ctx.target.target_hero_id = ctx.hero.id
         end
@@ -212,42 +250,49 @@ Cards.list = {
     },
   },
   {
+    -- +soin à soi et tag "Amnésie" ajoutés (2026-08-28) : voir Game.finish_card/
+    -- state.exhausted -- cette carte disparaît de la rotation du combat en
+    -- cours après avoir été jouée, revient au combat suivant.
     code = "clairvoyance", name = "Clairvoyance", class_id = "paladin", tier = "avance", cost = 0,
-    cats = { "sort" }, dmg_type = nil, target = "self",
-    desc = '"Pioche" 1. Gagne 1 "energie".',
+    cats = { "sort", "amnesie" }, dmg_type = nil, target = "self",
+    desc = '"Pioche" 1. Gagne 1 "energie". "soin" 4. "Amnesie"',
     effect = function(ctx)
       Deck = Deck or require("src.rules.deck")
       Game = Game or require("src.rules.game")
       Deck.draw_cards(ctx.state, 1)
       Game.gain_energy(ctx.state, 1)
-      Combat.log(ctx.state, ctx.hero.name .. " active Clairvoyance : pioche, +1 énergie.", "power")
+      Combat.grant_heal(ctx.hero, 4)
+      Combat.log(ctx.state, ctx.hero.name .. " active Clairvoyance : pioche, +1 énergie, +4 PV.", "power")
     end,
     upgrade = {
-      desc = '"Pioche" 2. Gagne 1 "energie".',
+      desc = '"Pioche" 2. Gagne 1 "energie". "soin" 6. "Amnesie"',
       effect = function(ctx)
         Deck = Deck or require("src.rules.deck")
         Game = Game or require("src.rules.game")
         Deck.draw_cards(ctx.state, 2)
         Game.gain_energy(ctx.state, 1)
-        Combat.log(ctx.state, ctx.hero.name .. " active Clairvoyance : pioche, +1 énergie.", "power")
+        Combat.grant_heal(ctx.hero, 6)
+        Combat.log(ctx.state, ctx.hero.name .. " active Clairvoyance : pioche, +1 énergie, +6 PV.", "power")
       end,
     },
   },
   {
+    -- Bouclier relevé 4/6 -> 6/9 et tag "Amnésie" ajouté (2026-08-28) : soin
+    -- inchangé (4/6).
     code = "lumiere-divine", name = "Lumière divine", class_id = "paladin", tier = "avance", cost = 2,
-    cats = { "defense", "soin", "sort" }, dmg_type = nil, target = "self",
-    desc = 'Tous les alliés gagnent 4 "bouclier". "soin" 4 à tous les alliés.',
+    cats = { "defense", "soin", "sort", "amnesie" }, dmg_type = nil, target = "self",
+    desc = 'Tous les alliés gagnent 6 "bouclier". "soin" 4 à tous les alliés. "Amnesie"',
     effect = function(ctx)
       for _, h in ipairs(living_heroes(ctx)) do
-        Combat.grant_defense(h, 4)
+        Combat.grant_defense(h, 6)
         Combat.grant_heal(h, 4)
       end
     end,
     upgrade = {
-      desc = 'Tous les alliés gagnent 6 "bouclier". "soin" 6 à tous les alliés.',
+      desc = 'Tous les alliés gagnent 9 "bouclier". "soin" 6 à tous les alliés. "Amnesie"',
       effect = function(ctx)
         for _, h in ipairs(living_heroes(ctx)) do
-          Combat.grant_defense(h, 6)
+          Combat.grant_defense(h, 9)
           Combat.grant_heal(h, 6)
         end
       end,

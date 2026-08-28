@@ -15,10 +15,13 @@ Deck.HAND_SIZE = 5
 -- cards.lua). Mage : "flameche"/"barriere" (renommées, pas
 -- "coup-direct-mage"/"encaisser-mage"). Assassin (2026-08-28, refonte
 -- complète) : "plan-attaque"/"se-cacher"/"repli-strategique" (renommées,
--- pas "coup-direct-assassin"/"encaisser-assassin"/"strategie").
+-- pas "coup-direct-assassin"/"encaisser-assassin"/"strategie"). Paladin
+-- (2026-08-28, refonte -- plus AUCUNE carte de dégâts) : "provocateur"/
+-- "infranchissable" (remplacent "coup-direct-paladin"/"encaisser-paladin",
+-- disparues), Rempart inchangée.
 Deck.STARTING_DECK_CODES = {
   { "coup-direct-guerrier", 1 }, { "encaisser-guerrier", 1 }, { "coup-taille", 1 },
-  { "coup-direct-paladin", 1 }, { "encaisser-paladin", 1 }, { "rempart", 1 },
+  { "provocateur", 1 }, { "infranchissable", 1 }, { "rempart", 1 },
   { "flameche", 1 }, { "barriere", 1 }, { "missile-magique", 1 },
   { "plan-attaque", 1 }, { "se-cacher", 1 }, { "repli-strategique", 1 },
 }

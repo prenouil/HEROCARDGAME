@@ -57,6 +57,20 @@ Glossary.terms = {
   -- jouée) -- cette entrée ne sert qu'à l'explication affichée, jamais une
   -- deuxième source de vérité sur l'effet.
   { key = "furtif", icon = nil, has_icon = false, related = "", explain = "Ne fait pas perdre de Discrétion en la jouant. Donne 2 Discrétion si défaussée sans avoir été jouée." },
+  -- Provocation (2026-08-28, statut propre au Paladin, clarifié après coup) :
+  -- vrai statut de combat contrairement à Discrétion -- badge sur le cadre du
+  -- héros comme Puissance/Esquive (voir STATUS_TOOLTIP_FIELDS dans view.lua),
+  -- décroissance -1/tour gérée par Game.start_turn (pas
+  -- Game.decay_end_of_turn_statuses, voir son commentaire).
+  { key = "provocation", icon = nil, has_icon = false, related = "", explain = "Le personnage a +50% de chances d'être ciblé par les ennemis. -1 Provocation au début de chaque tour." },
+  -- Amnésie (2026-08-28, carte Clairvoyance du Paladin) : Icone/Statut "no"
+  -- dans le tableur source -- jamais de badge sur un héros (ce n'est pas un
+  -- statut de personnage, juste une propriété de LA CARTE), texte entre
+  -- guillemets sur la carte elle-même. Effet réel implémenté dans
+  -- Game.finish_card (zone `state.exhausted`, repêchée au combat suivant par
+  -- Game.start_next_combat/start_boss_combat) -- cette entrée ne sert qu'à
+  -- l'explication affichée, jamais une deuxième source de vérité.
+  { key = "amnesie", icon = nil, has_icon = false, related = "", explain = "Après utilisation, la carte disparaît pour le reste du combat (elle revient au combat suivant)." },
 }
 
 -- Lowercase + strip everything but a-z. Le jeu de cartes source n'utilise que des

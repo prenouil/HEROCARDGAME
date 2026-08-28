@@ -359,6 +359,91 @@ describe("Game.decay_end_of_turn_statuses (bug signalé 2026-08-24 : Vulnérabil
   end)
 end)
 
+-- Provocation (2026-08-28, statut du Paladin) : décroît via Game.start_turn,
+-- pas Game.decay_end_of_turn_statuses (voir son commentaire -- le tirage de
+-- cible doit voir la valeur pleine avant la décroissance).
+describe("Provocation : décroissance via Game.start_turn (2026-08-28)", function()
+  it("décroît de 1 par tour, jamais sous 0", function()
+    local state = Game.new_state()
+    state.rng = Game.new_rng_streams(1)
+    state.heroes = { { id = "h1", name = "h1", hp = 18, max_hp = 18, provocation = 2 } }
+    state.enemies = {}
+    Game.start_turn(state)
+    assert.equal(1, state.heroes[1].provocation)
+    Game.start_turn(state)
+    assert.equal(0, state.heroes[1].provocation)
+    Game.start_turn(state)
+    assert.equal(0, state.heroes[1].provocation) -- jamais négatif
+  end)
+
+  it("ne touche pas un héros mort", function()
+    local state = Game.new_state()
+    state.rng = Game.new_rng_streams(1)
+    state.heroes = { { id = "h1", name = "h1", hp = 0, max_hp = 18, provocation = 2 } }
+    state.enemies = {}
+    Game.start_turn(state)
+    assert.equal(2, state.heroes[1].provocation)
+  end)
+end)
+
+-- Boucliers programmés (2026-08-28, carte "Infranchissable") : voir
+-- Game.schedule_shield, consommé par Game.start_turn.
+describe("Game.schedule_shield / Game.start_turn : boucliers programmés", function()
+  it("accorde le bouclier au bon début de tour, pas avant", function()
+    local state = Game.new_state()
+    state.rng = Game.new_rng_streams(1)
+    local hero = { id = "h1", name = "h1", hp = 18, max_hp = 18, defense = 0, scheduled_shields = {} }
+    state.heroes = { hero }
+    state.enemies = {}
+    Game.schedule_shield(hero, 10, 1)
+    Game.start_turn(state) -- turns_left 1 -> 0 : accordé CE tour
+    assert.equal(10, hero.defense)
+    assert.equal(0, #hero.scheduled_shields)
+  end)
+
+  it("2 tours programmés (Infranchissable amélioré) : un gain distinct à chaque début de tour", function()
+    local state = Game.new_state()
+    state.rng = Game.new_rng_streams(1)
+    local hero = { id = "h1", name = "h1", hp = 18, max_hp = 18, defense = 0, scheduled_shields = {} }
+    state.heroes = { hero }
+    state.enemies = {}
+    Game.schedule_shield(hero, 15, 1)
+    Game.schedule_shield(hero, 15, 2)
+    Game.start_turn(state) -- 1er programmé accordé, defense reset à 0 juste avant
+    assert.equal(15, hero.defense)
+    assert.equal(1, #hero.scheduled_shields)
+    Game.start_turn(state) -- 2e programmé accordé (defense re-remise à 0 entre-temps)
+    assert.equal(15, hero.defense)
+    assert.equal(0, #hero.scheduled_shields)
+  end)
+end)
+
+-- "Amnésie" (2026-08-28, carte Clairvoyance du Paladin) : voir
+-- Game.finish_card (routage) et Game.start_next_combat (retour au combat suivant).
+describe("Amnésie : Game.finish_card route vers state.exhausted, jamais la défausse", function()
+  it("une carte 'amnesie' va dans state.exhausted, pas state.discard", function()
+    local state = Game.new_state()
+    local amnesie_def = { code = "test-amnesie", cats = { "amnesie" } }
+    state.hand = { { uid = 1, def = amnesie_def } }
+    state.pending = { uid = 1 }
+    Game.finish_card(state, state.pending, { card_def = amnesie_def })
+    assert.equal(0, #state.hand)
+    assert.equal(0, #state.discard)
+    assert.equal(1, #state.exhausted)
+    assert.equal("test-amnesie", state.exhausted[1].def.code)
+  end)
+
+  it("une carte SANS 'amnesie' va bien en défausse, comme avant", function()
+    local state = Game.new_state()
+    local normal_def = { code = "test-normal", cats = { "melee" } }
+    state.hand = { { uid = 1, def = normal_def } }
+    state.pending = { uid = 1 }
+    Game.finish_card(state, state.pending, { card_def = normal_def })
+    assert.equal(1, #state.discard)
+    assert.equal(0, #state.exhausted)
+  end)
+end)
+
 describe("Flux de jeu : jouer une carte", function()
   it("dépense l'énergie, applique l'effet, et défausse la carte", function()
     local state = Game.new_state()

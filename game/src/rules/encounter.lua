@@ -123,6 +123,13 @@ end
 -- exclusion binaire comme Camouflé (déjà géré par le filtre `visible`
 -- ci-dessus), juste moins probable. Sans effet sur les héros sans Discrétion
 -- (poids 1, `discretion` nil traité comme 0).
+--
+-- Provocation (2026-08-28, statut du Paladin, clarifié après coup -- "+50% de
+-- chances d'être ciblé par les ennemis") : bonus FIXE de +50% (×1.5) tant que
+-- `provocation > 0`, quel que soit le nombre de stacks -- ceux-ci ne pilotent
+-- QUE la durée (1 stack perdu par tour, voir Game.start_turn), pas l'ampleur
+-- du bonus. Comme Discrétion, ne joue qu'en mode "random", après le filtre
+-- Camouflé (un héros Camouflé reste intouchable même en pleine Provocation).
 function Encounter.pick_hero_target(state, mode, rng)
   local alive = Combat.living_heroes(state)
   if #alive == 0 then return nil end
@@ -140,6 +147,7 @@ function Encounter.pick_hero_target(state, mode, rng)
   local weights, total_weight = {}, 0
   for i, h in ipairs(alive) do
     local w = math.max(0, 1 - 0.1 * (h.discretion or 0))
+    if (h.provocation or 0) > 0 then w = w * 1.5 end
     weights[i] = w
     total_weight = total_weight + w
   end

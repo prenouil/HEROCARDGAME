@@ -13,6 +13,11 @@ local Sequencer = require("src.util.sequencer")
 -- ou défaussée ; voir View.hand_rects_for/deck_pile_rect/discard_pile_rect.
 local View = require("src.ui.view")
 local Sfx = require("src.ui.sfx")
+-- Uniquement pour les couleurs des particules de cendres/étincelles
+-- (2026-08-28, voir Controller:spawn_ash) -- draw_particles (view.lua) reste
+-- l'unique endroit qui dessine réellement, ce module ne fait que choisir la
+-- teinte à leur passer.
+local Theme = require("src.ui.theme")
 
 local Controller = {}
 Controller.__index = Controller
@@ -99,8 +104,21 @@ local PARTICLE_DURATION = 0.45 -- s -- petit burst de pixels à l'impact
 local PARTICLE_COUNT = 6
 local STATUS_POP_DURATION = 0.35 -- s -- pop d'échelle d'un badge de statut à son application
 local SHIELD_FX_DURATION = 1.0 -- s -- gros bouclier en fondu sur un gain de Défense
+-- "Amnésie" (2026-08-28, demande explicite) : durée du rétrécissement/fondu
+-- sur place d'une carte qui se disperse en cendres, voir
+-- Controller:play_amnesie_vanish -- plus long que PARTICLE_DURATION pour que
+-- les cendres (dessinées avec le même controller.particles/particle_duration)
+-- aient le temps de retomber pendant que la carte s'efface.
+local ASH_DISSOLVE_DURATION = 0.5
+local ASH_PARTICLE_COUNT = 10
+-- "Furtif" (2026-08-28, demande explicite) : petit nuage de particules
+-- teinté Discrétion quand une carte Furtif restée en main se défausse en fin
+-- de tour (voir Controller:animate_discard_snapshot) -- bien moins de
+-- particules que les cendres d'Amnésie, un simple accent visuel synchronisé
+-- avec le flottant de Discrétion (voir Controller:react_to_diff).
+local FURTIF_SPARKLE_COUNT = 5
 -- Champs de statut comparés avant/après pour déclencher le pop.
-local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "camoufle" }
+local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "camoufle", "provocation" }
 
 function Controller.new()
   local self = setmetatable({}, Controller)
@@ -427,6 +445,16 @@ function Controller:animate_discard_snapshot(cards, exclude_uid)
           duration = END_TURN_DISCARD_FLIGHT_DURATION, fade_in = false, def = c.def,
         }
         self:schedule_sfx("flup", delay)
+        -- "Furtif" (2026-08-28, demande explicite -- "un petit effet de
+        -- disparition qui incrémente le compteur de discrétion") : la carte
+        -- part quand même en défausse (voir Game.discard_cards, inchangé pour
+        -- ce cas), juste une petite étincelle en plus à son point de départ --
+        -- le VRAI gain de Discrétion (+2, voir Game.grant_furtif_discard_discretion)
+        -- est déjà couvert par le flottant générique de Controller:react_to_diff,
+        -- appelé par Controller:end_turn AVANT cette fonction -- pas dupliqué ici.
+        if Game.card_has_cat(c.def, "furtif") then
+          self:spawn_ash(origin, Theme.discretion, FURTIF_SPARKLE_COUNT, -10)
+        end
       end
     end
   end
@@ -434,15 +462,24 @@ function Controller:animate_discard_snapshot(cards, exclude_uid)
 end
 
 --- Anime une seule carte (celle qui vient d'être jouée, si elle a bien fini en
--- défausse -- pas si elle est restée en main ou retournée au sommet du deck)
--- depuis son rect dans `hand_before` (capturé avant l'appel qui la résout).
+-- défausse OU en cendres -- pas si elle est restée en main ou retournée au
+-- sommet du deck) depuis son rect dans `hand_before` (capturé avant l'appel
+-- qui la résout). "Amnésie" (2026-08-28) vérifiée EN PREMIER : une carte
+-- Amnésie finit dans state.exhausted, jamais state.discard (voir
+-- Game.finish_card) -- sans ce détour, elle ne recevrait AUCUNE animation du
+-- tout (juste retirée de la main en silence).
 function Controller:maybe_animate_played_discard(played_uid, hand_before)
   if not played_uid then return end
-  local last = self.state.discard[#self.state.discard]
-  if not last or last.uid ~= played_uid then return end -- pas parti en défausse (main/dessus du deck/pas encore résolu)
   local hand_rects = View.hand_rects_for(hand_before)
   local origin = hand_rects[played_uid]
   if not origin then return end
+  local last_exhausted = self.state.exhausted[#self.state.exhausted]
+  if last_exhausted and last_exhausted.uid == played_uid then
+    self:play_amnesie_vanish(origin, last_exhausted.def)
+    return
+  end
+  local last = self.state.discard[#self.state.discard]
+  if not last or last.uid ~= played_uid then return end -- pas parti en défausse (main/dessus du deck/pas encore résolu)
   self.card_anims[#self.card_anims + 1] = {
     from = origin, to = View.discard_pile_rect, elapsed = 0, delay = 0,
     duration = FLIGHT_DURATION, fade_in = false, def = last.def,
@@ -453,12 +490,17 @@ end
 --- Capture PV + statuts de toutes les unités -- même principe que l'ancien
 -- snapshot_hp (juste avant un appel de règles), étendu pour que
 -- Controller:react_to_diff puisse aussi détecter l'application d'un statut,
--- pas seulement une perte de PV.
+-- pas seulement une perte de PV. `discretion` à part, PAS dans STATUS_KEYS
+-- (2026-08-28, demande explicite -- flottant dédié comme un gain de PV,
+-- jamais un pop de badge : Discrétion ne s'affiche nulle part en badge,
+-- juste en texte sous le portrait, voir draw_hero) -- nil pour les 3 classes
+-- qui n'ont pas ce champ, jamais traité comme 0 (romprait le `and` de garde
+-- dans Controller:react_to_diff).
 function Controller:snapshot_units()
   local out = {}
   local function capture(list)
     for _, u in ipairs(list) do
-      local snap = { hp = u.hp }
+      local snap = { hp = u.hp, discretion = u.discretion }
       for _, k in ipairs(STATUS_KEYS) do snap[k] = u[k] or 0 end
       out[u.id] = snap
     end
@@ -488,6 +530,38 @@ function Controller:spawn_impact(unit_id)
       x = cx, y = cy, vx = math.cos(angle) * speed, vy = math.sin(angle) * speed, t = 0,
     }
   end
+end
+
+--- Petit nuage de particules réparties sur tout un RECT (pas un point comme
+-- spawn_impact, une carte entière) -- réutilise `self.particles`/
+-- draw_particles (view.lua) tel quel, `color`/`gravity` (2026-08-28) sont
+-- lus en priorité sur les valeurs par défaut (voir leur commentaire côté
+-- view.lua). `gravity` négative = dérive vers le HAUT (cendres qui
+-- s'envolent), jamais une vraie chute comme le burst d'impact au combat.
+function Controller:spawn_ash(rect, color, count, gravity)
+  for _ = 1, count do
+    local angle = math.random() * math.pi * 2
+    local speed = 15 + math.random() * 35
+    self.particles[#self.particles + 1] = {
+      x = rect.x + math.random() * rect.w, y = rect.y + math.random() * rect.h,
+      vx = math.cos(angle) * speed, vy = math.sin(angle) * speed - 20,
+      t = 0, color = color, gravity = gravity,
+    }
+  end
+end
+
+--- "Amnésie" (2026-08-28, demande explicite -- "la carte, au lieu d'aller
+-- dans la défausse, se disperse en cendre") : la carte ne vole nulle part
+-- (elle ne rejoint jamais state.discard, voir state.exhausted dans game.lua)
+-- -- juste un rétrécissement/fondu SUR PLACE (voir le cas `a.dissolve` dans
+-- draw_card_flights, view.lua) + un burst de cendres grises par-dessus.
+function Controller:play_amnesie_vanish(rect, def)
+  self.card_anims[#self.card_anims + 1] = {
+    from = rect, to = rect, elapsed = 0, delay = 0,
+    duration = ASH_DISSOLVE_DURATION, dissolve = true, def = def,
+  }
+  self:spawn_ash(rect, Theme.ash, ASH_PARTICLE_COUNT, -30)
+  Sfx.play("ash")
 end
 
 function Controller:pop_status(unit_id, key)
@@ -615,6 +689,14 @@ function Controller:react_to_diff(before, opts)
       if not hit_played then Sfx.play(hit_sfx); hit_played = true end
     elseif u.hp > b.hp then
       self:spawn_floater(u.id, u.hp - b.hp, "heal")
+    end
+    -- Discrétion (2026-08-28, demande explicite -- "un effet qui indique la
+    -- valeur, comme pour un gain de PV") : flottant dédié sur TOUTE hausse,
+    -- quelle que soit la source (allié qui agit +1, fin de tour sans agir +5,
+    -- carte propre, carte "Furtif" défaussée +2) -- ce diff générique les
+    -- couvre TOUTES d'un coup, jamais un site d'appel par source.
+    if u.discretion and b.discretion and u.discretion > b.discretion then
+      self:spawn_floater(u.id, u.discretion - b.discretion, "discretion")
     end
     for _, k in ipairs(STATUS_KEYS) do
       if (u[k] or 0) > b[k] then self:pop_status(u.id, k) end
@@ -774,7 +856,14 @@ end
 -- avant de lancer la suite.
 function Controller:end_turn()
   local hand_before = Game.shallow_copy(self.state.hand)
+  -- Discrétion "Furtif" (2026-08-28) : Game.end_turn_requested accorde +2
+  -- Discrétion par carte Furtif restée en main (voir
+  -- Game.grant_furtif_discard_discretion, appelé avant la défausse
+  -- elle-même) -- avant/après ici pour que react_to_diff en déduise le
+  -- flottant, même mécanisme générique que tout autre gain de Discrétion.
+  local before = self:snapshot_units()
   if Game.end_turn_requested(self.state) then
+    self:react_to_diff(before)
     local discard_duration = self:animate_discard_snapshot(hand_before)
     self:advance_after_discard_sequenced(discard_duration + END_TURN_TO_ENEMY_RESOLUTION_PAUSE)
   end

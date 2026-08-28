@@ -114,3 +114,48 @@ describe("Cards.upgraded_def", function()
     end
   end)
 end)
+
+describe("Cartes Paladin (2026-08-28, refonte)", function()
+  it("Provocateur donne le bouclier à la CIBLE mais la Provocation au LANCEUR", function()
+    local base = Cards.by_code("provocateur")
+    local state = { log = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0, provocation = 0 }
+    local ally = { id = "h2", name = "h2", hp = 20, max_hp = 20, defense = 0, provocation = 0 }
+    base.effect({ state = state, hero = hero, target = ally, card_def = base })
+    assert.equal(4, ally.defense)
+    assert.equal(0, ally.provocation) -- pas l'allié
+    assert.equal(2, hero.provocation) -- le lanceur
+    assert.equal(0, hero.defense) -- le lanceur ne reçoit pas de bouclier ici
+  end)
+
+  it("Infranchissable amélioré programme 2 boucliers distincts (voir Game.schedule_shield)", function()
+    local up = Cards.upgraded_def(Cards.by_code("infranchissable"))
+    local state = { log = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0, provocation = 0, scheduled_shields = {} }
+    up.effect({ state = state, hero = hero, target = hero, card_def = up })
+    assert.equal(15, hero.defense) -- gain immédiat
+    assert.equal(3, hero.provocation)
+    assert.equal(2, #hero.scheduled_shields)
+    assert.equal(1, hero.scheduled_shields[1].turns_left)
+    assert.equal(2, hero.scheduled_shields[2].turns_left)
+  end)
+
+  it("Raillerie redirige l'ennemi ciblé vers le Paladin (renommée depuis 'Provocation', même effet)", function()
+    local base = Cards.by_code("raillerie")
+    local state = { log = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0 }
+    local enemy = { id = "e1", name = "e1", hp = 20, max_hp = 20, next_move = { kind = "dmg" }, target_hero_id = "autre" }
+    base.effect({ state = state, hero = hero, target = enemy, card_def = base })
+    assert.equal(8, hero.defense)
+    assert.equal("h1", enemy.target_hero_id)
+  end)
+
+  it("Clairvoyance et Lumière divine sont taguées 'amnesie'", function()
+    for _, code in ipairs({ "clairvoyance", "lumiere-divine" }) do
+      local def = Cards.by_code(code)
+      local has_amnesie = false
+      for _, cat in ipairs(def.cats) do if cat == "amnesie" then has_amnesie = true end end
+      assert.is_true(has_amnesie, code .. " devrait porter 'amnesie' dans cats")
+    end
+  end)
+end)

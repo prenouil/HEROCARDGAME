@@ -28,6 +28,11 @@ local function def_has_cat(def, cat)
   end
   return false
 end
+-- Exposée publiquement (2026-08-28, demande explicite -- petit effet visuel
+-- de disparition sur une carte "Furtif" défaussée, voir
+-- Controller:animate_discard_snapshot dans src/ui/controller.lua) : la UI a
+-- besoin du même test, jamais une 2ᵉ copie de cette logique côté view/controller.
+Game.card_has_cat = def_has_cat
 
 local function shallow_copy(t)
   local out = {}
@@ -61,6 +66,18 @@ local function fresh_hero(def)
     id = def.id, class_id = def.class_id, name = def.name, icon = def.icon, label = def.label, max_hp = def.max_hp,
     hp = def.max_hp, defense = 0, esquive = 0, camoufle = 0,
     incapacite = 0, vulnerabilite = 0, puissance = 0, saignements = 0,
+    -- Provocation (2026-08-28, statut propre au Paladin, clarifié après coup --
+    -- "+50% de chances d'être ciblé par les ennemis, puis diminue de 1") : un
+    -- statut de combat comme les autres (voir STATUS_KEYS/STATUS_TOOLTIP_FIELDS
+    -- côté UI), décroît via Game.start_turn plutôt que
+    -- Game.decay_end_of_turn_statuses -- voir son commentaire, le tirage de
+    -- cible (Encounter.roll_telegraphs) doit encore voir la valeur PLEINE ce
+    -- tour-ci.
+    provocation = 0,
+    -- Boucliers programmés (2026-08-28, carte "Infranchissable") : liste de
+    -- {amount, turns_left}, consommée par Game.start_turn -- voir
+    -- Game.schedule_shield, seul point d'entrée pour y ajouter une entrée.
+    scheduled_shields = {},
     played_card_this_turn = false,
     mana = def.class_id == "mage" and 2 or nil,
     discretion = def.class_id == "assassin" and 0 or nil,
@@ -99,6 +116,7 @@ local function carried_hero(h)
   local n = shallow_copy(h)
   n.defense = 0; n.esquive = 0; n.camoufle = 0
   n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.saignements = 0
+  n.provocation = 0; n.scheduled_shields = {}
   n.played_card_this_turn = false
   apply_combat_start_blessing(n)
   return n
@@ -160,6 +178,12 @@ end
 function Game.new_state()
   return {
     heroes = {}, enemies = {}, deck = {}, hand = {}, discard = {},
+    -- "Amnésie" (2026-08-28, demande explicite) : 4ᵉ zone de cartes, à part de
+    -- deck/main/défausse -- une carte qui y tombe (voir Game.finish_card) ne
+    -- revient jamais dans la rotation de CE combat, seulement repêchée avec le
+    -- reste au tout début du combat SUIVANT (voir Game.start_next_combat/
+    -- start_boss_combat, qui la vident dans `reclaimed`).
+    exhausted = {},
     pending = nil, turn = 1, over = false, energy = 0,
     run = { combat_index = 1 }, draft_picks = nil,
     combat_snapshot = nil, turn_snapshot = nil, uid_counter = 0, log = {},
@@ -304,7 +328,7 @@ function Game.reset_run(state, seed)
   end
   state.enemies = enemies
   state.deck = Deck.build_starting_deck(function() return Game.next_uid(state) end, state.rng.deck)
-  state.hand = {}; state.discard = {}; state.pending = nil
+  state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.over = false; state.energy = 0
   state.log = {}
   Combat.log(state, "Run Infini — Combat 1 (budget " .. budget .. ") : " .. Encounter.summary(state.enemies), "sys")
@@ -330,8 +354,11 @@ function Game.start_next_combat(state)
   for _, c in ipairs(state.deck) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.hand) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.discard) do reclaimed[#reclaimed + 1] = c end
+  -- "Amnésie" (2026-08-28) : "disparait pour le RESTE du combat" -- revient
+  -- donc bien ici, au tout début du combat suivant, mélangée avec le reste.
+  for _, c in ipairs(state.exhausted) do reclaimed[#reclaimed + 1] = c end
   state.deck = Deck.shuffle(reclaimed, state.rng.deck)
-  state.hand = {}; state.discard = {}; state.pending = nil
+  state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.energy = 0
   state.log = {}
   Combat.log(state, "Combat " .. state.run.combat_index .. " (budget " .. budget .. ") : " .. Encounter.summary(state.enemies), "sys")
@@ -353,7 +380,7 @@ function Game.start_boss_test(state, seed)
   state.rng = Game.new_rng_streams(seed)
   state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter)
   state.deck = Deck.build_starting_deck(function() return Game.next_uid(state) end, state.rng.deck)
-  state.hand = {}; state.discard = {}; state.pending = nil
+  state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.over = false; state.energy = 0
   state.log = {}
   Combat.log(state, "Test du boss : " .. Encounter.summary(state.enemies), "sys")
@@ -377,8 +404,9 @@ function Game.start_boss_combat(state)
   for _, c in ipairs(state.deck) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.hand) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.discard) do reclaimed[#reclaimed + 1] = c end
+  for _, c in ipairs(state.exhausted) do reclaimed[#reclaimed + 1] = c end
   state.deck = Deck.shuffle(reclaimed, state.rng.deck)
-  state.hand = {}; state.discard = {}; state.pending = nil
+  state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.energy = 0
   state.log = {}
   Combat.log(state, "Le Boss : " .. Encounter.summary(state.enemies), "sys")
@@ -387,6 +415,16 @@ function Game.start_boss_combat(state)
 end
 
 -- ---------- début de tour ----------
+
+--- Programme un gain de Bouclier `turns_from_now` débuts de tour plus tard
+-- (2026-08-28, carte "Infranchissable") : seul point d'entrée pour ajouter une
+-- entrée à `hero.scheduled_shields`, consommée par Game.start_turn --
+-- `turns_from_now = 2` (version améliorée) programme 2 gains DISTINCTS
+-- (celui-ci ET un appel séparé à 1), pas un seul gain doublé plus tard.
+function Game.schedule_shield(hero, amount, turns_from_now)
+  hero.scheduled_shields = hero.scheduled_shields or {}
+  hero.scheduled_shields[#hero.scheduled_shields + 1] = { amount = amount, turns_left = turns_from_now }
+end
 
 --- Équivalent startTurn : énergie globale remise à Game.TURN_START_ENERGY
 -- PILE (2026-08-11, précisé par le porteur de projet -- ni un plancher ni un
@@ -401,11 +439,35 @@ function Game.start_turn(state)
       h.defense = 0
       h.played_card_this_turn = false
       if h.puissance > 0 then h.puissance = h.puissance - 1 end
+      -- Boucliers programmés (2026-08-28, "Infranchissable") : APRÈS la remise
+      -- à 0 de la Défense juste au-dessus, sinon le gain serait effacé aussitôt.
+      if h.scheduled_shields and #h.scheduled_shields > 0 then
+        local remaining = {}
+        for _, entry in ipairs(h.scheduled_shields) do
+          entry.turns_left = entry.turns_left - 1
+          if entry.turns_left <= 0 then
+            Combat.grant_defense(h, entry.amount)
+            Combat.log(state, h.name .. " reçoit " .. entry.amount .. " bouclier programmé.", "you")
+          else
+            remaining[#remaining + 1] = entry
+          end
+        end
+        h.scheduled_shields = remaining
+      end
     end
   end
   Combat.log(state, "— Tour " .. state.turn .. " : énergie à " .. state.energy .. ", pioche à " .. Deck.HAND_SIZE .. " —", "sys")
 
   Encounter.roll_telegraphs(state)
+
+  -- Provocation décroît APRÈS le tirage de cible ci-dessus (2026-08-28,
+  -- clarification explicite -- "décroit juste après l'application de l'effet,
+  -- vers le début du tour") : ce tirage doit encore voir la valeur PLEINE pour
+  -- CE tour, la décroissance ne doit affecter que le suivant.
+  for _, h in ipairs(state.heroes) do
+    if h.hp > 0 and (h.provocation or 0) > 0 then h.provocation = h.provocation - 1 end
+  end
+
   Game.snapshot_turn(state)
   local drawn = Deck.fill_hand(state)
 
@@ -572,7 +634,8 @@ function Game.tick_discretion_end_of_turn(state)
 end
 
 --- Équivalent finishCard : retire la carte de la main vers défausse/main/dessus
--- du deck selon ce que l'effet a demandé (ctx.return_to_hand / return_to_deck_top).
+-- du deck/zone "Amnésie" selon ce que l'effet a demandé (ctx.return_to_hand /
+-- return_to_deck_top / carte taguée "amnesie", voir cards.lua -- Clairvoyance).
 function Game.finish_card(state, pending, ctx)
   local idx
   for i, c in ipairs(state.hand) do
@@ -580,7 +643,12 @@ function Game.finish_card(state, pending, ctx)
   end
   if idx then
     local card = table.remove(state.hand, idx)
-    if ctx and ctx.return_to_hand then
+    if ctx and ctx.card_def and def_has_cat(ctx.card_def, "amnesie") then
+      -- "Disparait pour le reste du combat" (2026-08-28) : jamais en défausse,
+      -- jamais repiochable avant le combat suivant -- voir Game.start_next_combat/
+      -- start_boss_combat, seuls endroits qui repêchent `state.exhausted`.
+      state.exhausted[#state.exhausted + 1] = card
+    elseif ctx and ctx.return_to_hand then
       state.hand[#state.hand + 1] = card
     elseif ctx and ctx.return_to_deck_top then
       state.deck[#state.deck + 1] = card -- fin du tableau = dessus du deck (prochaine carte piochée)

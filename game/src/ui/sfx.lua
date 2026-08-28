@@ -147,6 +147,16 @@ BUILDERS.defeat = function()
   })
 end
 
+-- "cendre" -- carte "Amnésie" qui se disperse en cendres au lieu de partir en
+-- défausse (2026-08-28, demande explicite) : bruit sec sans hauteur, decay
+-- rapide -- un "pfft" de matière qui s'effrite, distinct de "flup"
+-- (déplacement de carte) et "eclat" (amélioration).
+BUILDERS.ash = function()
+  return Chiptune.render(0.28, function(t)
+    return Chiptune.noise() * Chiptune.decay(t, 0.28, 2.2)
+  end, 0.5)
+end
+
 local cache = {}
 
 local function get(name)

@@ -373,6 +373,16 @@ local function draw_enemy_icon(template_id, icon, label, x, y, w, size, color)
   if not drawn then icon_text(icon, label, x, y, w, size, color) end
 end
 
+-- Rémanence sur l'arrivée d'un badge (2026-08-28, demande explicite --
+-- "gros puis scale vers le point d'arrivée avec un effet de rémanence
+-- pendant quelques courts instants") : 2 échos fantômes dessinés à une
+-- échelle plus grande que l'icône réelle, alpha dégressif, seulement pendant
+-- le premier ECHO_WINDOW du pop -- juste assez pour donner une impression de
+-- traînée lumineuse qui se resserre, PAS un vrai système de particules (même
+-- esprit que draw_particles dans ce fichier : simple, à la main).
+local STATUS_POP_ECHO_WINDOW = 0.6 -- fraction de pop_duration pendant laquelle les échos existent
+local STATUS_POP_ECHO_COUNT = 2
+
 --- Icône de statut (voir src/ui/icons.lua) avec sa valeur numérique à côté
 -- (value peut être nil, ex. Camouflage qui n'a pas de compteur) ; repli texte
 -- "ABBR valeur" si la clé n'a pas d'icône dessinée. `pop_t`/`pop_duration`
@@ -382,8 +392,25 @@ end
 local function status_badge(status_key, abbr, value, x, y, w, size, color, pop_t, pop_duration)
   local cx, cy = x + size * 0.55, y + size / 2
   local scale = 1
+  local p = nil
   if pop_t and pop_duration then
-    scale = 1 + 0.5 * (1 - math.min(1, pop_t / pop_duration))
+    p = math.min(1, pop_t / pop_duration)
+    scale = 1 + 0.5 * (1 - p)
+  end
+  -- Échos AVANT l'icône réelle (derrière, alpha faible) : sinon ils la
+  -- recouvriraient et casseraient sa lisibilité pendant le pop.
+  if p and p < STATUS_POP_ECHO_WINDOW then
+    local echo_life = 1 - p / STATUS_POP_ECHO_WINDOW -- 1 -> 0 sur la fenêtre
+    for i = 1, STATUS_POP_ECHO_COUNT do
+      local echo_alpha = echo_life * 0.3 / i
+      local echo_scale = scale * (1 + 0.22 * i)
+      love.graphics.push()
+      love.graphics.translate(cx, cy)
+      love.graphics.scale(echo_scale, echo_scale)
+      love.graphics.translate(-cx, -cy)
+      Icons.draw_status(status_key, cx, cy, size * 0.42, color or Theme.status, echo_alpha)
+      love.graphics.pop()
+    end
   end
   love.graphics.push()
   love.graphics.translate(cx, cy)
@@ -710,6 +737,20 @@ local function draw_hero(controller, h, r)
   -- seul le badge manquait -- le statut était donc invisible côté joueur.
   if (h.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = h.incapacite } end
   if (h.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = h.vulnerabilite } end
+  -- Provocation (2026-08-28, statut du Paladin) : uniquement côté héros, aucun
+  -- ennemi ne le porte -- pas de branche équivalente dans draw_enemy.
+  if (h.provocation or 0) > 0 then badges[#badges + 1] = { key = "provocation", abbr = "PROV", value = h.provocation } end
+  -- Bouclier programmé (2026-08-28, demande explicite -- "icone dédiée",
+  -- Infranchissable) : pas un vrai statut numérique (hero.scheduled_shields
+  -- est un TABLEAU d'entrées {amount, turns_left}, jamais un champ dans
+  -- STATUS_KEYS) -- valeur affichée = somme des montants encore en attente,
+  -- recalculée à chaque frame directement depuis les données, jamais
+  -- dupliquée dans un champ à part.
+  if h.scheduled_shields and #h.scheduled_shields > 0 then
+    local pending_total = 0
+    for _, entry in ipairs(h.scheduled_shields) do pending_total = pending_total + entry.amount end
+    badges[#badges + 1] = { key = "shield_pending", abbr = "PROG", value = pending_total }
+  end
   draw_badge_row(badges, 0, 93, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
 
   -- Nom en bas du cadre (2026-08-27, demande explicite) : voir name_y calculé
@@ -1386,6 +1427,7 @@ local STATUS_TOOLTIP_FIELDS = {
   { field = "saignements", glossary_key = "saignement" },
   { field = "incapacite", glossary_key = "incapacite" },
   { field = "vulnerabilite", glossary_key = "vulnerabilite" },
+  { field = "provocation", glossary_key = "provocation" },
 }
 
 local function active_status_lines(unit)
@@ -1508,6 +1550,29 @@ local function draw_card_flights(controller)
   for _, a in ipairs(controller.card_anims) do
     if a.elapsed >= a.delay then
       local p = math.min(1, (a.elapsed - a.delay) / a.duration)
+      -- "Amnésie" (2026-08-28, demande explicite -- "se disperse en cendre") :
+      -- la carte ne VOLE nulle part (`a.dissolve`, voir Controller:
+      -- play_amnesie_vanish) -- elle ne rejoint jamais la défausse (voir
+      -- state.exhausted dans game.lua), donc pas de destination à animer,
+      -- juste un rétrécissement + fondu ACCÉLÉRÉ sur place, synchronisé avec
+      -- le burst de cendres (Controller:spawn_ash) dessiné par-dessus.
+      if a.dissolve then
+        local ease = p * p -- easeInQuad : démarre lentement, s'effondre vers la fin
+        local scale = 1 - 0.35 * ease
+        local alpha = 1 - ease
+        local cx, cy = a.from.x + a.from.w / 2, a.from.y + a.from.h / 2
+        local w, h = a.from.w * scale, a.from.h * scale
+        if a.def then
+          card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+          love.graphics.setCanvas(card_flight_canvas)
+          love.graphics.clear(0, 0, 0, 0)
+          draw_card_face(a.def, CARD_W, CARD_H, a.def.cost, a.def.desc, Theme.muted, false)
+          love.graphics.setCanvas()
+          love.graphics.setColor(1, 1, 1, alpha)
+          love.graphics.draw(card_flight_canvas, cx - w / 2, cy - h / 2, 0, w / CARD_W, h / CARD_H)
+        end
+        goto continue
+      end
       -- Petit rebond d'arrivée sur la pioche (2026-08-21, demande explicite) :
       -- ease_out_back (même courbe que le titre "Victoire !") dépasse
       -- légèrement 1 avant de s'y stabiliser -- la carte "atterrit" dans la
@@ -1536,6 +1601,7 @@ local function draw_card_flights(controller)
         set(Theme.panel_light, alpha)
         love.graphics.rectangle("fill", x, y, w, h, 8, 8)
       end
+      ::continue::
     end
   end
   love.graphics.setColor(1, 1, 1, 1)
@@ -1546,7 +1612,12 @@ end
 -- visuels") : monte et s'estompe depuis Controller:spawn_floater, couleur
 -- selon le sens (dégâts/soin) -- pas de logique de jeu ici, juste l'interpolation.
 local FLOATER_RISE = 34
-local FLOATER_COLOR = { damage = "hp", heal = "heal" }
+-- "discretion" (2026-08-28, demande explicite) : même famille visuelle que
+-- "heal" (traitement par défaut, voir draw_floaters plus bas), juste une
+-- teinte propre (Theme.discretion, déjà celle du texte "DISCR N" sous le
+-- portrait) pour qu'un flottant de Discrétion ne se confonde jamais avec un
+-- vrai soin.
+local FLOATER_COLOR = { damage = "hp", heal = "heal", discretion = "discretion" }
 -- Retour du porteur de projet (2026-08-09) : les dégâts doivent taper plus
 -- fort visuellement -- police nettement plus grosse + un zoom qui dépasse puis
 -- se stabilise (ease_out_back, déjà utilisé pour le titre "Victoire !", pas
@@ -1588,14 +1659,20 @@ end
 -- main (pas de love.graphics.ParticleSystem, pas de nouvel asset), pour
 -- rester dans l'esprit pixel art plutôt que d'y superposer un vrai système de
 -- particules (garde-fou explicite : rester simple, ne pas noyer le style).
+-- `pt.color`/`pt.gravity` (optionnels, 2026-08-28, demande explicite -- même
+-- liste/mêmes champs réutilisés pour les cendres d'"Amnésie", voir
+-- Controller:spawn_ash) : replis sur le burst d'impact rouge d'origine
+-- (Theme.hp, gravité qui fait retomber) quand absents, jamais un 2ᵉ système
+-- de particules parallèle pour un simple changement de couleur/trajectoire.
 local PARTICLE_GRAVITY = 160
 
 local function draw_particles(controller)
   for _, pt in ipairs(controller.particles) do
     local p = math.min(1, pt.t / controller.particle_duration)
+    local gravity = pt.gravity or PARTICLE_GRAVITY
     local x = pt.x + pt.vx * pt.t
-    local y = pt.y + pt.vy * pt.t + 0.5 * PARTICLE_GRAVITY * pt.t * pt.t
-    set(Theme.hp, 1 - p)
+    local y = pt.y + pt.vy * pt.t + 0.5 * gravity * pt.t * pt.t
+    set(pt.color or Theme.hp, 1 - p)
     love.graphics.rectangle("fill", x - 2, y - 2, 4, 4)
   end
   love.graphics.setColor(1, 1, 1, 1)
