@@ -44,8 +44,19 @@ Glossary.terms = {
   -- affichée en gros sous le portrait de l'Assassin comme la mana du Mage
   -- (voir draw_hero dans view.lua), pas via ce badge -- entrée gardée pour
   -- que les mentions "Discrétion" entre guillemets sur les cartes
-  -- (Assassinat/Dans les ombres) restent reconnues par RichText.
-  { key = "discretion", icon = nil, has_icon = false, related = "", explain = "Ressource propre à l'Assassin (0 à 10) : +1 quand un autre héros joue une carte, +5 s'il termine le tour sans en avoir joué. À 10, devient Camouflé. Repart à 0 dès que l'Assassin joue une carte." },
+  -- (toutes les cartes de l'Assassin, voir cards.lua) restent reconnues par RichText.
+  { key = "discretion", icon = nil, has_icon = false, related = "", explain = "Ressource propre à l'Assassin (0 à 10) : +1 quand un autre héros joue une carte, +5 s'il termine le tour sans en avoir joué. À 10, devient Camouflé. Repart à 0 dès que l'Assassin joue une carte non-Furtif, ou dès qu'il reçoit des dégâts." },
+  -- "Furtif" (2026-08-28, ajouté après coup -- l'utilisateur a d'abord donné
+  -- les cartes/la description de classe, puis précisé ce mot-clé séparément) :
+  -- porté par toutes les cartes de l'Assassin (voir cards.lua) -- Icone/Statut
+  -- "no" dans le tableur source : jamais de pastille dédiée sur le cadre du
+  -- héros (contrairement à Discrétion, affichée sous le portrait), juste ce
+  -- texte entre guillemets sur la carte elle-même. Effet réel implémenté dans
+  -- Game.on_card_played (pas de perte de Discrétion/Camouflé en la jouant) et
+  -- Game.grant_furtif_discard_discretion (+2 Discrétion si défaussée non
+  -- jouée) -- cette entrée ne sert qu'à l'explication affichée, jamais une
+  -- deuxième source de vérité sur l'effet.
+  { key = "furtif", icon = nil, has_icon = false, related = "", explain = "Ne fait pas perdre de Discrétion en la jouant. Donne 2 Discrétion si défaussée sans avoir été jouée." },
 }
 
 -- Lowercase + strip everything but a-z. Le jeu de cartes source n'utilise que des

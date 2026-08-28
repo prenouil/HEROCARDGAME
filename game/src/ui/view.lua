@@ -17,7 +17,7 @@ local Enemies = require("src.data.enemies")
 local Heroes = require("src.data.heroes")
 local Combat = require("src.rules.combat")
 local Cards = require("src.data.cards")
-local FeuDeCamp = require("src.rules.feu_de_camp")
+local Temple = require("src.rules.temple")
 local Game = require("src.rules.game")
 local Deck = require("src.rules.deck")
 
@@ -36,7 +36,10 @@ end
 local W, H = 960, 660
 View.W, View.H = W, H
 
-local UNIT_W, UNIT_H = 150, 156 -- +28 (2026-08-08) pour l'affichage d'énergie agrandi ci-dessous
+-- +12 (2026-08-27, demande explicite -- portraits plus gros partout, voir
+-- HERO_PORTRAIT_SIZE plus bas) : la carte grandit un peu pour absorber le
+-- portrait agrandi sans tasser le reste (badges, nom en bas côté héros).
+local UNIT_W, UNIT_H = 150, 168
 local CARD_W, CARD_H = 92, 138
 local ROW_GAP = 12
 
@@ -60,7 +63,7 @@ function View.enemy_rects(state)
   return out
 end
 
-local HERO_ROW_Y = 238 -- espace troupe/ennemis agrandi (2026-08-08) : 56px de marge sous les cartes ennemies (54+128=182), au lieu de 0 avant
+local HERO_ROW_Y = 250 -- 238->250 (2026-08-27, demande explicite -- "descendre un peu les aventuriers")
 
 function View.hero_rects(state)
   local rects = centered_row(#state.heroes, UNIT_W, UNIT_H, HERO_ROW_Y)
@@ -99,6 +102,14 @@ local HAND_FAN_DROP = 7 -- px de descente par carte d'écart au centre
 -- l'éventail (rotation + descente) déjà en place.
 local HAND_OVERLAP_GAP = -CARD_W * 0.22
 
+-- Redescendue, beaucoup plus bas cette fois (2026-08-27, demande explicite --
+-- "beaucoup plus bas", après un premier +15px jugé insuffisant) : 419->450.
+-- Butée par le budget vertical du bas d'écran (H=660, voir plus haut) : pour
+-- y arriver sans déborder, "Fin de tour" a dû rétrécir un peu (88x74->88x64,
+-- voir END_TURN_BTN_W/H plus bas) -- pas redemandé, mais nécessaire pour que
+-- tout tienne encore à l'écran.
+local HAND_Y = 450
+
 local function hand_row_fan(count, y)
   local rects = centered_row(count, CARD_W, CARD_H, y, HAND_OVERLAP_GAP)
   local mid = (count + 1) / 2
@@ -115,7 +126,7 @@ end
 -- main passée (avant une défausse, par ex.) même après que `state.hand` a déjà
 -- changé, pour les animations de vol de carte (voir controller.lua).
 function View.hand_rects_for(cards)
-  local rects = hand_row_fan(#cards, 404)
+  local rects = hand_row_fan(#cards, HAND_Y)
   local out = {}
   for i, c in ipairs(cards) do out[c.uid] = rects[i] end
   return out
@@ -151,8 +162,8 @@ end
 -- "DEFAUSSE : X" suffisent. CARD_W/CARD_H restent la taille des cartes
 -- elles-mêmes (main, vol pioche<->main), inchangée.
 local PILE_W, PILE_H = CARD_W * 0.5, CARD_H * 0.5
-View.deck_pile_rect = { x = 20, y = 404, w = PILE_W, h = PILE_H }
-View.discard_pile_rect = { x = W - 20 - PILE_W, y = 404, w = PILE_W, h = PILE_H }
+View.deck_pile_rect = { x = 20, y = HAND_Y, w = PILE_W, h = PILE_H }
+View.discard_pile_rect = { x = W - 20 - PILE_W, y = HAND_Y, w = PILE_W, h = PILE_H }
 
 -- Énergie globale (2026-08-11, remplace l'énergie individuelle par héros) :
 -- déplacée à droite de la pioche (2026-08-27, demande explicite -- avant,
@@ -166,13 +177,14 @@ View.energy_display_rect = {
   w = 90, h = 90,
 }
 
--- Rangée de boutons du bas ancrée sur la MAIN (2026-08-27) -- 404 + CARD_H,
--- PAS sur la pioche/défausse, qui viennent d'être réduites de 50% ci-dessus :
--- sans ce découplage, les boutons auraient suivi les piles vers le haut et
--- laissé un grand vide entre eux et la main. Reprend exactement la valeur
--- numérique qu'avait l'ancien ancrage (quand la pioche faisait encore la
--- taille d'une carte), donc aucun changement de position pour qui jouait déjà.
-local BOTTOM_ROW_Y = 404 + CARD_H + 8
+-- Rangée de boutons du bas ancrée sur la MAIN (2026-08-27) -- HAND_Y + CARD_H,
+-- PAS sur la pioche/défausse, qui ont été réduites de 50% : sans ce
+-- découplage, les boutons auraient suivi les piles vers le haut et laissé un
+-- grand vide entre eux et la main. Suit automatiquement HAND_Y (voir
+-- ci-dessus) si la main redescend encore. Marge resserrée à 4px (était 8) --
+-- HAND_Y étant descendue beaucoup plus bas, chaque pixel du budget vertical
+-- restant compte pour que "Fin de tour" tienne encore à l'écran (H=660).
+local BOTTOM_ROW_Y = HAND_Y + CARD_H + 4
 
 -- "Recommencer ce tour"/"Recommencer le combat" (repositionnés/rapetissés au
 -- fil de plusieurs playtests, voir l'historique) : ancrés à gauche sous la
@@ -196,10 +208,15 @@ View.instant_victory_button = {
 }
 
 -- Agrandi (2026-08-24, demande explicite -- "un peu plus gros") : 76x64 -> 88x74.
+-- Rerapetissé un peu (2026-08-27, 74->64) : contrainte de budget vertical,
+-- pas une demande -- HAND_Y a été descendue beaucoup plus bas pour "la main
+-- doit être beaucoup plus bas", et le bouton ne tenait plus sous elle sans
+-- déborder de l'écran (H=660) autrement. Reste nettement plus carré que le
+-- tout premier gabarit (140x26).
 -- Toujours centré sur la pioche/défausse même réduites (2026-08-27) : plus
 -- large que la pile elle-même désormais, déborde symétriquement de part et
 -- d'autre -- purement cosmétique, n'affecte pas la zone cliquable de la pile.
-local END_TURN_BTN_W, END_TURN_BTN_H = 88, 74
+local END_TURN_BTN_W, END_TURN_BTN_H = 88, 64
 View.end_turn_button = {
   x = View.discard_pile_rect.x + View.discard_pile_rect.w / 2 - END_TURN_BTN_W / 2,
   y = BOTTOM_ROW_Y,
@@ -210,7 +227,7 @@ View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34,
 
 -- Menu principal (2026-08-21, demande explicite) : 5 boutons empilés,
 -- centrés -- même geste que les autres écrans à bouton unique (Rejouer,
--- feuDeCamp) : un id sur chaque rect, lu par Input.mousepressed pour savoir
+-- Forge/Temple) : un id sur chaque rect, lu par Input.mousepressed pour savoir
 -- quelle action déclencher, jamais une deuxième liste dupliquée côté input.lua.
 local MENU_BTN_W, MENU_BTN_H, MENU_BTN_GAP = 300, 48, 18
 local MENU_BTN_Y0 = 220
@@ -239,26 +256,37 @@ end
 -- à bouton unique en ait de nouveau besoin.
 View.back_button = { x = W / 2 - 90, y = H / 2 + 40, w = 180, h = 40, label = "Retour" }
 
--- Écran "feuDeCamp" (2026-08-10, demande explicite) : deux panneaux fixes
--- côte à côte (soin/résurrection, amélioration de carte) -- leur position ne
--- dépend jamais de ce qu'ils affichent, seul leur contenu/contour change
--- selon la disponibilité (voir View.draw). "Passer" n'est dessiné/cliquable
--- que quand les deux sont grisés (voir Controller:choose_feu_de_camp_skip).
--- Hauteur relevée (2026-08-11, demande explicite -- portrait de héros en
--- entier + cartes à améliorer affichées face complète, pas juste leur titre)
--- de 320 à 460 : c'est le vrai contenu (portrait, 2 cartes pleine taille par
--- ligne) qui a grandi, la hauteur des panneaux suit.
-local FEU_DE_CAMP_PANEL_W, FEU_DE_CAMP_PANEL_H, FEU_DE_CAMP_PANEL_GAP = 380, 460, 40
-local FEU_DE_CAMP_PANEL_Y = 126
-local FEU_DE_CAMP_PANEL_X0 = (W - (FEU_DE_CAMP_PANEL_W * 2 + FEU_DE_CAMP_PANEL_GAP)) / 2
-View.feu_de_camp_heal_rect = { x = FEU_DE_CAMP_PANEL_X0, y = FEU_DE_CAMP_PANEL_Y, w = FEU_DE_CAMP_PANEL_W, h = FEU_DE_CAMP_PANEL_H }
-View.feu_de_camp_upgrade_rect = {
-  x = FEU_DE_CAMP_PANEL_X0 + FEU_DE_CAMP_PANEL_W + FEU_DE_CAMP_PANEL_GAP, y = FEU_DE_CAMP_PANEL_Y,
-  w = FEU_DE_CAMP_PANEL_W, h = FEU_DE_CAMP_PANEL_H,
-}
-View.feu_de_camp_skip_button = {
-  x = W / 2 - 100, y = FEU_DE_CAMP_PANEL_Y + FEU_DE_CAMP_PANEL_H + 14, w = 200, h = 44, label = "Passer",
-}
+-- Écran "La Forge" (2026-08-28, demande explicite -- remplace l'ancien
+-- panneau "Forge" de feuDeCamp, voir Controller:enter_forge_screen) : jusqu'à
+-- Forge.CHOICE_COUNT (4) cartes en rangée, chacune déjà affichée dans sa
+-- version améliorée (voir draw_forge) -- le nombre de rects dépend du nombre
+-- RÉEL de choix proposés (0 à 4, moins si le deck n'a pas assez de cartes
+-- améliorables), donc calculé à la demande depuis controller.forge plutôt
+-- qu'une position fixe.
+local FORGE_CARD_Y = 260
+local FORGE_CARD_GAP = 30
+function View.forge_card_rects(controller)
+  local f = controller.forge
+  if not f then return {} end
+  return centered_row(#f.choices, CARD_W, CARD_H, FORGE_CARD_Y, FORGE_CARD_GAP)
+end
+View.forge_skip_button = { x = W / 2 - 100, y = FORGE_CARD_Y + CARD_H + 40, w = 200, h = 44, label = "Passer" }
+
+-- Écran "Le Temple" (2026-08-28, demande explicite) : les 4 aventuriers en
+-- rangée fixe (même principe que View.hero_rects) devant la statue
+-- (placeholder procédural, voir draw_temple_statue) -- toujours les 4,
+-- jamais recalculé selon l'éligibilité : un aventurier mort ou déjà béni
+-- reste affiché, juste grisé/non cliquable (voir draw_temple/
+-- Controller:choose_temple_hero).
+local TEMPLE_HERO_W, TEMPLE_HERO_H = 130, 136
+local TEMPLE_HERO_Y = 310
+function View.temple_hero_rects(controller)
+  local rects = centered_row(#controller.state.heroes, TEMPLE_HERO_W, TEMPLE_HERO_H, TEMPLE_HERO_Y)
+  local out = {}
+  for i, h in ipairs(controller.state.heroes) do out[h.id] = rects[i] end
+  return out
+end
+View.temple_skip_button = { x = W / 2 - 100, y = 300, w = 200, h = 44, label = "Passer" }
 
 local function point_in(r, x, y)
   return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h
@@ -512,13 +540,17 @@ end
 -- l'attention pour lui-même.
 local TOOLTIP_HINT_ALPHA = 0.35
 local TOOLTIP_HINT_RING_ALPHA = 0.45
-local function draw_tooltip_hint(w, h)
+-- `color` (optionnel, 2026-08-28, demande explicite -- même indice sur le
+-- bouton "Fin de tour") : le blanc/Theme.text par défaut suppose un fond
+-- sombre (panneau) -- sur un bouton à fond clair (Theme.accent, doré), un "?"
+-- clair se lirait mal, d'où cette dérogation plutôt qu'une variante dupliquée.
+local function draw_tooltip_hint(w, h, color)
   local cx, cy = w - 10, h - 9
-  set(Theme.white, TOOLTIP_HINT_RING_ALPHA)
+  set(color or Theme.white, TOOLTIP_HINT_RING_ALPHA)
   love.graphics.setLineWidth(1)
   love.graphics.circle("line", cx, cy, 8)
   love.graphics.setFont(Fonts.get(11))
-  set(Theme.text, TOOLTIP_HINT_ALPHA)
+  set(color or Theme.text, TOOLTIP_HINT_ALPHA)
   love.graphics.printf("?", cx - 6, cy - 6, 12, "center")
   love.graphics.setColor(1, 1, 1, 1)
 end
@@ -594,40 +626,67 @@ local function draw_hero(controller, h, r)
 
   set(Theme.panel, dead and 0.5 or 1)
   love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
+  -- Fond de plus en plus rouge sombre sous 50% de PV (2026-08-27, demande
+  -- explicite), proportionnel aux PV perdus au-delà de ce seuil -- "montrer
+  -- qu'il est de plus en plus blessé et proche de la mort". Simple surcouche
+  -- semi-transparente (Theme.hp, le rouge déjà utilisé pour les dégâts/la
+  -- barre de PV -- pas une nouvelle teinte) plutôt qu'un vrai mélange RGB :
+  -- alpha 0 pile à 50% de PV, jusqu'à 0.6 à 0 PV. Un héros déjà vaincu (voile
+  -- gris via l'alpha du panneau ci-dessus) n'a plus besoin de cet indice.
+  if not dead then
+    local hp_pct = h.hp / h.max_hp
+    if hp_pct < 0.5 then
+      local wound_t = math.min(1, (0.5 - hp_pct) / 0.5)
+      set(Theme.hp, wound_t * 0.6)
+      love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
+    end
+  end
   set(border); love.graphics.setLineWidth(border_w)
   love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
 
-  -- Éléments agrandis/espacés (2026-08-24, demande explicite -- portraits
-  -- plus grands, plus de respiration verticale, barres de vie plus épaisses,
-  -- texte un peu plus gros "à essayer") : version modérée pour rester dans la
-  -- fenêtre actuelle (660px, voir W/H plus haut) plutôt que la demande
-  -- initiale (+50%/*2), qui aurait exigé de ragrandir la fenêtre -- portrait
-  -- 40->46 (~+15%), barre 7->10 (~x1.4), textes PV/mana/Discrétion +1px,
-  -- espacements entre éléments élargis de 0-2px à 2-4px. Le héros a plus de
-  -- marge que l'ennemi (badges s'arrêtent bien avant le bas du cadre), d'où
-  -- des espacements un peu plus généreux ici que côté draw_enemy.
+  -- Portrait agrandi (2026-08-27, demande explicite -- "toutes les images des
+  -- aventuriers et des ennemis doivent être plus gros") : 46->54. Nom déplacé
+  -- EN BAS du cadre (2026-08-27, demande explicite) : l'ordre devient portrait
+  -- -> barre de PV -> mana/discrétion -> statuts -> nom, au lieu de portrait
+  -- -> nom -> barre -> ... avant. Le badge de Défense s'ancre désormais au-dessus
+  -- du nom (voir cy passé à draw_defense_badge_big), pas près du bas par défaut.
   set(Theme.text, dead and 0.45 or 1)
-  draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, 46, Theme.text)
-  draw_defense_badge_big(h, r)
-  name_badge(h.name, 0, 52, r.w, 16, hero_palette.border, Theme.bg, 4, 2)
+  local HERO_PORTRAIT_SIZE = 54
+  draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, HERO_PORTRAIT_SIZE, Theme.text)
+  -- Badge de bénédiction du Temple (2026-08-28, demande explicite --
+  -- "s'ajoute, sous forme d'une icone dédiée, au cadre de l'aventurier durant
+  -- les combats") : coin haut-droit, seule zone encore libre du cadre --
+  -- portrait au centre, PV/mana/statuts en dessous, nom tout en bas (voir
+  -- plus loin). `h.blessing` ne porte que l'id (voir Temple.bless) -- l'icône/
+  -- le texte d'infobulle viennent de Temple.by_id, jamais dupliqués ici.
+  if not dead and h.blessing then
+    local blessing = Temple.by_id(h.blessing)
+    if blessing then
+      set(Theme.heal); love.graphics.circle("fill", r.w - 14, 14, 11)
+      set(Theme.black); love.graphics.setLineWidth(2)
+      love.graphics.circle("line", r.w - 14, 14, 11)
+      love.graphics.setLineWidth(1)
+      icon_text(blessing.icon, "+", r.w - 25, 6, 22, 14, Theme.text)
+    end
+  end
+  local name_y = r.h - 24
+  draw_defense_badge_big(h, r, name_y - 24)
   -- Barre de PV épaissie, valeur DEDANS plutôt qu'en dessous (2026-08-27,
-  -- demande explicite) : 10->16px, texte superposé plutôt qu'une ligne à part
-  -- -- récupère l'espace qu'occupait cette ligne, tout ce qui suit remonte
-  -- d'autant (mana/discrétion 98->89, badges 111->102).
-  bar(8, 72, r.w - 16, 16, h.hp / h.max_hp, Theme.hp)
-  text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 72, r.w, 16, 10, Theme.text)
+  -- demande explicite) : texte superposé plutôt qu'une ligne à part.
+  bar(8, 62, r.w - 16, 16, h.hp / h.max_hp, Theme.hp)
+  text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 62, r.w, 16, 10, Theme.text)
 
   -- Mana (2026-08-20, ressource propre au Mage, voir hero.mana dans game.lua) :
   -- dans son propre cadre, juste sous sa jauge de PV -- seul le Mage a ce
   -- champ non-nil, les 3 autres classes ne dessinent jamais cette ligne.
   if h.mana ~= nil then
-    text("MANA " .. tostring(h.mana), 0, 89, r.w, 9, Theme.mana)
+    text("MANA " .. tostring(h.mana), 0, 81, r.w, 9, Theme.mana)
   end
   -- Discrétion (2026-08-24, ressource propre à l'Assassin, voir hero.discretion
   -- dans game.lua) : même traitement que MANA ci-dessus -- un seul des deux
   -- champs est jamais non-nil pour un héros donné, pas de collision possible.
   if h.discretion ~= nil then
-    text("DISCR " .. tostring(h.discretion), 0, 89, r.w, 9, Theme.discretion)
+    text("DISCR " .. tostring(h.discretion), 0, 81, r.w, 9, Theme.discretion)
   end
 
   -- Plus de bouton "Jouer" (2026-08-20) : sélectionner une carte assigne
@@ -651,7 +710,12 @@ local function draw_hero(controller, h, r)
   -- seul le badge manquait -- le statut était donc invisible côté joueur.
   if (h.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = h.incapacite } end
   if (h.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = h.vulnerabilite } end
-  draw_badge_row(badges, 0, 102, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
+  draw_badge_row(badges, 0, 93, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
+
+  -- Nom en bas du cadre (2026-08-27, demande explicite) : voir name_y calculé
+  -- plus haut, juste après le portrait -- réutilisé aussi par draw_defense_badge_big
+  -- pour s'ancrer juste au-dessus.
+  name_badge(h.name, 0, name_y, r.w, 16, hero_palette.border, Theme.bg, 4, 2)
 
   draw_shield_fx(controller, h.id, r)
   draw_tooltip_hint(r.w, r.h)
@@ -677,10 +741,17 @@ end
 -- `body` ne contient plus jamais ce mot, `icon_source`/`icon_key` indiquent à
 -- draw_telegraph_body (ci-dessous) quelle icône préfixer -- "keyword" pour un
 -- mot-clé du glossaire (épée/arbalète/étincelle/soin, mêmes icônes que sur les
--- cartes des aventuriers, voir Sprites.keyword), "status" pour un statut
--- (vulnérabilité, incapacité..., mêmes icônes que les badges, voir
--- Icons.draw_status). Le type mêlée/distance/magie vient de `move.dmg_type`
--- (voir enemies.lua, assigné par attaque) -- jamais deviné depuis le nom.
+-- cartes des aventuriers, voir Sprites.keyword), "status" pour une icône de
+-- statut (Icons.draw_status). Le type mêlée/distance/magie vient de
+-- `move.dmg_type` (voir enemies.lua, assigné par attaque) -- jamais deviné
+-- depuis le nom.
+-- Bonus/malus génériques, sans valeur chiffrée (2026-08-27, deuxième demande
+-- explicite) : `body` est alors absent -- un débuff (kind == "debuff") pose
+-- toujours icon_key = "malus" (jamais le statut précis, ex. "vulnerabilite" --
+-- le détail reste dans l'infobulle) ; un soin à soi/un allié ou une
+-- résurrection posent icon_key = "bonus". Ces deux clés sont des icônes
+-- neutres dédiées (voir DRAW_BY_STATUS dans icons.lua), pas de vraies statuts
+-- de jeu.
 local DMG_TYPE_ICON = { melee = "epee", ranged = "arc", magic = "etincelle" }
 local function enemy_telegraph_parts(state, e)
   if e.hp <= 0 then return { title = "Vaincu." } end
@@ -697,23 +768,26 @@ local function enemy_telegraph_parts(state, e)
   local function adjusted(amount)
     return Combat.round(amount * Combat.damage_multiplier(e, target, "physique"))
   end
-  if move.kind == "dmg" or move.kind == "debuff" then
-    local body, icon_source, icon_key
-    if move.kind == "dmg" then
-      body = tostring(adjusted(move.amount))
-      icon_source, icon_key = "keyword", DMG_TYPE_ICON[move.dmg_type] or "epee"
-    else
-      body = (Enemies.status_labels[move.status_key] or move.status_key) .. " " .. move.amount
-      icon_source, icon_key = "status", move.status_key
-    end
+  if move.kind == "dmg" then
     return {
-      title = move.name, body = body, icon_source = icon_source, icon_key = icon_key,
+      title = move.name, body = tostring(adjusted(move.amount)),
+      icon_source = "keyword", icon_key = DMG_TYPE_ICON[move.dmg_type] or "epee",
       target = target_name, target_class = target_class,
     }
-  elseif move.kind == "heal-self" then
-    return { title = move.name, body = "+" .. move.amount .. " PV", icon_source = "keyword", icon_key = "soin" }
-  elseif move.kind == "heal-ally" then
-    return { title = move.name, body = "+" .. move.amount .. " PV à un allié", icon_source = "keyword", icon_key = "soin" }
+  elseif move.kind == "debuff" then
+    -- Malus générique, jamais de valeur chiffrée (2026-08-27, demande
+    -- explicite) : icône "malus" neutre quel que soit le statut réellement
+    -- appliqué (Vulnérabilité, Incapacité...) -- le détail (lequel, combien)
+    -- reste dans l'infobulle ("Action en cours" + moves_info, voir
+    -- tooltip_lines), jamais recopié ici.
+    return { title = move.name, icon_source = "status", icon_key = "malus", target = target_name, target_class = target_class }
+  elseif move.kind == "heal-self" or move.kind == "heal-ally" or move.kind == "revive" then
+    -- Bonus générique, jamais de valeur chiffrée (2026-08-27, demande
+    -- explicite -- même principe que le malus ci-dessus) : soin à soi, soin à
+    -- un allié et résurrection sont les 3 façons dont un ennemi s'avantage
+    -- lui-même ou un autre ennemi -- une seule icône "bonus" neutre pour les
+    -- 3, le détail reste dans l'infobulle.
+    return { title = move.name, icon_source = "status", icon_key = "bonus" }
   elseif move.kind == "conditional-retaliate" then
     -- Bug signalé (2026-08-09) : contrairement à dmg/debuff juste au-dessus,
     -- cette branche n'affichait jamais la cible (`e.target_hero_id`, pourtant
@@ -740,12 +814,6 @@ local function enemy_telegraph_parts(state, e)
       title = move.name, body = Combat.round(move.amount * Combat.damage_multiplier(e, nil, "physique")) .. " à tous",
       icon_source = "keyword", icon_key = DMG_TYPE_ICON[move.dmg_type] or "etincelle",
     }
-  elseif move.kind == "revive" then
-    -- Règle "invisible" côté joueur (2026-08-21, demande explicite) : le
-    -- texte de ce coup n'a jamais besoin de dire QUAND il est disponible
-    -- (indisponible si aucune Pousse n'est vaincue, voir enemies.lua), juste
-    -- ce qu'il fait -- la condition elle-même ne s'affiche nulle part.
-    return { title = move.name, body = "Ranime les Pousses vaincues", icon_source = "keyword", icon_key = "soin" }
   end
   return nil
 end
@@ -755,24 +823,47 @@ end
 -- largeur `w` -- "keyword" pour un mot-clé du glossaire (Sprites.keyword),
 -- "status" pour un statut (Icons.draw_status). Simple texte centré si aucune
 -- icône n'est renseignée (ne devrait pas arriver pour un coup réel, garde-fou).
+-- `parts.body` peut être absent (2026-08-27, demande explicite -- bonus/malus
+-- génériques, voir enemy_telegraph_parts) : l'icône seule est alors centrée,
+-- sans aucune valeur chiffrée à côté.
+-- Icône/texte agrandis (2026-08-27, deuxième demande explicite -- "les
+-- textes/icônes indiquant les attaques des ennemis doivent être plus gros") :
+-- icône 14->22px, police 9->14. Le centrage vertical de l'icône se déduit
+-- désormais de icon_size/2 (au lieu d'un décalage fixe "+5" calé sur l'ancien
+-- 14px) pour rester correct quelle que soit sa taille.
 local function draw_telegraph_body(parts, y, w)
-  if not parts.body then return end
+  if not parts.icon_key and not parts.body then return end
   if not parts.icon_key then
-    text(parts.body, 0, y, w, 9, Theme.accent)
+    text(parts.body, 0, y, w, 14, Theme.accent)
     return
   end
-  local font = Fonts.get(9)
+  local icon_size = 22
+  local icon_cy = y + icon_size / 2
+  if not parts.body then
+    local cx = w / 2
+    if parts.icon_source == "status" then
+      Icons.draw_status(parts.icon_key, cx, icon_cy, icon_size / 2, Theme.accent)
+    else
+      local icon = Sprites.keyword(parts.icon_key)
+      if icon then
+        love.graphics.setColor(1, 1, 1, 1)
+        Sprites.draw_centered(icon, cx, icon_cy, icon_size / 2)
+      end
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+    return
+  end
+  local font = Fonts.get(14)
   local text_w = font:getWidth(parts.body)
-  local icon_size = 14
-  local gap = 3
+  local gap = 4
   local start_x = (w - (icon_size + gap + text_w)) / 2
   if parts.icon_source == "status" then
-    Icons.draw_status(parts.icon_key, start_x + icon_size / 2, y + 5, icon_size / 2, Theme.accent)
+    Icons.draw_status(parts.icon_key, start_x + icon_size / 2, icon_cy, icon_size / 2, Theme.accent)
   else
     local icon = Sprites.keyword(parts.icon_key)
     if icon then
       love.graphics.setColor(1, 1, 1, 1)
-      Sprites.draw_centered(icon, start_x + icon_size / 2, y + 5, icon_size / 2)
+      Sprites.draw_centered(icon, start_x + icon_size / 2, icon_cy, icon_size / 2)
     end
   end
   set(Theme.accent)
@@ -825,7 +916,9 @@ local function draw_enemy(controller, e, r)
     bar(8, 4, r.w - 16, 16, e.hp / e.max_hp, Theme.hp)
     text_v_centered(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 4, r.w, 16, 10, Theme.text)
   end
-  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 26, r.w, 46, Theme.text)
+  -- Portrait agrandi (2026-08-27, demande explicite -- "toutes les images des
+  -- aventuriers et des ennemis doivent être plus gros") : 46->54.
+  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 24, r.w, 54, Theme.text)
   -- Position du corps du télégraphe (voir plus bas) calculée en premier :
   -- le badge de bouclier (2026-08-27, troisième retour explicite -- "ne pas
   -- cacher l'annonce d'attaque, remonter le bouclier pour qu'il soit juste
@@ -833,7 +926,10 @@ local function draw_enemy(controller, e, r)
   -- pour "où commence le télégraphe", jamais deux nombres à resynchroniser à
   -- la main. `- 24` ≈ le rayon visuel du bouclier (DEFENSE_BADGE_R * 0.85)
   -- plus une petite marge, pour que son bord bas touche presque le texte.
-  local telegraph_y = r.h - 30
+  -- `- 38` (était -30) : le corps du télégraphe est plus gros maintenant
+  -- (icône/texte agrandis, voir draw_telegraph_body), lui laisse plus de
+  -- hauteur avant la bande de cible tout en bas.
+  local telegraph_y = r.h - 38
   draw_defense_badge_big(e, r, telegraph_y - 24)
   local parts = enemy_telegraph_parts(controller.state, e)
   if not dead then
@@ -848,7 +944,7 @@ local function draw_enemy(controller, e, r)
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
     if (e.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = e.vulnerabilite } end
-    draw_badge_row(badges, 0, 74, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
+    draw_badge_row(badges, 0, 82, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
     -- Coup télégraphié (2026-08-27, demande explicite -- "retirer le nom de
     -- l'action... seuls les dégâts ou l'effet sont présents" ; nom déplacé
     -- dans l'infobulle, voir tooltip_lines "Action en cours") : plus de titre
@@ -1185,7 +1281,10 @@ local function draw_hand(controller)
     local owner_defeated = not owner or owner.hp <= 0
     local scale, lift = 1, 0
     if popped then
-      if is_pending then scale, lift = 1.16, 18 else scale, lift = 1.1, 10 end
+      -- Grossies (2026-08-27, demande explicite -- "un peu plus grosse au
+      -- survol", la carte sélectionnée doit suivre pour rester la plus
+      -- grande des deux) : survol 1.1->1.18, sélection 1.16->1.28.
+      if is_pending then scale, lift = 1.28, 22 else scale, lift = 1.18, 14 end
     end
     love.graphics.push()
     love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift)
@@ -1222,6 +1321,13 @@ local function draw_bottom_controls(controller)
   -- qui peut retomber sur 2 lignes ("Fin de" / "tour") dans une largeur étroite.
   set(Theme.accent); love.graphics.rectangle("fill", b1.x, b1.y, b1.w, b1.h, 8, 8)
   set(Theme.bg); love.graphics.setFont(Fonts.get(13)); love.graphics.printf(b1.label, b1.x, b1.y + b1.h / 2 - 10, b1.w, "center")
+  -- "?" d'infobulle (2026-08-28, demande explicite -- même indice que sur les
+  -- autres éléments à infobulle) : Theme.bg (sombre) plutôt que le blanc par
+  -- défaut, pour rester lisible sur ce fond doré (voir draw_tooltip_hint).
+  love.graphics.push()
+  love.graphics.translate(b1.x, b1.y)
+  draw_tooltip_hint(b1.w, b1.h, Theme.bg)
+  love.graphics.pop()
   -- Boutons rerapetissés (2026-08-24, demande explicite -- encore trop gros) :
   -- police 9 -> 7, centrage vertical ajusté sur la hauteur réduite (voir
   -- RESTART_BTN_W/H).
@@ -1312,6 +1418,13 @@ local function tooltip_lines(controller)
     local lines = {}
     local desc = Heroes.class_description[hero.class_id]
     if desc then lines[#lines + 1] = desc end
+    -- Bénédiction du Temple (2026-08-28, demande explicite) : juste après la
+    -- description de classe, avant les statuts de combat -- c'est un effet
+    -- permanent du run, pas un statut temporaire (voir active_status_lines).
+    if hero.blessing then
+      local blessing = Temple.by_id(hero.blessing)
+      if blessing then lines[#lines + 1] = blessing.name .. " — " .. blessing.desc end
+    end
     for _, l in ipairs(active_status_lines(hero)) do lines[#lines + 1] = l end
     return hero.name, lines
   elseif h.kind == "enemy" then
@@ -1363,6 +1476,9 @@ local function tooltip_lines(controller)
     return "Pioche", { "Cartes piochées par tour : " .. Deck.HAND_SIZE .. "." }
   elseif h.kind == "discard" then
     return "Défausse", { "Quand la pioche est vide, les cartes de la défausse sont remélangées dans la pioche." }
+  elseif h.kind == "end_turn" then
+    -- 2026-08-27, demande explicite.
+    return "Fin de tour", { "Les cartes restantes en main seront défaussées et cela passe au tour des ennemis." }
   end
   return nil
 end
@@ -1434,9 +1550,14 @@ local FLOATER_COLOR = { damage = "hp", heal = "heal" }
 -- Retour du porteur de projet (2026-08-09) : les dégâts doivent taper plus
 -- fort visuellement -- police nettement plus grosse + un zoom qui dépasse puis
 -- se stabilise (ease_out_back, déjà utilisé pour le titre "Victoire !", pas
--- une nouvelle courbe). Le soin garde le traitement d'origine, plus discret.
+-- une nouvelle courbe).
+-- Agrandi 15 -> 22 (2026-08-28, demande explicite -- soin de la bénédiction du
+-- Temple, "un FX en vert, assez gros, qui remonte en fade") : même flottant
+-- que tout autre soin (Controller:spawn_floater ne distingue pas la source),
+-- jamais un second mécanisme dédié à ce seul cas -- profite donc à toute
+-- récupération de PV affichée en combat, pas seulement celle du Temple.
 local DAMAGE_FLOATER_SIZE = 26
-local HEAL_FLOATER_SIZE = 15
+local HEAL_FLOATER_SIZE = 22
 local DAMAGE_ZOOM_DURATION = 0.22
 
 local function draw_floaters(controller)
@@ -1735,172 +1856,154 @@ local function draw_targeting_arrow(controller)
   draw_arrow(ox, oy, mx, my, valid and Theme.heal or Theme.energy)
 end
 
--- ---------- feu de camp ----------
-
---- Petit triangle plein pointant vers le bas, centré en (cx, cy) -- PAS un
--- glyphe "↓" (2026-08-10, hors du charset Latin étendu de m5x7/m3x6, voir
--- fonts.lua : rien ne garantit qu'il existe dans la police chargée, contrairement
--- à un vecteur dessiné à la main comme draw_arrow ci-dessus).
-local function draw_down_arrow(cx, cy, size, color, alpha)
-  set(color, alpha)
-  love.graphics.polygon("fill", cx - size, cy - size * 0.5, cx + size, cy - size * 0.5, cx, cy + size * 0.5)
-end
-
---- Même principe que draw_down_arrow, pointant vers la droite (2026-08-11 --
--- les 2 cartes de la Forge sont maintenant côte à côte, pas empilées).
--- `alpha` (optionnel, défaut 1 via `set`) : fondu pendant l'animation de
--- choix d'amélioration, voir draw_feu_de_camp.
-local function draw_right_arrow(cx, cy, size, color, alpha)
-  set(color, alpha)
-  love.graphics.polygon("fill", cx - size * 0.5, cy - size, cx - size * 0.5, cy + size, cx + size * 0.5, cy)
-end
+-- ---------- forge / temple (post-combat) ----------
 
 --- Carte pleine face en fondu à une opacité donnée (2026-08-11, animation de
--- choix d'amélioration -- la carte de base s'efface pendant que la "+" se
--- recentre, voir draw_feu_de_camp) : `set(color, alpha)` ne peut PAS porter un
--- fondu uniforme sur les multiples tracés de draw_card_face (panneau, contour,
--- badge, texte...), donc même détour par canvas que draw_card_flights
--- ci-dessus (réutilise le même `card_flight_canvas`, jamais deux canvas pour
--- le même usage).
-local function draw_faded_card(def, x, y, alpha)
+-- choix d'amélioration, voir draw_forge) : `set(color, alpha)` ne peut PAS
+-- porter un fondu uniforme sur les multiples tracés de draw_card_face
+-- (panneau, contour, badge, texte...), donc même détour par canvas que
+-- draw_card_flights ci-dessus (réutilise le même `card_flight_canvas`, jamais
+-- deux canvas pour le même usage). `desc_color`/`highlight` (optionnels,
+-- 2026-08-28 -- avant, cette fonction ne servait qu'à faire disparaître la
+-- carte de BASE en Theme.muted/non mise en avant ; la Forge à 4 cartes fait
+-- maintenant disparaître des cartes déjà "+"/mises en avant, donc le style
+-- doit pouvoir suivre) : mêmes défauts qu'avant si omis.
+local function draw_faded_card(def, x, y, alpha, desc_color, highlight)
   card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
   love.graphics.setCanvas(card_flight_canvas)
   love.graphics.clear(0, 0, 0, 0)
-  draw_card_face(def, CARD_W, CARD_H, def.cost, def.desc, Theme.muted, false)
+  draw_card_face(def, CARD_W, CARD_H, def.cost, def.desc, desc_color or Theme.muted, highlight or false)
   love.graphics.setCanvas()
   love.graphics.setColor(1, 1, 1, alpha)
   love.graphics.draw(card_flight_canvas, x, y)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
--- Décalage Y (relatif au panneau) de chaque ligne carte-base/carte-améliorée
--- de la Forge -- une seule source pour le dessin ET les bandes de survol,
--- pour qu'elles ne puissent jamais diverger.
-local FEU_DE_CAMP_CARD_ROW_Y = { 50, 212 }
-local FEU_DE_CAMP_CARD_GAP = 40 -- largeur de la zone flèche entre les 2 cartes d'une ligne
-
---- Bandes de survol des 2 cartes proposées à l'amélioration -- position FIXE
--- dérivée de View.feu_de_camp_upgrade_rect, jamais du contenu (même principe
--- que les panneaux eux-mêmes, voir leur commentaire) -- réutilisée telle
--- quelle par draw_feu_de_camp (dessin) et input.lua (hover/tooltip).
-function View.feu_de_camp_upgrade_card_rects()
-  local r = View.feu_de_camp_upgrade_rect
-  local out = {}
-  for i, row_y in ipairs(FEU_DE_CAMP_CARD_ROW_Y) do
-    out[i] = { x = r.x, y = r.y + row_y - 6, w = r.w, h = CARD_H + 12 }
-  end
-  return out
+--- Version "+" à afficher pour `def` -- protège contre un double-suffixe
+-- (2026-08-28) : la carte CHOISIE a déjà son `instance.def` remplacé par
+-- Forge.apply_upgrade au moment où ce module la dessine encore une fois pour
+-- l'anim de fondu des autres (voir draw_forge) -- Cards.upgraded_def sur un
+-- def déjà "+" (is_upgraded) doublerait le suffixe " +", donc on renvoie le
+-- def tel quel dans ce cas plutôt que de le repasser par Cards.upgraded_def.
+local function forge_preview_def(def)
+  return def.is_upgraded and def or Cards.upgraded_def(def)
 end
 
---- Écran "feuDeCamp" (2026-08-10, demande explicite) : entre le draft de fin de
--- combat et le combat suivant. Panneau "Repos" (soin/résurrection à 100% des PV
--- de l'aventurier le plus blessé, ou grisé si personne n'est blessé) et panneau
--- "Forge" (2 cartes tirées au hasard, chacune montrée base -> "+", ou grisé si
--- moins de 2 cartes améliorables) -- voir Controller:enter_feu_de_camp_screen
--- pour le tirage (fait une seule fois, à l'entrée sur l'écran).
-local function draw_feu_de_camp(controller)
-  local fdc = controller.feu_de_camp
+--- Écran "La Forge" (2026-08-28, demande explicite -- remplace l'ancien
+-- panneau "Forge" de feuDeCamp, voir Controller:enter_forge_screen pour le
+-- tirage, fait une seule fois à l'entrée sur l'écran) : jusqu'à 4 cartes en
+-- rangée, chacune DÉJÀ montrée dans sa version améliorée -- contrairement à
+-- l'ancien panneau à 2 cartes (base -> flèche -> "+"), comparer base et
+-- améliorée pour 4 cartes à la fois ne tient plus sur la largeur de l'écran ;
+-- seule "ce que la carte va devenir" reste affichée. Clic sur une carte : les
+-- 3 autres s'effacent en fondu (voir Controller:choose_forge_card/
+-- forge_upgrade_anim), celle choisie reste affichée seule, sans déplacement
+-- (contrairement à l'ancien panneau qui recentrait la carte choisie -- plus
+-- la place pour ça à 4 cartes).
+local function draw_forge(controller)
+  local f = controller.forge
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
-  text("Feu de camp", 0, 60, W, 24, Theme.text)
-  text("Choisis comment préparer le prochain combat.", 0, 92, W, 12, Theme.muted)
+  text("La Forge", 0, 60, W, 24, Theme.text)
 
-  local heal_r, up_r = View.feu_de_camp_heal_rect, View.feu_de_camp_upgrade_rect
-  local heal_available = fdc.heal_target ~= nil
-  local upgrade_available = fdc.upgrade_targets ~= nil
-
-  panel(heal_r.x, heal_r.y, heal_r.w, heal_r.h, heal_available and Theme.panel_light or Theme.panel)
-  set(heal_available and Theme.heal or Theme.muted)
-  love.graphics.setLineWidth(heal_available and 3 or 2)
-  love.graphics.rectangle("line", heal_r.x, heal_r.y, heal_r.w, heal_r.h, 10, 10)
-  love.graphics.setLineWidth(1)
-  text("Repos", heal_r.x, heal_r.y + 16, heal_r.w, 16, Theme.text)
-  if heal_available then
-    local hero = fdc.heal_target
-    -- Portrait (2026-08-11, demande explicite) : même chemin que draw_hero
-    -- (draw_class_icon -> Icons.draw_class -> Sprites.hero, le vrai sprite du
-    -- héros dès que le rayon dépasse SPRITE_MIN_RADIUS), juste affiché bien
-    -- plus grand ici qu'au format carte de la troupe.
-    local portrait_size = 150
-    draw_class_icon(hero.class_id, hero.icon, hero.label,
-      heal_r.x + (heal_r.w - portrait_size) / 2, heal_r.y + 50, portrait_size, portrait_size, Theme.text)
-    local palette = Theme.card_class[hero.class_id] or Theme.card_class.generic
-    name_badge(hero.name, heal_r.x + 20, heal_r.y + 212, heal_r.w - 40, 14, palette.border, Theme.bg, 2, 4)
-    text(hero.hp <= 0 and "Ramené à la vie avec 20% de ses PV max." or "Regagne 20% de ses PV max.",
-      heal_r.x + 20, heal_r.y + 244, heal_r.w - 40, 12, Theme.muted)
-    -- Barres avant/après (2026-08-11, demande explicite -- "beaucoup moins
-    -- grandes") : hauteur 8, même famille que la barre de PV des encarts
-    -- héros/ennemis (voir draw_hero, bar(..., 7, ...)), PLUS les PV chiffrés
-    -- en dessous -- jamais une barre seule sans le nombre exact. Aperçu
-    -- "après" calculé via FeuDeCamp.heal_amount (2026-08-11 : soin partiel à
-    -- 20%, plus un plein soin) -- jamais recalculé indépendamment ici, seule
-    -- source de vérité sur le montant.
-    local after_hp = math.min(hero.max_hp, math.max(0, hero.hp) + FeuDeCamp.heal_amount(hero))
-    bar(heal_r.x + 30, heal_r.y + 284, heal_r.w - 60, 8, hero.hp / hero.max_hp, Theme.hp)
-    text(math.max(0, hero.hp) .. "/" .. hero.max_hp .. " PV", heal_r.x, heal_r.y + 296, heal_r.w, 10, Theme.muted)
-    draw_down_arrow(heal_r.x + heal_r.w / 2, heal_r.y + 322, 8, Theme.heal)
-    bar(heal_r.x + 30, heal_r.y + 346, heal_r.w - 60, 8, after_hp / hero.max_hp, Theme.heal)
-    text(after_hp .. "/" .. hero.max_hp .. " PV", heal_r.x, heal_r.y + 358, heal_r.w, 10, Theme.muted)
-  else
-    text("Personne n'est blessé.", heal_r.x + 20, heal_r.y + heal_r.h / 2 - 8, heal_r.w - 40, 12, Theme.muted)
-  end
-
-  panel(up_r.x, up_r.y, up_r.w, up_r.h, upgrade_available and Theme.panel_light or Theme.panel)
-  set(upgrade_available and Theme.accent or Theme.muted)
-  love.graphics.setLineWidth(upgrade_available and 3 or 2)
-  love.graphics.rectangle("line", up_r.x, up_r.y, up_r.w, up_r.h, 10, 10)
-  love.graphics.setLineWidth(1)
-  text("Forge", up_r.x, up_r.y + 16, up_r.w, 16, Theme.text)
-  if upgrade_available then
-    -- Cartes en entier (2026-08-11, demande explicite) : même draw_card_face
-    -- que la main/l'écran de draft, jamais un simple nom -- base à gauche,
-    -- flèche, version "+" à droite (mise en évidence via `highlight`, le même
-    -- paramètre qui dore déjà le contour "Avancé" en draft).
-    local pair_w = CARD_W * 2 + FEU_DE_CAMP_CARD_GAP
-    local x0 = up_r.x + (up_r.w - pair_w) / 2
-    local upgraded_x0 = x0 + CARD_W + FEU_DE_CAMP_CARD_GAP
-    local centered_x0 = up_r.x + (up_r.w - CARD_W) / 2 -- "la case" : centrée dans le panneau
-    local anim = controller.feu_de_camp_upgrade_anim
-    for i, instance in ipairs(fdc.upgrade_targets) do
-      local card_y = up_r.y + FEU_DE_CAMP_CARD_ROW_Y[i]
-      if anim then
-        -- Choix déjà fait (2026-08-11) : instance.def porte maintenant la
-        -- version améliorée (voir Controller:choose_feu_de_camp_upgrade) --
-        -- la carte de base vient d'anim.base_defs, prise AVANT la mutation
-        -- (Cards.upgraded_def sur un def déjà "+" doublerait le suffixe).
-        local p = math.min(1, anim.t / (controller.feu_de_camp_upgrade_anim_duration or 1))
-        local ease = 1 - (1 - p) ^ 2 -- easeOutQuad, même famille que draw_card_flights
-        local fade_alpha = 1 - p
-        if fade_alpha > 0 then
-          draw_faded_card(anim.base_defs[i], x0, card_y, fade_alpha)
-          draw_right_arrow(x0 + CARD_W + FEU_DE_CAMP_CARD_GAP / 2, card_y + CARD_H / 2, 8, Theme.accent, fade_alpha)
-        end
-        local cur_x = upgraded_x0 + (centered_x0 - upgraded_x0) * ease
-        love.graphics.push()
-        love.graphics.translate(cur_x, card_y)
-        draw_card_face(instance.def, CARD_W, CARD_H, instance.def.cost, instance.def.desc, Theme.text, true)
-        love.graphics.pop()
-      else
-        local def = instance.def
-        love.graphics.push()
-        love.graphics.translate(x0, card_y)
-        draw_card_face(def, CARD_W, CARD_H, def.cost, def.desc, Theme.muted, false)
-        love.graphics.pop()
-        draw_right_arrow(x0 + CARD_W + FEU_DE_CAMP_CARD_GAP / 2, card_y + CARD_H / 2, 8, Theme.accent)
-        love.graphics.push()
-        love.graphics.translate(upgraded_x0, card_y)
-        local upgraded_def = Cards.upgraded_def(def)
-        draw_card_face(upgraded_def, CARD_W, CARD_H, upgraded_def.cost, upgraded_def.desc, Theme.text, true)
-        love.graphics.pop()
-      end
-    end
-  else
-    text("Pas assez de cartes à améliorer.", up_r.x + 20, up_r.y + up_r.h / 2 - 8, up_r.w - 40, 12, Theme.muted)
-  end
-
-  if not heal_available and not upgrade_available then
-    local b = View.feu_de_camp_skip_button
+  if #f.choices == 0 then
+    text("Toutes vos cartes sont déjà améliorées.", 0, 92, W, 12, Theme.muted)
+    local b = View.forge_skip_button
     set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
     set(Theme.bg); text(b.label, b.x, b.y + 14, b.w, 14, Theme.bg)
+    return
+  end
+
+  text("Choisis une carte à améliorer.", 0, 92, W, 12, Theme.muted)
+  local rects = View.forge_card_rects(controller)
+  local anim = controller.forge_upgrade_anim
+  for i, instance in ipairs(f.choices) do
+    local r = rects[i]
+    local preview_def = forge_preview_def(instance.def)
+    if anim and anim.chosen_index ~= i then
+      local p = math.min(1, anim.t / (controller.forge_upgrade_anim_duration or 1))
+      local alpha = 1 - p
+      if alpha > 0 then draw_faded_card(preview_def, r.x, r.y, alpha, Theme.text, true) end
+    else
+      love.graphics.push()
+      love.graphics.translate(r.x, r.y)
+      draw_card_face(preview_def, CARD_W, CARD_H, preview_def.cost, preview_def.desc, Theme.text, true)
+      love.graphics.pop()
+    end
+  end
+end
+
+--- Statue du Temple, placeholder procédural (2026-08-28 -- "image à ajouter",
+-- aucune génération d'assets IA possible dans cet environnement : pas de
+-- .env/identifiants Cloudflare ici, voir tools/asset-manifest.js pour
+-- l'entrée à générer plus tard sur un poste qui en dispose) : un pot
+-- volontairement irrégulier (contour à 8 points non symétrique, "difforme")
+-- surmonté d'une fleur simple (tige + 6 pétales + coeur) -- juste de quoi
+-- donner un point focal reconnaissable tant que le vrai sprite n'existe pas.
+local function draw_temple_statue(cx, cy)
+  local pot = {
+    cx - 34, cy + 46, cx - 40, cy + 10, cx - 26, cy - 4, cx - 30, cy - 30,
+    cx + 24, cy - 34, cx + 32, cy - 6, cx + 42, cy + 14, cx + 30, cy + 46,
+  }
+  set(Theme.panel_light)
+  love.graphics.polygon("fill", pot)
+  set(Theme.black); love.graphics.setLineWidth(2)
+  love.graphics.polygon("line", pot)
+  love.graphics.setLineWidth(1)
+  set(Theme.heal)
+  love.graphics.rectangle("fill", cx - 4, cy - 70, 8, 40)
+  local petal_colors = { Theme.accent, Theme.hp, Theme.energy }
+  for i = 0, 5 do
+    local angle = (i / 6) * math.pi * 2
+    set(petal_colors[(i % #petal_colors) + 1])
+    love.graphics.circle("fill", cx + math.cos(angle) * 16, cy - 78 + math.sin(angle) * 16, 10)
+  end
+  set(Theme.accent)
+  love.graphics.circle("fill", cx, cy - 78, 9)
+end
+
+--- Écran "Le Temple" (2026-08-28, demande explicite) : les 4 aventuriers
+-- devant la statue (ci-dessus), le joueur clique celui qui reçoit LA
+-- bénédiction déjà tirée (voir Controller:enter_temple_screen -- un seul
+-- tirage à l'entrée sur l'écran, jamais reroll par clic). Aucun aventurier
+-- éligible (tous déjà bénis) -> message + "Passer", même principe que
+-- draw_forge à 0 choix.
+local function draw_temple(controller)
+  local t = controller.temple
+  set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
+  text("Le Temple", 0, 60, W, 24, Theme.text)
+  draw_temple_statue(W / 2, 200)
+
+  if not t.blessing then
+    text("Tous vos aventuriers sont déjà bénis.", 0, 250, W, 12, Theme.muted)
+    local b = View.temple_skip_button
+    set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
+    set(Theme.bg); text(b.label, b.x, b.y + 14, b.w, 14, Theme.bg)
+    return
+  end
+
+  text(t.blessing.name .. " — " .. t.blessing.desc, 0, 250, W, 12, Theme.muted)
+  text("Choisis l'aventurier qui recevra cette bénédiction.", 0, 268, W, 11, Theme.muted)
+
+  local rects = View.temple_hero_rects(controller)
+  for _, h in ipairs(controller.state.heroes) do
+    local r = rects[h.id]
+    local eligible = h.hp > 0 and not h.blessing
+    panel(r.x, r.y, r.w, r.h, eligible and Theme.panel_light or Theme.panel)
+    set(eligible and Theme.accent or Theme.muted)
+    love.graphics.setLineWidth(eligible and 3 or 2)
+    love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
+    love.graphics.setLineWidth(1)
+    local portrait_size = 70
+    draw_class_icon(h.class_id, h.icon, h.label,
+      r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size,
+      eligible and Theme.text or Theme.muted)
+    local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
+    name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+    if h.hp <= 0 then
+      text("Mort", r.x, r.y + 112, r.w, 11, Theme.muted)
+    elseif h.blessing then
+      text("Déjà béni", r.x, r.y + 112, r.w, 11, Theme.muted)
+    end
   end
 end
 
@@ -2058,15 +2161,17 @@ function View.draw(controller)
         love.graphics.pop()
       end
     end
-  elseif controller.screen == "feuDeCamp" and controller.feu_de_camp then
-    draw_feu_de_camp(controller)
+  elseif controller.screen == "forge" and controller.forge then
+    draw_forge(controller)
+  elseif controller.screen == "temple" and controller.temple then
+    draw_temple(controller)
   end
 
   draw_targeting_arrow(controller)
   draw_card_flights(controller)
   draw_particles(controller)
   draw_floaters(controller)
-  if controller.screen == "playing" or controller.screen == "draft" or controller.screen == "feuDeCamp" then
+  if controller.screen == "playing" or controller.screen == "draft" or controller.screen == "forge" or controller.screen == "temple" then
     draw_tooltip(controller)
   end
 

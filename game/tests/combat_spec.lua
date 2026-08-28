@@ -58,6 +58,32 @@ describe("Combat.deal_damage", function()
     Combat.deal_damage(state, hero, target, 4, "physique", nil)
     assert.equal(17, target.hp) -- 20 - round(4*0.75=3)
   end)
+
+  -- Discrétion perdue en encaissant des dégâts (2026-08-28, demande explicite,
+  -- complète le mécanisme de l'Assassin -- voir game_spec.lua pour les 2
+  -- autres resets, "joue une carte non-Furtif" et "fin de tour").
+  it("une VRAIE perte de PV (to_hp > 0) remet Discrétion et Camouflé de la cible à 0", function()
+    local state = make_state()
+    local target = make_hero("h1", { class_id = "assassin", discretion = 7, camoufle = 1 })
+    Combat.deal_damage(state, nil, target, 4, "physique", nil)
+    assert.equal(0, target.discretion)
+    assert.equal(0, target.camoufle)
+  end)
+
+  it("un coup entièrement absorbé par le Bouclier (to_hp == 0) ne touche pas la Discrétion", function()
+    local state = make_state()
+    local target = make_hero("h1", { class_id = "assassin", discretion = 7, camoufle = 1, defense = 10 })
+    Combat.deal_damage(state, nil, target, 4, "physique", nil)
+    assert.equal(7, target.discretion)
+    assert.equal(1, target.camoufle)
+  end)
+
+  it("ne touche jamais un héros sans Discrétion (discretion == nil, pas l'Assassin)", function()
+    local state = make_state()
+    local target = make_hero("h1", { class_id = "guerrier" })
+    Combat.deal_damage(state, nil, target, 4, "physique", nil)
+    assert.is_nil(target.discretion)
+  end)
 end)
 
 describe("Combat.damage_multiplier : sensibilité au feu de l'Homme Arbre (2026-08-24)", function()

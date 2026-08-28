@@ -2,7 +2,9 @@
 -- Port fidèle de pickDraftCards. Règles : pool = cartes des classes présentes ;
 -- probabilité de doublon par slot 100% / 25% / 50% ; jamais deux fois la même carte
 -- parmi les 3 propositions ; si le pool de cartes inédites est épuisé, retombe
--- silencieusement sur un doublon.
+-- silencieusement sur un doublon. Au plus 1 carte de tier "Départ" parmi les 3
+-- (2026-08-27, demande explicite -- "quelles que soient les autres contraintes"),
+-- prioritaire sur toutes les règles ci-dessus.
 
 local Cards = require("src.data.cards")
 local Heroes = require("src.data.heroes")
@@ -39,13 +41,35 @@ function Draft.pick_cards(state)
 
   local used_codes = {}
   local picks = {}
+  -- Au plus 1 carte "Départ" parmi les 3 propositions, quelles que soient les
+  -- autres contraintes (2026-08-27, demande explicite) : dès qu'une carte
+  -- Départ est tirée pour un slot, elle est exclue du pool de TOUS les slots
+  -- suivants -- avant même le filtre doublon/inédit ci-dessous, qui ne
+  -- s'applique donc plus qu'au sous-ensemble restant.
+  local depart_picked = false
 
   for _, chance in ipairs(Draft.DUP_CHANCES) do
+    local function depart_ok(d) return not (depart_picked and d.tier == "depart") end
+
     local pool = {}
     for _, d in ipairs(eligible) do
-      if not contains(used_codes, d.code) then pool[#pool + 1] = d end
+      if not contains(used_codes, d.code) and depart_ok(d) then pool[#pool + 1] = d end
     end
-    if #pool == 0 then pool = eligible end -- filet de sécurité si le pool éligible est plus petit que 3
+    if #pool == 0 then
+      -- Filet de sécurité si le pool éligible (moins les cartes déjà tirées
+      -- pour ce draft) est vide : retombe sur tout l'éligible -- mais la
+      -- règle "au plus 1 carte Départ" reste inviolable ("quelles que soient
+      -- les autres contraintes"), seul le filtre doublon/inédit cède ici.
+      for _, d in ipairs(eligible) do
+        if depart_ok(d) then pool[#pool + 1] = d end
+      end
+    end
+    if #pool == 0 then
+      -- Dernier recours absolu (ne devrait jamais arriver avec le pool de
+      -- cartes actuel) : même la règle Départ cède plutôt que de ne proposer
+      -- aucune carte pour ce slot.
+      pool = eligible
+    end
 
     local dup_pool, new_pool = {}, {}
     for _, d in ipairs(pool) do
@@ -64,6 +88,7 @@ function Draft.pick_cards(state)
     end
     picks[#picks + 1] = chosen
     used_codes[chosen.code] = true
+    if chosen.tier == "depart" then depart_picked = true end
   end
 
   return picks

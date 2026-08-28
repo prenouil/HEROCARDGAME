@@ -1,4 +1,4 @@
--- Cards.upgraded_def (écran "feuDeCamp", 2026-08-10) : vérifie le contrat
+-- Cards.upgraded_def (écran "La Forge", 2026-08-10) : vérifie le contrat
 -- générique (nom suffixé, def/effect remplacés, uid jamais concerné puisque
 -- c'est le module appelant qui le porte) + quelques valeurs ponctuelles
 -- tirées du tableur de Zgrubulu, pour attraper une régression si les
@@ -15,7 +15,7 @@ describe("Cards.upgraded_def", function()
   end)
 
   it("garde le même code, class_id, tier et cost que la carte de base", function()
-    local base = Cards.by_code("blessure-ouverte")
+    local base = Cards.by_code("en-traitre")
     local up = Cards.upgraded_def(base)
     assert.equal(base.code, up.code)
     assert.equal(base.class_id, up.class_id)
@@ -75,5 +75,42 @@ describe("Cards.upgraded_def", function()
     up.effect({ state = state, hero = hero2, target = target, card_def = up })
     assert.equal(3, hero2.discretion)
     assert.equal(3, hero2.puissance)
+  end)
+
+  it("Assassinat Camouflé inflige les dégâts et NE retire plus Camouflé (2026-08-28, \"et perd Camouflé\" disparu du texte -- Furtif)", function()
+    local base = Cards.by_code("assassinat")
+    local state = { log = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "assassin", camoufle = 1, discretion = 10, puissance = 0 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    base.effect({ state = state, hero = hero, target = target, card_def = base })
+    assert.equal(8, target.hp) -- 20 - 12
+    assert.equal(1, hero.camoufle) -- ne le retire plus lui-même (contrairement à avant 2026-08-28)
+  end)
+
+  it("En traître : sans Camouflé, ne fait STRICTEMENT rien -- dégâts/saignement/Discrétion tous conditionnels (2026-08-28, corrigé)", function()
+    local base = Cards.by_code("en-traitre")
+    local state = { log = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "assassin", camoufle = 0, discretion = 0 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0, saignements = 0 }
+    base.effect({ state = state, hero = hero, target = target, card_def = base })
+    assert.equal(20, target.hp) -- pas Camouflé : aucun dégât
+    assert.equal(0, target.saignements)
+    assert.equal(0, hero.discretion) -- pas Camouflé : pas de Discrétion non plus
+
+    local hero2 = { id = "h2", name = "h2", hp = 20, max_hp = 20, class_id = "assassin", camoufle = 1, discretion = 0 }
+    local target2 = { id = "e2", name = "e2", hp = 20, max_hp = 20, defense = 0, saignements = 0 }
+    base.effect({ state = state, hero = hero2, target = target2, card_def = base })
+    assert.equal(12, target2.hp) -- Camouflé : 20 - 8
+    assert.equal(3, target2.saignements)
+    assert.equal(4, hero2.discretion)
+  end)
+
+  it("cartes Assassin taguées 'furtif' dans cats (2026-08-28)", function()
+    for _, code in ipairs({ "plan-attaque", "se-cacher", "repli-strategique", "en-traitre", "assassinat", "preparation" }) do
+      local def = Cards.by_code(code)
+      local has_furtif = false
+      for _, cat in ipairs(def.cats) do if cat == "furtif" then has_furtif = true end end
+      assert.is_true(has_furtif, code .. " devrait porter 'furtif' dans cats")
+    end
   end)
 end)

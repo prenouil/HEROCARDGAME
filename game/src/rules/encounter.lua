@@ -9,8 +9,14 @@ local Combat = require("src.rules.combat")
 local Encounter = {}
 
 Encounter.MAX_ENEMIES_PER_COMBAT = 4 -- lisibilité, à confirmer en playtest (surtout tactile)
-Encounter.BUDGET_BASE = 20
-Encounter.BUDGET_GROWTH = 0.22 -- +22%/combat, exponentiel, valeur placeholder à tester
+Encounter.BUDGET_BASE = 20 -- inchangé (2026-08-28, demande explicite -- "ne pas changer le départ")
+-- Ralentie de 0.22 à 0.12 (2026-08-28, demande explicite -- "la montée moins
+-- forte, moins exponentielle") : reste une croissance exponentielle (même
+-- formule), mais un taux nettement plus faible aplatit beaucoup la courbe sur
+-- la durée d'un run -- ex. budget du combat 10 : ~120 avant, ~55 maintenant,
+-- pour un même budget de départ (combat 1 = 20 dans les deux cas). Toujours
+-- un placeholder à ajuster en playtest.
+Encounter.BUDGET_GROWTH = 0.12
 
 function Encounter.budget_for_combat(n)
   return Enemies.round(Encounter.BUDGET_BASE * (1 + Encounter.BUDGET_GROWTH) ^ (n - 1))

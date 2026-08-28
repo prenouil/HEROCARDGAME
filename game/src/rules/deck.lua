@@ -13,12 +13,14 @@ Deck.HAND_SIZE = 5
 -- son "Coup direct", son "Encaisser", et sa carte "depart" propre). Guerrier :
 -- "coup-taille" (pas "coup-estoc", devenu "avance", 2026-08-24 -- voir
 -- cards.lua). Mage : "flameche"/"barriere" (renommées, pas
--- "coup-direct-mage"/"encaisser-mage").
+-- "coup-direct-mage"/"encaisser-mage"). Assassin (2026-08-28, refonte
+-- complète) : "plan-attaque"/"se-cacher"/"repli-strategique" (renommées,
+-- pas "coup-direct-assassin"/"encaisser-assassin"/"strategie").
 Deck.STARTING_DECK_CODES = {
   { "coup-direct-guerrier", 1 }, { "encaisser-guerrier", 1 }, { "coup-taille", 1 },
   { "coup-direct-paladin", 1 }, { "encaisser-paladin", 1 }, { "rempart", 1 },
   { "flameche", 1 }, { "barriere", 1 }, { "missile-magique", 1 },
-  { "coup-direct-assassin", 1 }, { "encaisser-assassin", 1 }, { "strategie", 1 },
+  { "plan-attaque", 1 }, { "se-cacher", 1 }, { "repli-strategique", 1 },
 }
 
 -- `rng` (2026-08-10, demande explicite -- ordre du deck reproductible à l'identique

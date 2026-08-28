@@ -55,6 +55,44 @@ local function menu_hovering(controller, x, y)
   return false
 end
 
+--- Écrans "forge"/"temple" (2026-08-28, demande explicite) : même geste quel
+-- que soit le mode d'entrée (tap/flèche) -- factorisé une seule fois, comme
+-- menu_click, réutilisé par mousepressed_tap/arrow ET
+-- is_hovering_clickable_tap/arrow (voir post_combat_hovering plus bas).
+-- `t.eligible`/`f.choices` : seules les cibles RÉELLEMENT valides sont
+-- testées (aventurier mort/déjà béni, ou 0 carte proposée) -- un clic hors de
+-- ces zones ne fait rien de plus que "return true" (l'écran a bien traité le
+-- clic, même si aucune action n'en résulte), jamais retomber sur la logique
+-- "playing" en dessous.
+local function post_combat_click(controller, x, y)
+  if controller.screen == "forge" then
+    local f = controller.forge
+    if f and #f.choices > 0 then
+      local rects = View.forge_card_rects(controller)
+      for i, r in ipairs(rects) do
+        if View.point_in(r, x, y) then controller:choose_forge_card(i); return true end
+      end
+    elseif f and View.point_in(View.forge_skip_button, x, y) then
+      controller:choose_forge_skip()
+    end
+    return true
+  end
+  if controller.screen == "temple" then
+    local t = controller.temple
+    if t and t.blessing then
+      local rects = View.temple_hero_rects(controller)
+      for _, h in ipairs(t.eligible) do
+        local r = rects[h.id]
+        if r and View.point_in(r, x, y) then controller:choose_temple_hero(h.id); return true end
+      end
+    elseif t and View.point_in(View.temple_skip_button, x, y) then
+      controller:choose_temple_skip()
+    end
+    return true
+  end
+  return false
+end
+
 --- "Rejouer" sur l'écran de défaite (2026-08-21, demande explicite) : relance
 -- le même mode qu'à la mort -- `run_mode == "boss_test"` relance le test du
 -- boss (Game.start_boss_test, jamais Game.reset_run, qui tirerait une
@@ -85,13 +123,7 @@ local function mousepressed_tap(controller, x, y, button)
     return
   end
 
-  if controller.screen == "feuDeCamp" then
-    if View.point_in(View.feu_de_camp_heal_rect, x, y) then controller:choose_feu_de_camp_heal()
-    elseif View.point_in(View.feu_de_camp_upgrade_rect, x, y) then controller:choose_feu_de_camp_upgrade()
-    elseif View.point_in(View.feu_de_camp_skip_button, x, y) then controller:choose_feu_de_camp_skip()
-    end
-    return
-  end
+  if post_combat_click(controller, x, y) then return end
 
   -- screen == "playing"
 
@@ -161,13 +193,7 @@ local function mousepressed_arrow(controller, x, y, button)
     return
   end
 
-  if controller.screen == "feuDeCamp" then
-    if View.point_in(View.feu_de_camp_heal_rect, x, y) then controller:choose_feu_de_camp_heal()
-    elseif View.point_in(View.feu_de_camp_upgrade_rect, x, y) then controller:choose_feu_de_camp_upgrade()
-    elseif View.point_in(View.feu_de_camp_skip_button, x, y) then controller:choose_feu_de_camp_skip()
-    end
-    return
-  end
+  if post_combat_click(controller, x, y) then return end
 
   -- screen == "playing"
 
@@ -223,15 +249,32 @@ end
 -- déclencher d'action), pour que "cliquable visuellement" == "cliquable pour
 -- de vrai" -- appelé chaque frame depuis love.update (main.lua).
 
---- Partagée entre les deux modes (tap/flèche, le clic sur cet écran ne dépend
--- pas du mode d'entrée -- voir les deux blocs "feuDeCamp" identiques dans
--- mousepressed_tap/mousepressed_arrow ci-dessus).
-local function feu_de_camp_hovering(controller, x, y)
-  local fdc = controller.feu_de_camp
-  if not fdc then return false end
-  if fdc.heal_target and View.point_in(View.feu_de_camp_heal_rect, x, y) then return true end
-  if fdc.upgrade_targets and View.point_in(View.feu_de_camp_upgrade_rect, x, y) then return true end
-  if not fdc.heal_target and not fdc.upgrade_targets and View.point_in(View.feu_de_camp_skip_button, x, y) then return true end
+--- Partagée entre les deux modes (tap/flèche, le clic sur ces écrans ne
+-- dépend pas du mode d'entrée -- voir post_combat_click ci-dessus). Ne
+-- déclare cliquable QUE ce qui produirait une vraie action (cartes réellement
+-- proposées, aventurier réellement éligible) -- jamais un portrait
+-- mort/déjà béni ou une carte inexistante, même si post_combat_click les
+-- laisserait passer sans erreur (silencieusement no-op).
+local function post_combat_hovering(controller, x, y)
+  if controller.screen == "forge" then
+    local f = controller.forge
+    if not f then return false end
+    if #f.choices == 0 then return View.point_in(View.forge_skip_button, x, y) end
+    local rects = View.forge_card_rects(controller)
+    for _, r in ipairs(rects) do if View.point_in(r, x, y) then return true end end
+    return false
+  end
+  if controller.screen == "temple" then
+    local t = controller.temple
+    if not t then return false end
+    if not t.blessing then return View.point_in(View.temple_skip_button, x, y) end
+    local rects = View.temple_hero_rects(controller)
+    for _, h in ipairs(t.eligible) do
+      local r = rects[h.id]
+      if r and View.point_in(r, x, y) then return true end
+    end
+    return false
+  end
   return false
 end
 
@@ -254,7 +297,7 @@ local function is_hovering_clickable_tap(controller, x, y)
     return false
   end
 
-  if controller.screen == "feuDeCamp" then return feu_de_camp_hovering(controller, x, y) end
+  if controller.screen == "forge" or controller.screen == "temple" then return post_combat_hovering(controller, x, y) end
 
   -- Carte "sans cible" en attente de confirmation (2026-08-27) : n'importe où
   -- est cliquable (soit ça valide, soit ça échange/désélectionne, voir
@@ -301,7 +344,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
     return false
   end
 
-  if controller.screen == "feuDeCamp" then return feu_de_camp_hovering(controller, x, y) end
+  if controller.screen == "forge" or controller.screen == "temple" then return post_combat_hovering(controller, x, y) end
 
   -- Carte "sans cible" en attente de confirmation (2026-08-27) : même garde
   -- qu'en mode tap ci-dessus -- n'importe où est cliquable.
@@ -353,20 +396,33 @@ function Input.mousemoved(controller, x, y)
     return
   end
 
-  -- Écran "feuDeCamp" (2026-08-10) : infobulle mot-clé sur les 2 cartes
-  -- proposées à l'amélioration -- même souci de cohérence que le bug draft
-  -- ci-dessus (jamais un écran de cartes sans infobulle).
-  if controller.screen == "feuDeCamp" then
-    local fdc = controller.feu_de_camp
-    if fdc and fdc.upgrade_targets then
-      local rows = View.feu_de_camp_upgrade_card_rects()
-      for i, r in ipairs(rows) do
+  -- Écran "forge" (2026-08-28) : infobulle mot-clé sur les cartes proposées à
+  -- l'amélioration -- même souci de cohérence que le bug draft ci-dessus
+  -- (jamais un écran de cartes sans infobulle).
+  if controller.screen == "forge" then
+    local f = controller.forge
+    if f then
+      local rects = View.forge_card_rects(controller)
+      for i, r in ipairs(rects) do
         if View.point_in(r, x, y) then
-          controller:set_hover("card", fdc.upgrade_targets[i].def)
+          controller:set_hover("card", f.choices[i].def)
           return
         end
       end
     end
+    controller:set_hover(nil, nil)
+    return
+  end
+
+  -- Écran "temple" (2026-08-28) : infobulle aventurier sur chaque portrait
+  -- (description de classe + statuts + la nouvelle ligne de bénédiction, voir
+  -- tooltip_lines dans view.lua) -- même souci de cohérence, un aventurier
+  -- mort/déjà béni reste survolable pour l'infobulle même s'il n'est pas
+  -- cliquable (voir post_combat_hovering, plus restrictif).
+  if controller.screen == "temple" then
+    local rects = View.temple_hero_rects(controller)
+    local hero_id = find_rect(rects, x, y)
+    if hero_id then controller:set_hover("hero", hero_id); return end
     controller:set_hover(nil, nil)
     return
   end
@@ -391,6 +447,10 @@ function Input.mousemoved(controller, x, y)
   -- ne les gère.
   if View.point_in(View.deck_pile_rect, x, y) then controller:set_hover("deck", nil); return end
   if View.point_in(View.discard_pile_rect, x, y) then controller:set_hover("discard", nil); return end
+  -- "Fin de tour" (2026-08-27, demande explicite) : infobulle expliquant l'effet
+  -- (défausse de la main + tour ennemi) -- le bouton reste cliquable comme avant
+  -- (voir plus haut dans ce fichier), ceci ajoute juste le survol.
+  if View.point_in(View.end_turn_button, x, y) then controller:set_hover("end_turn", nil); return end
 
   local hover_uid = View.hand_hit(state, x, y)
   if hover_uid then

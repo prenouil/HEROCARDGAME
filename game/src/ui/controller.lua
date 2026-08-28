@@ -5,7 +5,8 @@
 local Game = require("src.rules.game")
 local Combat = require("src.rules.combat")
 local Draft = require("src.rules.draft")
-local FeuDeCamp = require("src.rules.feu_de_camp")
+local Forge = require("src.rules.forge")
+local Temple = require("src.rules.temple")
 local Sequencer = require("src.util.sequencer")
 -- Dépendance à la UI (rects de layout, purs -- aucun appel love.graphics dedans)
 -- nécessaire pour savoir D'OÙ une carte part visuellement quand elle est piochée
@@ -64,20 +65,30 @@ local DRAFT_FLIP_DURATION = 0.5
 local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début du suivant
 local BOSS_VICTORY_HOLD_DURATION = 2.2 -- s -- temps où "Boss vaincu !" reste affiché avant le retour au menu
 
--- Écran "feuDeCamp" (2026-08-10, demande explicite) : entre le draft de fin de
--- combat et le combat suivant, s'intercale de façon transparente (n'avance
--- jamais le budget de difficulté). Petite pause après le choix pour laisser le
--- temps à l'animation/au son de soin ou d'amélioration de se voir avant que le
--- combat suivant démarre.
-local FEU_DE_CAMP_RESOLVE_PAUSE = 0.6
+-- Écrans "La Forge"/"Le Temple" (2026-08-28, demande explicite -- remplacent
+-- l'ancien écran "feuDeCamp" unique, voir Controller:enter_post_combat_sequence) :
+-- entre le draft de fin de combat et le combat suivant, s'intercalent de façon
+-- transparente (n'avancent jamais le budget de difficulté). Chacun apparaît de
+-- façon INDÉPENDANTE et ALÉATOIRE (voir POST_COMBAT_FORGE_CHANCE/TEMPLE_CHANCE),
+-- jamais plus d'une fois chacun pour un même combat gagné -- 0, 1 ou 2 écrans
+-- avant le combat suivant. Petite pause après un choix pour laisser le temps à
+-- l'animation/au son de se voir avant l'étape suivante.
+local POST_COMBAT_RESOLVE_PAUSE = 0.6
+-- Placeholders à ajuster en playtest (2026-08-28) -- indépendantes l'une de
+-- l'autre : les 4 issues ("ni l'un ni l'autre", "Forge seule", "Temple seul",
+-- "les deux") sont donc toutes possibles, pas seulement les 3 citées explicitement.
+local POST_COMBAT_FORGE_CHANCE = 0.4
+local POST_COMBAT_TEMPLE_CHANCE = 0.4
 
--- Choix "amélioration" (2026-08-11, demande explicite) : les 2 cartes de base
--- et les flèches disparaissent en fondu pendant que les 2 cartes améliorées se
--- recentrent dans leur case, PUIS 1s de pause (cartes déjà réglées, juste le
--- temps de les lire) avant d'enchaîner sur le combat suivant -- remplace la
--- pause générique FEU_DE_CAMP_RESOLVE_PAUSE sur ce chemin précis.
-local FEU_DE_CAMP_UPGRADE_ANIM_DURATION = 0.5
-local FEU_DE_CAMP_UPGRADE_HOLD_PAUSE = 1.0
+-- Choix "amélioration" à la Forge (2026-08-11, demande explicite -- adapté au
+-- 2026-08-28 pour 1 carte choisie parmi jusqu'à 4, plus 2 cartes systématiques) :
+-- les 3 autres propositions ET la carte de base de celle choisie disparaissent
+-- en fondu pendant que sa version améliorée se recentre dans la case centrale,
+-- PUIS 1s de pause (carte déjà réglée, juste le temps de la lire) avant
+-- d'enchaîner sur l'étape suivante -- remplace la pause générique
+-- POST_COMBAT_RESOLVE_PAUSE sur ce chemin précis.
+local FORGE_UPGRADE_ANIM_DURATION = 0.5
+local FORGE_UPGRADE_HOLD_PAUSE = 1.0
 
 -- VFX de lisibilité (2026-08-09, party "amélioration des visuels") : tous
 -- dérivés du même mécanisme de diff avant/après déjà en place pour la
@@ -95,19 +106,25 @@ function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "menu" -- "menu" | "options" | "playing" | "draft" | "feuDeCamp" | "bossVictory" | "defeat"
+  self.screen = "menu" -- "menu" | "options" | "playing" | "draft" | "forge" | "temple" | "bossVictory" | "defeat"
   -- Mode de run choisi au menu (2026-08-21, demande explicite) : "infini"
   -- (illimité, l'ancien comportement par défaut), "bounded" (5 combats puis
-  -- l'Homme Arbre, voir Controller:finish_feu_de_camp/Game.start_boss_combat)
+  -- l'Homme Arbre, voir Controller:advance_to_next_combat/Game.start_boss_combat)
   -- ou "boss_test" (combat isolé contre le boss, voir
   -- Controller:start_boss_test -- une victoire ramène au menu plutôt que
   -- d'enchaîner un faux combat suivant). nil tant qu'aucun run n'a encore
   -- démarré (écran "menu").
   self.run_mode = nil
   self.draft_picks = nil
-  self.feu_de_camp = nil -- { heal_target = hero|nil, upgrade_targets = {instance,instance}|nil }, voir enter_feu_de_camp_screen
-  self.feu_de_camp_upgrade_anim = nil -- { base_defs = {def,def}, t = elapsed }, voir choose_feu_de_camp_upgrade
-  self.feu_de_camp_upgrade_anim_duration = FEU_DE_CAMP_UPGRADE_ANIM_DURATION -- lu par view.lua pour l'easing
+  -- File des écrans "camp" restant à montrer après le combat qui vient d'être
+  -- gagné (2026-08-28) -- {"forge"}/{"temple"}/{"forge","temple"}/{} selon les
+  -- tirages de Controller:enter_post_combat_sequence ; consommée un élément à
+  -- la fois par Controller:advance_post_combat_queue.
+  self.post_combat_queue = {}
+  self.forge = nil -- { choices = {instance,...}, resolved = bool|nil }, voir enter_forge_screen
+  self.forge_upgrade_anim = nil -- { chosen_index, base_def, t = elapsed }, voir choose_forge_card
+  self.forge_upgrade_anim_duration = FORGE_UPGRADE_ANIM_DURATION -- lu par view.lua pour l'easing
+  self.temple = nil -- { blessing = def|nil, eligible = {hero,...}, resolved = bool|nil }, voir enter_temple_screen
   self.victory_anim = nil -- { t = elapsed } pendant le zoom+bump du titre "Victoire !"
   self.victory_title_duration = VICTORY_TITLE_DURATION -- lu par view.lua pour l'easing
   self.draft_cards_shown = false -- les 3 cartes (de dos) n'apparaissent qu'après le titre
@@ -184,8 +201,10 @@ end
 -- s'appliquer juste après selon `state.over`).
 function Controller:clear_animation_state()
   self.draft_picks = nil
-  self.feu_de_camp = nil
-  self.feu_de_camp_upgrade_anim = nil
+  self.post_combat_queue = {}
+  self.forge = nil
+  self.forge_upgrade_anim = nil
+  self.temple = nil
   self.victory_anim = nil
   self.draft_cards_shown = false
   self.draft_flip = {}
@@ -227,7 +246,7 @@ end
 -- "bounded") : "Rejouer" après une défaite relance le même test plutôt que de
 -- retomber sur le mode infini, et une victoire ramène au menu plutôt que
 -- d'enchaîner sur un faux "combat 2" -- voir Input.mousepressed et
--- Controller:finish_feu_de_camp.
+-- Controller:advance_to_next_combat.
 function Controller:start_boss_test()
   self.screen = "playing"
   self.run_mode = "boss_test"
@@ -492,6 +511,14 @@ end
 -- second mécanisme de rebond à maintenir. `state.heroes` est déjà dans l'ordre
 -- d'affichage gauche->droite (voir View.hero_rects), donc une simple itération
 -- suffit -- pas besoin de trier.
+-- `hero_ref.combat_start_heal` (2026-08-28, demande explicite -- bénédiction
+-- du Temple) : posé par Game.carried_hero AVANT que ce beat ne joue (chaque
+-- entrée en combat rebâtit les héros via carried_hero, voir
+-- advance_to_next_combat) -- affiché ICI, synchronisé sur le saut de CE
+-- héros précisément plutôt qu'en un seul bloc au tout début, pour que le
+-- flottant vert de soin morde sur le même instant que son p'tit bond "prêt".
+-- Consommé (mis à nil) tout de suite après affichage : ne doit jamais
+-- rejouer sur un tour normal, seulement à l'entrée en combat.
 function Controller:play_hero_ready_hops()
   local self_ = self
   for _, h in ipairs(self_.state.heroes) do
@@ -500,6 +527,10 @@ function Controller:play_hero_ready_hops()
       self_.seq:push(function()
         self_:pulse(hero_ref.id, "pulse-up")
         Sfx.play("hop")
+        if hero_ref.combat_start_heal then
+          self_:spawn_floater(hero_ref.id, hero_ref.combat_start_heal, "heal")
+          hero_ref.combat_start_heal = nil
+        end
       end, HERO_READY_STAGGER)
     end
   end
@@ -654,7 +685,7 @@ function Controller:update(dt)
   end
   if self.victory_anim then self.victory_anim.t = self.victory_anim.t + dt end
   for _, f in pairs(self.draft_flip) do f.t = f.t + dt end
-  if self.feu_de_camp_upgrade_anim then self.feu_de_camp_upgrade_anim.t = self.feu_de_camp_upgrade_anim.t + dt end
+  if self.forge_upgrade_anim then self.forge_upgrade_anim.t = self.forge_upgrade_anim.t + dt end
 end
 
 function Controller:set_hover(kind, target)
@@ -881,114 +912,190 @@ function Controller:choose_draft_card(index)
   Combat.log(self.state, def.name .. " ajoutée au deck.", "sys")
   self.draft_picks = nil
   self.card_anims = {}
-  self:enter_feu_de_camp_screen()
+  self:enter_post_combat_sequence()
 end
 
--- ---------- feu de camp ----------
+-- ---------- forge / temple (post-combat) ----------
 
---- Entre sur l'écran "feuDeCamp", entre le draft et le combat suivant (2026-08-10,
--- demande explicite). Les deux options possibles (soin/résurrection de
--- l'aventurier le plus blessé, amélioration de 2 cartes tirées au hasard) sont
--- tirées ICI, une seule fois, via state.rng.feu_de_camp -- même principe que
--- Draft.pick_cards pour l'écran de draft : ce qui sera montré au joueur ne
--- dépend jamais de quand il clique, seulement de l'état au moment d'entrer sur
--- l'écran. nil sur l'un ou l'autre grise l'option correspondante côté UI.
-function Controller:enter_feu_de_camp_screen()
-  self.screen = "feuDeCamp"
-  local rng = self.state.rng.feu_de_camp
-  local heal_target = FeuDeCamp.most_wounded_hero(self.state, rng)
-  local upgrade_targets = FeuDeCamp.pick_upgrade_targets(self.state, rng)
-  self.feu_de_camp = { heal_target = heal_target, upgrade_targets = upgrade_targets }
+--- Tire, une seule fois par combat gagné, LEQUEL des 2 écrans "camp" apparaîtra
+-- (0, 1 ou 2 -- jamais le même deux fois, voir POST_COMBAT_FORGE_CHANCE/
+-- TEMPLE_CHANCE en tête de fichier) puis lance la file (voir
+-- advance_post_combat_queue). `state.rng.post_combat` : flux dédié à CE
+-- tirage-là seulement, jamais celui qui décide du CONTENU de la Forge/du
+-- Temple (state.rng.forge/temple, consommés seulement si l'écran apparaît
+-- vraiment) -- comme ça, ajouter/retirer un écran de la file ne décale jamais
+-- les tirages de l'autre.
+function Controller:enter_post_combat_sequence()
+  local rng = self.state.rng.post_combat
+  local queue = {}
+  if rng:random() < POST_COMBAT_FORGE_CHANCE then queue[#queue + 1] = "forge" end
+  if rng:random() < POST_COMBAT_TEMPLE_CHANCE then queue[#queue + 1] = "temple" end
+  self.post_combat_queue = queue
+  self:advance_post_combat_queue()
+end
+
+--- Dépile le prochain écran "camp" à montrer (Forge, Temple, ou aucun -- passe
+-- alors directement au combat suivant). Point de retour unique de
+-- finish_forge/finish_temple, jamais d'aiguillage dupliqué ailleurs.
+function Controller:advance_post_combat_queue()
+  local next_screen = table.remove(self.post_combat_queue, 1)
+  if next_screen == "forge" then
+    self:enter_forge_screen()
+  elseif next_screen == "temple" then
+    self:enter_temple_screen()
+  else
+    self:advance_to_next_combat()
+  end
+end
+
+--- Entre sur l'écran "La Forge" (2026-08-28, demande explicite) : jusqu'à
+-- Forge.CHOICE_COUNT (4) cartes tirées au hasard parmi tout le deck encore
+-- améliorable, moins si le deck n'en a pas assez, jusqu'à 0 -- tirées ICI, une
+-- seule fois, via state.rng.forge, même principe que Draft.pick_cards.
+function Controller:enter_forge_screen()
+  self.screen = "forge"
+  self.forge = { choices = Forge.pick_choices(self.state, self.state.rng.forge) }
 end
 
 --- Vrai tant que le choix n'est pas encore fait -- garde contre un double-clic
--- pendant FEU_DE_CAMP_RESOLVE_PAUSE (self.screen reste "feuDeCamp" jusqu'à ce
--- que finish_feu_de_camp bascule réellement d'écran, voir son commentaire).
-local function feu_de_camp_choosable(self)
-  local fdc = self.feu_de_camp
-  return self.screen == "feuDeCamp" and fdc ~= nil and not fdc.resolved
+-- pendant la pause de résolution (self.screen reste "forge" jusqu'à ce que
+-- finish_forge bascule réellement d'écran).
+local function forge_choosable(self)
+  local f = self.forge
+  return self.screen == "forge" and f ~= nil and not f.resolved
 end
 
-function Controller:choose_feu_de_camp_heal()
-  if not feu_de_camp_choosable(self) then return end
-  local fdc = self.feu_de_camp
-  if not fdc.heal_target then return end
-  fdc.resolved = true
-  local hero = fdc.heal_target
-  local before_hp = hero.hp
-  FeuDeCamp.heal_hero(hero)
-  local healed = hero.hp - before_hp
-  if healed > 0 then self:spawn_floater(hero.id, healed, "heal") end
-  Sfx.play("heal")
-  self:finish_feu_de_camp()
-end
-
---- Snapshot des defs de BASE avant mutation (2026-08-11, demande explicite) --
--- FeuDeCamp.apply_upgrades remplace `instance.def` par la version "+" ; l'anim
--- de transition a besoin des deux (base qui s'efface en fondu, "+" qui se
--- recentre) donc on garde les defs de base à part avant l'appel, jamais
--- reconstruites après coup (Cards.upgraded_def sur un def déjà amélioré
--- doublerait le suffixe " +").
-function Controller:choose_feu_de_camp_upgrade()
-  if not feu_de_camp_choosable(self) then return end
-  local fdc = self.feu_de_camp
-  if not fdc.upgrade_targets then return end
-  fdc.resolved = true
-  local base_defs = {}
-  for i, instance in ipairs(fdc.upgrade_targets) do base_defs[i] = instance.def end
-  FeuDeCamp.apply_upgrades(fdc.upgrade_targets)
-  self.feu_de_camp_upgrade_anim = { base_defs = base_defs, t = 0 }
+--- Snapshot du def de BASE avant mutation (2026-08-11, demande explicite) --
+-- Forge.apply_upgrade remplace `instance.def` par la version "+" ; l'anim de
+-- transition a besoin des deux (base qui s'efface en fondu, "+" qui se
+-- recentre) donc on garde le def de base à part avant l'appel, jamais
+-- reconstruit après coup (Cards.upgraded_def sur un def déjà amélioré
+-- doublerait le suffixe " +"). Les AUTRES propositions (jamais choisies)
+-- s'effacent simplement en fondu, voir draw_forge dans view.lua -- rien à
+-- mémoriser pour elles, leur def de base reste ce qu'il est.
+function Controller:choose_forge_card(index)
+  if not forge_choosable(self) then return end
+  local f = self.forge
+  local instance = f.choices[index]
+  if not instance then return end
+  f.resolved = true
+  local base_def = instance.def
+  Forge.apply_upgrade(instance)
+  self.forge_upgrade_anim = { chosen_index = index, base_def = base_def, t = 0 }
   Sfx.play("upgrade")
-  self:finish_feu_de_camp(FEU_DE_CAMP_UPGRADE_ANIM_DURATION + FEU_DE_CAMP_UPGRADE_HOLD_PAUSE)
+  self:finish_forge(FORGE_UPGRADE_ANIM_DURATION + FORGE_UPGRADE_HOLD_PAUSE)
 end
 
---- "Passer" (2026-08-10, demande explicite) : seule option valide quand le
--- soin ET l'amélioration sont tous les deux grisés (personne blessé et moins
--- de 2 cartes améliorables).
-function Controller:choose_feu_de_camp_skip()
-  if not feu_de_camp_choosable(self) then return end
-  local fdc = self.feu_de_camp
-  if fdc.heal_target or fdc.upgrade_targets then return end
-  fdc.resolved = true
-  self:finish_feu_de_camp()
+--- "Passer" -- seule option valide quand aucune carte n'est proposée (deck
+-- entièrement amélioré, voir Forge.pick_choices).
+function Controller:choose_forge_skip()
+  if not forge_choosable(self) then return end
+  local f = self.forge
+  if #f.choices > 0 then return end
+  f.resolved = true
+  self:finish_forge()
 end
 
---- `pause` (optionnel) : durée avant l'étape suivante -- FEU_DE_CAMP_RESOLVE_PAUSE
--- par défaut (soin/passer), plus long sur le chemin amélioration pour laisser
--- l'animation de fondu/recentrage se jouer (voir choose_feu_de_camp_upgrade).
-function Controller:finish_feu_de_camp(pause)
+--- `pause` (optionnel) : durée avant l'étape suivante -- POST_COMBAT_RESOLVE_PAUSE
+-- par défaut (passer), plus long après un vrai choix pour laisser l'animation
+-- de fondu/recentrage se jouer (voir choose_forge_card).
+function Controller:finish_forge(pause)
   local self_ = self
-  -- Même idiome que Controller:enter_draft_screen (fn vide + durée = "attends",
-  -- PUIS l'étape suivante fait le travail) : Sequencer:push exécute run_fn
-  -- immédiatement et attend `wait_after` avant l'étape SUIVANTE, jamais avant
-  -- run_fn lui-même -- voir src/util/sequencer.lua.
-  self.seq:push(function() end, pause or FEU_DE_CAMP_RESOLVE_PAUSE)
+  self.seq:push(function() end, pause or POST_COMBAT_RESOLVE_PAUSE)
   self.seq:push(function()
-    self_.feu_de_camp = nil
-    self_.feu_de_camp_upgrade_anim = nil
+    self_.forge = nil
+    self_.forge_upgrade_anim = nil
     self_.card_anims = {}
-    -- Le cas "Tester le boss" gagné ne passe plus jamais par ici (2026-08-21+ :
-    -- state.run.is_boss fait sortir la victoire du boss via
-    -- Controller:handle_combat_victory/enter_boss_victory bien avant
-    -- d'atteindre le draft ou le feu de camp, voir plus haut) -- cette fonction
-    -- ne gère donc plus que la progression ENTRE deux combats non-boss d'un
-    -- run normal, boss compris comme destination (pas comme victoire).
-    -- Run borné à 5 combats + 1 boss : le combat contre l'Homme Arbre
-    -- (Game.start_boss_combat) remplace le 6ᵉ combat classique --
-    -- `state.run.combat_index` porte encore le numéro du combat qui vient
-    -- d'être gagné (Game.start_next_combat/start_boss_combat, plus bas, sont
-    -- ce qui l'incrémente), donc >= 5 ici veut dire "le 5ᵉ combat vient
-    -- d'être bouclé".
-    self_.screen = "playing"
-    self_.state.over = false
-    if self_.run_mode == "bounded" and self_.state.run.combat_index >= 5 then
-      Game.start_boss_combat(self_.state)
-    else
-      Game.start_next_combat(self_.state)
-    end
-    self_:consume_drawn_animation()
-    if self_.state.over then self_:handle_combat_victory() end
+    self_:advance_post_combat_queue()
   end)
+end
+
+--- Entre sur l'écran "Le Temple" (2026-08-28, demande explicite) : liste les
+-- aventuriers éligibles (vivants, pas déjà bénis) et tire LA bénédiction qui
+-- sera proposée -- tirée ICI, une seule fois, via state.rng.temple. Aucun
+-- aventurier éligible (tous déjà bénis) laisse `blessing` à nil -- l'écran
+-- affiche alors "Passer" comme seule option (voir draw_temple, view.lua).
+function Controller:enter_temple_screen()
+  self.screen = "temple"
+  local eligible = Temple.eligible_heroes(self.state)
+  local blessing = #eligible > 0 and Temple.pick_blessing(self.state.rng.temple) or nil
+  self.temple = { blessing = blessing, eligible = eligible }
+end
+
+local function temple_choosable(self)
+  local t = self.temple
+  return self.screen == "temple" and t ~= nil and not t.resolved
+end
+
+--- Le JOUEUR choisit QUI reçoit la bénédiction (déjà tirée, voir
+-- enter_temple_screen) en cliquant l'un des 4 aventuriers affichés -- refuse
+-- silencieusement un id hors de `eligible` (aventurier mort ou déjà béni,
+-- voir View.temple_hero_rects/input.lua pour le hit-test réel).
+function Controller:choose_temple_hero(hero_id)
+  if not temple_choosable(self) then return end
+  local t = self.temple
+  if not t.blessing then return end
+  local hero
+  for _, h in ipairs(t.eligible) do if h.id == hero_id then hero = h end end
+  if not hero then return end
+  t.resolved = true
+  t.chosen_hero_id = hero_id
+  Temple.bless(hero, t.blessing)
+  Sfx.play("heal")
+  self:finish_temple()
+end
+
+--- "Passer" -- seule option valide quand aucun aventurier n'est éligible (tous
+-- déjà bénis, voir Temple.eligible_heroes).
+function Controller:choose_temple_skip()
+  if not temple_choosable(self) then return end
+  local t = self.temple
+  if t.blessing then return end
+  t.resolved = true
+  self:finish_temple()
+end
+
+function Controller:finish_temple()
+  local self_ = self
+  self.seq:push(function() end, POST_COMBAT_RESOLVE_PAUSE)
+  self.seq:push(function()
+    self_.temple = nil
+    self_:advance_post_combat_queue()
+  end)
+end
+
+--- Dernière étape de la file "camp" (Forge/Temple épuisées, ou aucune des deux
+-- n'était apparue) : bascule vers le combat suivant, comme l'ancien
+-- finish_feu_de_camp. Le cas "Tester le boss" gagné ne passe plus jamais par
+-- ici (2026-08-21+ : state.run.is_boss fait sortir la victoire du boss via
+-- Controller:handle_combat_victory/enter_boss_victory bien avant d'atteindre
+-- le draft ou le camp) -- cette fonction ne gère donc que la progression ENTRE
+-- deux combats non-boss d'un run normal, boss compris comme destination (pas
+-- comme victoire). Run borné à 5 combats + 1 boss : le combat contre l'Homme
+-- Arbre (Game.start_boss_combat) remplace le 6ᵉ combat classique --
+-- `state.run.combat_index` porte encore le numéro du combat qui vient d'être
+-- gagné (Game.start_next_combat/start_boss_combat, plus bas, sont ce qui
+-- l'incrémente), donc >= 5 ici veut dire "le 5ᵉ combat vient d'être bouclé".
+-- `play_turn_start_sequence()` (2026-08-28, remplace un simple
+-- consume_drawn_animation) : nécessaire pour que le petit saut de chaque
+-- aventurier (voir play_hero_ready_hops) rejoue à l'entrée en combat, pas
+-- seulement en cours de run -- c'est CE beat qui affiche le flottant vert
+-- d'une bénédiction de soin (voir hero.combat_start_heal, posé par
+-- Game.carried_hero). `skip_shield_sfx` : la Défense de chaque héros retombe à
+-- 0 à l'entrée en combat (voir carried_hero), pas un blocage de dégâts.
+function Controller:advance_to_next_combat()
+  local self_ = self
+  self.screen = "playing"
+  self.state.over = false
+  local before = self:snapshot_units()
+  if self.run_mode == "bounded" and self.state.run.combat_index >= 5 then
+    Game.start_boss_combat(self.state)
+  else
+    Game.start_next_combat(self.state)
+  end
+  self:react_to_diff(before, { skip_shield_sfx = true })
+  if self.state.over then self_:handle_combat_victory(); return end
+  self:play_turn_start_sequence()
 end
 
 return Controller

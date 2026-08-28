@@ -79,7 +79,7 @@ end
 function Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire)
   local pct = 0
   if source_unit and (source_unit.puissance or 0) > 0 and dmg_type == "physique" then
-    pct = pct + 0.25 * source_unit.puissance -- Puissance (Assassin, via Assassinat/Dans les ombres) : par stack
+    pct = pct + 0.25 * source_unit.puissance -- Puissance (Assassin, via Assassinat/En traître) : par stack
   end
   if source_unit and (source_unit.incapacite or 0) > 0 then
     pct = pct - 0.25 -- Incapacité : -25% flat, peu importe le nombre de stacks (comme Vulnérabilité)
@@ -132,6 +132,23 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
     source_hero and "you" or "foe")
 
   local shook = to_hp > 0
+
+  -- Discrétion perdue en encaissant des dégâts (2026-08-28, demande explicite --
+  -- s'ajoute aux 2 autres resets déjà en place, jouer une carte et fin de tour
+  -- sans agir, voir Game.on_card_played/Game.tick_discretion_end_of_turn dans
+  -- game.lua) : générique sur `target_unit.discretion` plutôt que sur
+  -- class_id == "assassin" (même idiome que ces deux fonctions -- seul
+  -- l'Assassin porte ce champ, voir Game.fresh_hero) pour ne pas coupler ce
+  -- module générique de dégâts à une classe précise. Ne se déclenche que sur
+  -- une VRAIE perte de PV (to_hp > 0, pas juste "touché" -- un coup entièrement
+  -- absorbé par le Bouclier ne compromet pas la discrétion) et seulement s'il y
+  -- avait quelque chose à perdre, pour ne jamais spammer le log en pure perte.
+  if to_hp > 0 and target_unit.discretion ~= nil
+      and ((target_unit.discretion or 0) > 0 or (target_unit.camoufle or 0) > 0) then
+    target_unit.discretion = 0
+    target_unit.camoufle = 0
+    Combat.log(state, target_unit.name .. " perd sa Discrétion en encaissant des dégâts.", "foe")
+  end
 
   -- Run Infini : marque l'ennemi comme touché ce tour (Golem) / touché par du feu ce tour (Troll).
   local is_enemy_target = false

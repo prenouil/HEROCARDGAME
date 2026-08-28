@@ -88,4 +88,22 @@ module.exports = [
     subject: 'a hooded ninja mask icon, stealth symbol' },
   { id: 'puissance', grid: 'icon', out: 'game/assets/icons/status/puissance.png',
     subject: 'a clenched fist icon, strength buff symbol' },
+  // "Furtif" (2026-08-28, refonte des cartes Assassin) : mot-clé sans icône
+  // pour l'instant (has_icon=false dans glossary.lua, faute de pouvoir
+  // générer d'assets IA dans l'environnement où ce mot-clé a été ajouté --
+  // voir la note sur temple-statue plus haut) -- entrée gardée prête, à
+  // brancher (has_icon=true) une fois ce fichier généré ailleurs.
+  { id: 'furtif', grid: 'icon', out: 'game/assets/icons/keywords/furtif.png',
+    subject: 'a pair of soft footprints fading into shadow, stealth movement symbol' },
+
+  // ---- Décors (grid personnalisée, plus grande qu'un portrait) ----
+  // Écran "Le Temple" (2026-08-28, demande explicite -- "une statue d'un dieu
+  // en forme de fleur dans un pot difforme") : remplace le placeholder
+  // procédural dessiné à la main dans game/src/ui/view.lua (draw_temple_statue,
+  // faute de pouvoir générer d'assets IA dans l'environnement où ce module a
+  // été écrit -- aucun .env/identifiants Cloudflare présents). Grille 128 (ni
+  // 'icon' 32x32 ni 'character' 64x64, taille custom) : élément de décor plus
+  // grand qu'un portrait de personnage, pas un petit symbole d'icône.
+  { id: 'temple-statue', grid: 128, out: 'game/assets/scenes/temple_statue.png',
+    subject: 'a stone statue of a flower deity, a humanoid figure sculpted like a blossoming flower with petal-like features, standing rooted in a large lopsided misshapen clay pot, fantasy temple altar centerpiece, viewed from the front' },
 ];

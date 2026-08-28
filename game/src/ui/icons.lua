@@ -5,6 +5,10 @@
 -- visuel en attendant de vraies illustrations (voir README du dossier game/).
 
 local Sprites = require("src.ui.sprites")
+-- Theme (2026-08-27) : uniquement pour draw_status_bonus/malus ci-dessous,
+-- dont la couleur est fixe (vert/rouge, porte le sens du symbole) plutôt que
+-- choisie par l'appelant comme les autres icônes de ce module.
+local Theme = require("src.ui.theme")
 
 local Icons = {}
 
@@ -285,6 +289,46 @@ local function draw_status_fireweak(cx, cy, r, color)
     cx - r * 0.5, cy + r * 0.1)
 end
 
+--- Flèche vers le haut, légèrement inclinée -- jamais parfaitement verticale
+-- (2026-08-27, demande explicite -- remplace un "+" jugé peu lisible) :
+-- télégraphe ennemi d'un soin à soi/un allié ou d'une résurrection, "une
+-- flèche verte vers le haut" -- volontairement neutre, ne représente aucune
+-- mécanique précise (contrairement à Puissance ci-dessus, un triangle) --
+-- juste "quelque chose de positif va se passer", le détail restant dans
+-- l'infobulle (voir enemy_telegraph_parts dans view.lua). Couleur FIXE
+-- (Theme.heal, vert) plutôt que le paramètre `color` de l'appelant -- ici la
+-- couleur porte le sens du symbole, pas un choix laissé à l'appelant.
+local function draw_status_bonus(cx, cy, r)
+  set(Theme.heal)
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.rotate(math.rad(-18))
+  love.graphics.setLineWidth(math.max(1, r * 0.22))
+  love.graphics.line(0, r * 0.8, 0, -r * 0.5)
+  love.graphics.polygon("fill", 0, -r * 0.9, -r * 0.4, -r * 0.25, r * 0.4, -r * 0.25)
+  love.graphics.setLineWidth(1)
+  love.graphics.pop()
+end
+
+--- Flèche vers le bas, même principe que draw_status_bonus juste au-dessus
+-- mais pour un malus (2026-08-27, demande explicite -- ex. Malédiction du
+-- Nécromancien) : rouge (Theme.hp), inclinée dans l'autre sens (pas un simple
+-- miroir vertical de l'icône bonus). Distincte des icônes de statut précises
+-- déjà existantes (Vulnérabilité, Incapacité...), qui restent utilisées
+-- ailleurs (badges de statuts ACTIFS sur une unité) -- seul le télégraphe
+-- d'une attaque À VENIR les remplace par ce symbole générique.
+local function draw_status_malus(cx, cy, r)
+  set(Theme.hp)
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.rotate(math.rad(18))
+  love.graphics.setLineWidth(math.max(1, r * 0.22))
+  love.graphics.line(0, -r * 0.8, 0, r * 0.5)
+  love.graphics.polygon("fill", 0, r * 0.9, -r * 0.4, r * 0.25, r * 0.4, r * 0.25)
+  love.graphics.setLineWidth(1)
+  love.graphics.pop()
+end
+
 local DRAW_BY_STATUS = {
   defense = draw_status_defense,
   esquive = draw_status_esquive,
@@ -294,6 +338,8 @@ local DRAW_BY_STATUS = {
   incapacite = draw_status_incapacite,
   vulnerabilite = draw_status_vulnerabilite,
   fireweak = draw_status_fireweak,
+  bonus = draw_status_bonus,
+  malus = draw_status_malus,
 }
 
 --- Dessine l'icône d'un statut (clé Lua, ex. "defense", "esquive"...) centrée

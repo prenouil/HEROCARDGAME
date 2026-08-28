@@ -4,8 +4,8 @@
 -- chaque classe a sa propre copie, avec un `code` distinct mais le même nom
 -- affiché (sauf le Mage, voir plus bas).
 --
--- Chaque carte porte un champ `upgrade` optionnel (2026-08-10, écran
--- "feuDeCamp") : {desc, effect} de la version "+" -- voir Cards.upgraded_def.
+-- Chaque carte porte un champ `upgrade` optionnel (2026-08-10, écran "La
+-- Forge") : {desc, effect} de la version "+" -- voir Cards.upgraded_def.
 --
 -- Cartes regroupées par classe : chaque classe a 3 cartes "depart" (sa
 -- "Coup direct" + son "Encaisser" + 1 carte propre) et 3 cartes "avance",
@@ -30,11 +30,13 @@
 -- par souci de cohérence visuelle -- la pastille de mana s'affiche sur les 6
 -- cartes du Mage, pas seulement les 4 qui en dépensent réellement).
 --
--- Assassin : Assassinat/Dans les ombres accordent désormais de la
--- "Discrétion" (Game.gain_discretion, ressource propre à l'Assassin, séparée
--- de Camouflé -- voir game.lua) au lieu de Camouflé directement. Blessure
--- ouverte n'inflige plus le Saignement que si l'Assassin qui la joue est
--- actuellement Camouflé (avant : inconditionnel).
+-- Assassin : refonte complète des 6 cartes (2026-08-28, tableur fourni) --
+-- voir le bloc de cartes plus bas pour le détail. Toutes tagguées "Furtif"
+-- (glossary.lua) : ne fait pas perdre Discrétion/Camouflé en la jouant
+-- (Game.on_card_played), rapporte 2 Discrétion si défaussée sans avoir été
+-- jouée (Game.grant_furtif_discard_discretion). Les 3 "depart" ont aussi
+-- changé de nom, à l'instar du Mage avant elles (plus de "Coup direct"/
+-- "Encaisser" génériques) : "Plan d'attaque"/"Se cacher"/"Repli stratégique".
 
 local Combat = require("src.rules.combat")
 local Deck -- required en différé pour casser le cycle cards -> deck -> cards.
@@ -339,86 +341,126 @@ Cards.list = {
   },
 
   -- ---------- Assassin ----------
+  -- Refonte complète (2026-08-28, demande explicite -- tableur fourni,
+  -- remplace intégralement les 6 cartes précédentes) : toutes tagguées
+  -- "Furtif" (cats + mot-clé affiché, voir glossary.lua) -- ne fait PAS
+  -- perdre Discrétion/Camouflé en la jouant (Game.on_card_played), et
+  -- rapporte 2 Discrétion si elle finit défaussée sans avoir été jouée
+  -- (Game.grant_furtif_discard_discretion). Les 3 "depart" changent aussi de
+  -- nom (comme le Mage avant elles, voir Flamèche/Barrière) : ne portent
+  -- plus les noms génériques "Coup direct"/"Encaisser".
   {
-    code = "coup-direct-assassin", name = "Coup direct", class_id = "assassin", tier = "depart", cost = 1,
-    cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
-    desc = 'Inflige 4 "epee".',
-    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 4, "physique", ctx) end,
+    code = "plan-attaque", name = "Plan d'attaque", class_id = "assassin", tier = "depart", cost = 1,
+    cats = { "melee", "degats", "furtif" }, dmg_type = "physique", target = "enemy",
+    desc = 'Si Camouflé, inflige 8 "epee", sinon inflige 4 "epee". "Furtif"',
+    effect = function(ctx)
+      local amount = (ctx.hero.camoufle or 0) > 0 and 8 or 4
+      Combat.deal_damage(ctx.state, ctx.hero, ctx.target, amount, "physique", ctx)
+    end,
     upgrade = {
-      desc = 'Inflige 6 "epee".',
-      effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "physique", ctx) end,
+      desc = 'Si Camouflé, inflige 12 "epee", sinon inflige 6 "epee". "Furtif"',
+      effect = function(ctx)
+        local amount = (ctx.hero.camoufle or 0) > 0 and 12 or 6
+        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, amount, "physique", ctx)
+      end,
     },
   },
   {
-    code = "encaisser-assassin", name = "Encaisser", class_id = "assassin", tier = "depart", cost = 1,
-    cats = { "defense" }, dmg_type = nil, target = "ally",
-    desc = 'L\'allié gagne 4 "bouclier".',
+    -- Amélioration 4->6 (2026-08-28) : le tableur fourni affiche encore 4 en
+    -- amélioré, incohérent avec CHAQUE autre carte "Encaisser"-équivalente du
+    -- jeu (Guerrier/Paladin : 4->6) -- vraisemblablement un oubli de mise à
+    -- jour côté tableur plutôt qu'une carte volontairement sans palier.
+    -- Repris à 6 pour rester cohérent avec le reste du jeu ; signalé
+    -- explicitement, à corriger si 4 était réellement voulu.
+    code = "se-cacher", name = "Se cacher", class_id = "assassin", tier = "depart", cost = 1,
+    cats = { "defense", "furtif" }, dmg_type = nil, target = "ally",
+    desc = 'L\'allié gagne 4 "bouclier". "Furtif"',
     effect = function(ctx) Combat.grant_defense(ctx.target, 4) end,
     upgrade = {
-      desc = 'L\'allié gagne 6 "bouclier".',
+      desc = 'L\'allié gagne 6 "bouclier". "Furtif"',
       effect = function(ctx) Combat.grant_defense(ctx.target, 6) end,
     },
   },
   {
-    code = "strategie", name = "Stratégie", class_id = "assassin", tier = "depart", cost = 0,
-    cats = { "melee", "degats", "defense" }, dmg_type = "physique", target = "conditional",
-    desc = 'Si "cibleennemi", gagne 4 "bouclier", sinon inflige 4 "epee".',
+    -- Remplace "Stratégie" (2026-08-28) : n'inflige plus jamais de dégâts (la
+    -- colonne "mots clés" du tableur fourni listait encore "dégâts mêlée
+    -- physique", vraisemblablement recopiée de l'ancienne carte -- le texte
+    -- réel des 2 versions n'en parle plus du tout, cats corrigé en
+    -- conséquence). Redirige l'ennemi qui vise l'Assassin (pas la cible du
+    -- bouclier) vers l'allié protégé -- même mécanisme que Provocation
+    -- (Paladin), inversé : là-bas l'ennemi vise le lanceur, ici il quitte le
+    -- lanceur pour l'allié ciblé.
+    code = "repli-strategique", name = "Repli stratégique", class_id = "assassin", tier = "depart", cost = 1,
+    cats = { "defense", "furtif" }, dmg_type = nil, target = "ally",
+    desc = 'L\'allié gagne 4 "bouclier". Si "cibleennemi", l\'ennemi change de cible pour cet allié. "Furtif"',
     effect = function(ctx)
-      if Combat.enemy_targeting(ctx.state, ctx.hero) then
-        Combat.grant_defense(ctx.hero, 4)
-        Combat.log(ctx.state, ctx.hero.name .. " est visé : Stratégie lui donne 4 défense.", "you")
-      else
-        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 4, "physique", ctx)
+      Combat.grant_defense(ctx.target, 4)
+      local attacker = Combat.enemy_targeting(ctx.state, ctx.hero)
+      if attacker then
+        attacker.target_hero_id = ctx.target.id
+        Combat.log(ctx.state, ctx.hero.name .. " est visé : Repli stratégique redirige " .. attacker.name .. " vers " .. ctx.target.name .. ".", "you")
       end
     end,
     upgrade = {
-      desc = 'Si "cibleennemi", gagne 6 "bouclier", sinon inflige 6 "epee".',
+      desc = 'L\'allié gagne 6 "bouclier". Si "cibleennemi", l\'ennemi change de cible pour cet allié. "Furtif"',
       effect = function(ctx)
-        if Combat.enemy_targeting(ctx.state, ctx.hero) then
-          Combat.grant_defense(ctx.hero, 6)
-          Combat.log(ctx.state, ctx.hero.name .. " est visé : Stratégie lui donne 6 défense.", "you")
-        else
-          Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "physique", ctx)
+        Combat.grant_defense(ctx.target, 6)
+        local attacker = Combat.enemy_targeting(ctx.state, ctx.hero)
+        if attacker then
+          attacker.target_hero_id = ctx.target.id
+          Combat.log(ctx.state, ctx.hero.name .. " est visé : Repli stratégique redirige " .. attacker.name .. " vers " .. ctx.target.name .. ".", "you")
         end
       end,
     },
   },
   {
-    -- Saignement désormais CONDITIONNEL (2026-08-24, confirmé explicitement --
-    -- avant, inconditionnel) : "Camouflé" ici désigne l'état de l'Assassin qui
-    -- joue la carte (hero.camoufle > 0), pas la cible.
-    code = "blessure-ouverte", name = "Blessure ouverte", class_id = "assassin", tier = "avance", cost = 2,
-    cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
-    desc = 'Inflige 6 "epee". Si Camouflé, inflige "Saignements" 3.',
+    -- Remplace "Blessure ouverte" (2026-08-28, corrigé après clarification
+    -- explicite -- un premier jet rendait la Discrétion inconditionnelle,
+    -- faux) : dégâts, saignement ET Discrétion sont TOUS LES TROIS
+    -- conditionnels à Camouflé -- sans Camouflé, cette carte ne fait
+    -- STRICTEMENT rien (coût payé pour rien, même geste que Riposte quand
+    -- personne ne vise le lanceur -- voir plus haut) : contrairement à
+    -- Assassinat, aucun lot de consolation ici.
+    code = "en-traitre", name = "En traître", class_id = "assassin", tier = "avance", cost = 2,
+    cats = { "melee", "degats", "furtif" }, dmg_type = "physique", target = "enemy",
+    desc = 'Si Camouflé, inflige 8 "epee", "Saignements" 3, "Discretion" 4. "Furtif"',
     effect = function(ctx)
-      Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "physique", ctx)
       if (ctx.hero.camoufle or 0) > 0 then
+        Game = Game or require("src.rules.game")
+        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 8, "physique", ctx)
         Combat.apply_status(ctx.target, "saignements", 3)
+        Game.gain_discretion(ctx.state, ctx.hero, 4)
+      else
+        Combat.log(ctx.state, "En traître : " .. ctx.hero.name .. " n'est pas Camouflé, la carte ne fait rien.", "sys")
       end
     end,
     upgrade = {
-      desc = 'Inflige 9 "epee". Si Camouflé, inflige "Saignements" 4.',
+      desc = 'Si Camouflé, inflige 12 "epee", "Saignements" 4, "Discretion" 6. "Furtif"',
       effect = function(ctx)
-        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 9, "physique", ctx)
         if (ctx.hero.camoufle or 0) > 0 then
+          Game = Game or require("src.rules.game")
+          Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 12, "physique", ctx)
           Combat.apply_status(ctx.target, "saignements", 4)
+          Game.gain_discretion(ctx.state, ctx.hero, 6)
+        else
+          Combat.log(ctx.state, "En traître : " .. ctx.hero.name .. " n'est pas Camouflé, la carte ne fait rien.", "sys")
         end
       end,
     },
   },
   {
-    -- Discrétion (2026-08-24, remplace Camouflé comme récompense directe --
-    -- statut DISTINCT de Camouflé, voir Game.gain_discretion/hero.discretion
-    -- dans game.lua) : le seul chemin vers Camouflé est désormais d'atteindre
-    -- 10 Discrétion, jamais un octroi direct par une carte.
+    -- "et perd Camouflé" retiré (2026-08-28) : disparu du texte fourni, et
+    -- désormais tagguée "Furtif" comme les 5 autres -- la jouer ne fait plus
+    -- perdre Discrétion/Camouflé du tout (voir Game.on_card_played), qu'elle
+    -- vienne de frapper en Camouflé ou non. Changement de comportement notable
+    -- vs avant (perdait Camouflé après avoir frappé) : signalé explicitement.
     code = "assassinat", name = "Assassinat", class_id = "assassin", tier = "avance", cost = 1,
-    cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
-    desc = 'Si Camouflé, inflige 12 "epee", et perd Camouflé, sinon gagne "Discrétion" 2, "Puissance" 2 et Assassinat va sur le dessus du deck.',
+    cats = { "melee", "degats", "furtif" }, dmg_type = "physique", target = "enemy",
+    desc = 'Si Camouflé, inflige 12 "epee", sinon gagne "Discrétion" 2, "Puissance" 2 et Assassinat va sur le dessus du deck. "Furtif"',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
       if (ctx.hero.camoufle or 0) > 0 then
         Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 12, "physique", ctx)
-        ctx.hero.camoufle = 0
       else
         Game.gain_discretion(ctx.state, ctx.hero, 2)
         Combat.apply_status(ctx.hero, "puissance", 2)
@@ -427,12 +469,11 @@ Cards.list = {
       end
     end,
     upgrade = {
-      desc = 'Si Camouflé, inflige 18 "epee", et perd Camouflé, sinon gagne "Discrétion" 3, "Puissance" 3 et Assassinat va sur le dessus du deck.',
+      desc = 'Si Camouflé, inflige 18 "epee", sinon gagne "Discrétion" 3, "Puissance" 3 et Assassinat va sur le dessus du deck. "Furtif"',
       effect = function(ctx)
         Game = Game or require("src.rules.game")
         if (ctx.hero.camoufle or 0) > 0 then
           Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 18, "physique", ctx)
-          ctx.hero.camoufle = 0
         else
           Game.gain_discretion(ctx.state, ctx.hero, 3)
           Combat.apply_status(ctx.hero, "puissance", 3)
@@ -443,9 +484,11 @@ Cards.list = {
     },
   },
   {
-    code = "dans-les-ombres", name = "Dans les ombres", class_id = "assassin", tier = "avance", cost = 1,
-    cats = { "defense" }, dmg_type = nil, target = "self",
-    desc = 'Gagne 4 "bouclier", 1 "energie" et 3 "Discrétion".',
+    -- Renommée "Préparation" (2026-08-28, remplace "Dans les ombres") : même
+    -- effet, juste tagguée "Furtif" en plus.
+    code = "preparation", name = "Préparation", class_id = "assassin", tier = "avance", cost = 1,
+    cats = { "defense", "furtif" }, dmg_type = nil, target = "self",
+    desc = 'Gagne 4 "bouclier", 1 "energie" et "Discrétion" 3. "Furtif"',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
       Combat.grant_defense(ctx.hero, 4)
@@ -453,7 +496,7 @@ Cards.list = {
       Game.gain_discretion(ctx.state, ctx.hero, 3)
     end,
     upgrade = {
-      desc = 'Gagne 6 "bouclier", 2 "energie" et 5 "Discrétion".',
+      desc = 'Gagne 6 "bouclier", 2 "energie" et "Discrétion" 5. "Furtif"',
       effect = function(ctx)
         Game = Game or require("src.rules.game")
         Combat.grant_defense(ctx.hero, 6)
@@ -471,12 +514,12 @@ function Cards.by_code(code)
   return nil
 end
 
---- Version améliorée d'un def de base (écran "feuDeCamp", 2026-08-10, demande
+--- Version améliorée d'un def de base (écran "La Forge", 2026-08-10, demande
 -- explicite -- une seule amélioration possible par carte, jamais de palier
 -- au-delà). Conserve `code` (les recherches Cards.by_code/le glossaire
 -- continuent de fonctionner sur l'identité de base), change juste name/desc/
 -- effect et marque `is_upgraded` -- c'est ce flag qui exclut la carte du
--- pool de tirage (voir src/rules/feu_de_camp.lua), PAS l'absence de `upgrade`
+-- pool de tirage (voir src/rules/forge.lua), PAS l'absence de `upgrade`
 -- (gardé tel quel, inutilisé, pour ne pas perdre l'info "était améliorable").
 function Cards.upgraded_def(def)
   assert(def.upgrade, "carte non améliorable : " .. tostring(def.code))

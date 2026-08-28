@@ -277,6 +277,41 @@ describe("Discrétion de l'Assassin (2026-08-24, ressource propre, distincte de 
     Game.tick_discretion_end_of_turn(state)
     assert.equal(0, assassin.discretion)
   end)
+
+  -- "Furtif" (2026-08-28, clarification explicite du mot-clé) : une carte
+  -- taguée `cats = {"furtif"}` ne fait PAS perdre Discrétion/Camouflé à
+  -- l'Assassin qui la joue -- toutes ses 6 cartes le sont désormais (voir
+  -- cards.lua), mais Game.on_card_played reste générique sur `def.cats`,
+  -- jamais un `if hero.class_id == "assassin"` en dur.
+  it("Game.on_card_played ne retire NI Discrétion NI Camouflé sur une carte 'furtif'", function()
+    local state, assassin = make_state_with_assassin()
+    assassin.discretion = 10
+    assassin.camoufle = 1
+    Game.on_card_played(state, assassin, { cats = { "furtif" } })
+    assert.equal(10, assassin.discretion)
+    assert.equal(1, assassin.camoufle)
+    assert.is_true(assassin.played_card_this_turn) -- compte quand même comme "avoir agi"
+  end)
+
+  it("Game.on_card_played retire bien Discrétion/Camouflé sur une carte SANS 'furtif'", function()
+    local state, assassin = make_state_with_assassin()
+    assassin.discretion = 10
+    assassin.camoufle = 1
+    Game.on_card_played(state, assassin, { cats = { "melee", "degats" } })
+    assert.equal(0, assassin.discretion)
+    assert.equal(0, assassin.camoufle)
+  end)
+
+  it("Game.grant_furtif_discard_discretion donne 2 Discrétion par carte 'furtif' restée en main, rien pour les autres", function()
+    local state, assassin = make_state_with_assassin()
+    local furtif_def = { class_id = "assassin", cats = { "furtif" } }
+    local autre_def = { class_id = "assassin", cats = { "melee" } }
+    local hand = {
+      { uid = 1, def = furtif_def }, { uid = 2, def = furtif_def }, { uid = 3, def = autre_def },
+    }
+    Game.grant_furtif_discard_discretion(state, hand)
+    assert.equal(4, assassin.discretion) -- 2 cartes furtif x 2
+  end)
 end)
 
 describe("Game.sync_camoufle_visibility (2026-08-24, Camouflé s'enlève dès qu'il ne reste plus d'allié non-Camouflé vivant)", function()

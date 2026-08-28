@@ -14,8 +14,20 @@ local Combat = require("src.rules.combat")
 local Deck = require("src.rules.deck")
 local Encounter = require("src.rules.encounter")
 local Rng = require("src.util.rng")
+local Temple = require("src.rules.temple")
 
 local Game = {}
+
+--- Vrai si `def` porte la catégorie `cat` (même idiome que la détection "feu"
+-- dans Combat.deal_damage -- def.cats reste un simple tableau de tags, jamais
+-- un champ booléen dédié par tag).
+local function def_has_cat(def, cat)
+  if not def or not def.cats then return false end
+  for _, c in ipairs(def.cats) do
+    if c == cat then return true end
+  end
+  return false
+end
 
 local function shallow_copy(t)
   local out = {}
@@ -52,16 +64,43 @@ local function fresh_hero(def)
     played_card_this_turn = false,
     mana = def.class_id == "mage" and 2 or nil,
     discretion = def.class_id == "assassin" and 0 or nil,
+    -- Bénédiction du Temple (2026-08-28, demande explicite) : nil tant qu'aucune
+    -- n'a été accordée -- voir src/rules/temple.lua (Temple.bless) pour
+    -- l'attribution, et son application ci-dessous dans carried_hero.
+    blessing = nil,
   }
+end
+
+--- `combat_start_heal` (2026-08-28, demande explicite) : montant EFFECTIVEMENT
+-- rendu par la bénédiction de soin de cet aventurier à cette entrée en combat
+-- précise (peut être < Temple.by_id(...).combat_start_heal si déjà proche du
+-- plafond, ou nil si pas de bénédiction/déjà mort/déjà à PV pleins) -- lu et
+-- remis à nil par Controller:play_hero_ready_hops (view.lua affiche le flottant
+-- vert exact, synchronisé avec le petit saut de CET aventurier). La RÈGLE (le
+-- soin lui-même) vit ici, pas dans le contrôleur -- lui ne fait que le retour
+-- visuel, jamais recalculé indépendamment.
+local function apply_combat_start_blessing(n)
+  n.combat_start_heal = nil
+  if not n.blessing or n.hp <= 0 then return end
+  local blessing = Temple.by_id(n.blessing)
+  if not blessing or not blessing.combat_start_heal then return end
+  local before = n.hp
+  n.hp = math.min(n.max_hp, n.hp + blessing.combat_start_heal)
+  local healed = n.hp - before
+  if healed > 0 then n.combat_start_heal = healed end
 end
 
 local function carried_hero(h)
   -- Entre deux combats d'un même run, seuls les PV persistent (blessures non
-  -- soignées) ; tout le reste repart à zéro.
+  -- soignées) ; tout le reste repart à zéro -- SAUF `blessing` (2026-08-28),
+  -- qui dure tout le run une fois accordée par le Temple (voir
+  -- src/rules/temple.lua) : `shallow_copy` la propage déjà telle quelle, rien
+  -- à faire de spécial ici pour ce champ.
   local n = shallow_copy(h)
   n.defense = 0; n.esquive = 0; n.camoufle = 0
   n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.saignements = 0
   n.played_card_this_turn = false
+  apply_combat_start_blessing(n)
   return n
 end
 
@@ -69,14 +108,14 @@ end
 -- tour (2026-08-11, précisé par le porteur de projet -- remplace l'énergie
 -- individuelle par héros) : une REMISE À NIVEAU FIXE, pas un plancher --
 -- qu'il en reste plus ou moins que 3 à la fin du tour précédent (via une
--- carte comme Dans les ombres/Clairvoyance, voir Game.gain_energy, jamais
+-- carte comme Préparation/Clairvoyance, voir Game.gain_energy, jamais
 -- plafonnée EN COURS DE TOUR), le tour suivant retombe toujours exactement
 -- sur cette valeur. Voir Game.start_turn, seul endroit qui l'applique.
 Game.TURN_START_ENERGY = 3
 
 --- Ajoute `amount` à la réserve d'énergie globale, sans plafond EN COURS DE
 -- TOUR (2026-08-11, confirmé explicitement par le porteur de projet) -- seul
--- point d'entrée pour un gain de carte (Clairvoyance/Dans les ombres dans
+-- point d'entrée pour un gain de carte (Clairvoyance/Préparation dans
 -- cards.lua) : ne jamais écrire `state.energy = state.energy + n` ailleurs.
 -- Le montant gagné ici ne survit jamais au tour : Game.start_turn remet la
 -- réserve à Game.TURN_START_ENERGY au tour suivant, quel que soit ce total.
@@ -89,7 +128,7 @@ end
 -- plafonnées) -- au-delà, l'Assassin devient Camouflé (`hero.camoufle = 1`) --
 -- c'est le SEUL chemin vers Camouflé désormais, aucune carte ne l'accorde
 -- plus directement. Seul point d'entrée pour un gain de Discrétion (cartes
--- Assassinat/Dans les ombres dans cards.lua, et le passif "un allié agit/ne
+-- Assassinat/En traître/Préparation dans cards.lua, et le passif "un allié agit/ne
 -- joue aucune carte ce tour" -- voir Game.on_card_played/
 -- Game.tick_discretion_end_of_turn) : ne jamais écrire `hero.discretion = ...`
 -- directement ailleurs.
@@ -133,11 +172,15 @@ end
 -- ou de tour) : "encounter" (composition + PV/bouclier des ennemis tirés à chaque
 -- combat), "deck" (ordre de mélange du deck), "enemy_turn" (cible + coup choisi par
 -- chaque ennemi, et la variance de ses montants, à chaque tour), "draft" (les 3
--- cartes proposées en fin de combat), "feu_de_camp" (égalité entre aventuriers
--- également blessés + tirage des 2 cartes à améliorer, voir src/rules/feu_de_camp.lua).
--- Seeds dérivées d'une seed maîtresse par de simples décalages -- pas un besoin
--- d'indépendance statistique forte, juste que rejouer un flux ne consomme jamais
--- les tirages d'un AUTRE flux.
+-- cartes proposées en fin de combat), "forge" (tirage des cartes proposées à
+-- l'amélioration, voir src/rules/forge.lua), "temple" (tirage de la bénédiction
+-- proposée, voir src/rules/temple.lua), "post_combat" (2026-08-28 -- décide SI la
+-- Forge et/ou le Temple apparaissent après un combat donné, voir
+-- src/ui/controller.lua : un flux séparé du reste, pour que ces tirages "coup de
+-- dé" n'interfèrent jamais avec ceux, déterministes pour un contenu donné, de
+-- Forge/Temple eux-mêmes). Seeds dérivées d'une seed maîtresse par de simples
+-- décalages -- pas un besoin d'indépendance statistique forte, juste que rejouer
+-- un flux ne consomme jamais les tirages d'un AUTRE flux.
 function Game.new_rng_streams(master_seed)
   master_seed = master_seed or os.time()
   return {
@@ -146,7 +189,9 @@ function Game.new_rng_streams(master_seed)
     deck = Rng.new(master_seed + 1),
     enemy_turn = Rng.new(master_seed + 2),
     draft = Rng.new(master_seed + 3),
-    feu_de_camp = Rng.new(master_seed + 4),
+    forge = Rng.new(master_seed + 4),
+    temple = Rng.new(master_seed + 5),
+    post_combat = Rng.new(master_seed + 6),
   }
 end
 
@@ -474,7 +519,7 @@ function Game.resolve_pending(state, kind, target_id)
   if def.mana_cost then hero.mana = hero.mana - def.mana_cost end
   local ctx = { state = state, hero = hero, target = target, card_def = def }
   def.effect(ctx)
-  Game.on_card_played(state, hero)
+  Game.on_card_played(state, hero, def)
   Game.check_victory(state)
   Game.finish_card(state, pending, ctx)
 end
@@ -486,15 +531,23 @@ end
 -- un AUTRE héros (jamais lui-même, jamais les ennemis -- confirmé
 -- explicitement) ; sa propre Discrétion repart à 0 dès qu'IL joue une carte
 -- (cohérent avec la fin de Camouflé ci-dessus : jouer une carte = se
--- dévoiler). Marque aussi `played_card_this_turn`, lu par
--- Game.tick_discretion_end_of_turn en fin de tour ("+5 Discrétion si
--- l'Assassin lui-même n'a joué aucune carte ce tour").
-function Game.on_card_played(state, hero)
-  hero.camoufle = 0
+-- dévoiler) -- SAUF carte "Furtif" (2026-08-28, clarification explicite du
+-- mot-clé : "Ne fait pas perdre de Discrétion") : ce cas ne touche ni
+-- discretion ni camoufle, l'action elle-même étant trop discrète pour se
+-- trahir. Marque aussi `played_card_this_turn` inconditionnellement (même une
+-- carte Furtif compte comme "avoir agi" pour Game.tick_discretion_end_of_turn
+-- -- seule la perte de Discrétion/Camouflé est exemptée, pas le fait d'avoir
+-- joué).
+function Game.on_card_played(state, hero, def)
   hero.played_card_this_turn = true
+  local furtif = def_has_cat(def, "furtif")
   if hero.discretion ~= nil then
-    hero.discretion = 0
+    if not furtif then
+      hero.camoufle = 0
+      hero.discretion = 0
+    end
   else
+    hero.camoufle = 0
     for _, h in ipairs(state.heroes) do
       if h.discretion ~= nil and h.hp > 0 then
         Game.gain_discretion(state, h, 1)
@@ -550,8 +603,29 @@ function Game.end_turn_requested(state)
     -- accord fautif accepté à 1 carte plutôt que la parenthèse).
     Combat.log(state, #state.hand .. " cartes non jouées défaussées.", "sys")
   end
+  Game.grant_furtif_discard_discretion(state, state.hand)
   Game.discard_cards(state, Game.shallow_copy(state.hand))
   return true
+end
+
+--- "Furtif" (2026-08-28, clarification explicite du mot-clé) : +2 Discrétion
+-- pour CHAQUE carte "Furtif" restée en main -- donc défaussée ci-dessous,
+-- jamais jouée ce tour -- à son propriétaire (retrouvé via `def.class_id`,
+-- même idiome que Game.select_card, plutôt que suppose "assassin" en dur).
+-- Distinct des 2 autres gains de Discrétion (+1 quand un allié agit, +5 en
+-- fin de tour sans agir soi-même -- voir Game.on_card_played/
+-- Game.tick_discretion_end_of_turn) : celui-ci porte sur la MAIN, pas sur
+-- l'action, donc évalué ICI, avant que Game.discard_cards (pure, sans règle
+-- de jeu) ne vide réellement la main.
+function Game.grant_furtif_discard_discretion(state, hand)
+  for _, c in ipairs(hand) do
+    if def_has_cat(c.def, "furtif") then
+      local owner = Combat.hero_by_id(state, c.def.class_id)
+      if owner and owner.hp > 0 and owner.discretion ~= nil then
+        Game.gain_discretion(state, owner, 2)
+      end
+    end
+  end
 end
 
 --- Déplace les cartes données de la main vers la défausse (pure — la UI gère
