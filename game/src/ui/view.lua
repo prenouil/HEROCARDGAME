@@ -311,6 +311,71 @@ View.temple_confirm_button = {
   x = W / 2 - 100, y = TEMPLE_HERO_Y + TEMPLE_HERO_H + 20, w = 200, h = 44, label = "Confirmer",
 }
 
+-- Écran "Choisis ton équipe" (2026-08-29, avant chaque run -- 4 aventuriers
+-- parmi les 6 `Heroes.defs`) : rangée du haut = disponibles (pas encore dans
+-- l'équipe), rangée du bas = équipe confirmée -- 2 listes MUTUELLEMENT
+-- EXCLUSIVES (voir Controller:team_select_confirm, qui bascule un id de
+-- l'une à l'autre) -- jamais le même héros affiché aux deux endroits à la fois.
+local TEAM_HERO_W, TEAM_HERO_H = 108, 120
+local TEAM_HERO_GAP = 18
+local TEAM_AVAILABLE_Y = 66
+-- 420, pas 486 (2026-08-29, bug signalé -- chevauchait le bouton "Partir à
+-- l'aventure" en bas à droite : un clic dessus touchait en fait le 4ᵉ
+-- portrait de la rangée, jamais le bouton) : la rangée du bas doit tenir
+-- ENTIÈREMENT au-dessus de lui, marge comprise -- voir
+-- View.team_select_launch_button plus bas, calculé À PARTIR de cette valeur
+-- plutôt que du bas de l'écran, pour que les deux ne puissent plus jamais
+-- diverger silencieusement.
+local TEAM_PARTY_Y = 420
+
+function View.team_select_available_rects(controller)
+  local ts = controller.team_select
+  if not ts then return {} end
+  local rects = centered_row(#ts.available_ids, TEAM_HERO_W, TEAM_HERO_H, TEAM_AVAILABLE_Y, TEAM_HERO_GAP)
+  local out = {}
+  for i, id in ipairs(ts.available_ids) do out[id] = rects[i] end
+  return out
+end
+
+function View.team_select_party_rects(controller)
+  local ts = controller.team_select
+  if not ts then return {} end
+  local rects = centered_row(#ts.selected_ids, TEAM_HERO_W, TEAM_HERO_H, TEAM_PARTY_Y, TEAM_HERO_GAP)
+  local out = {}
+  for i, id in ipairs(ts.selected_ids) do out[id] = rects[i] end
+  return out
+end
+
+-- Cartes du héros mis en avant (2026-08-29) : TOUTES les siennes (Départ +
+-- Avancé, 6 au total), en ligne centrée -- positions CIBLES seulement ; leur
+-- origine (un bord aléatoire, hors-écran) est calculée au vol par
+-- Controller:team_select_spawn_cards, jamais ici.
+local TEAM_CARD_Y = 246
+function View.team_select_card_rects(count)
+  return centered_row(count, CARD_W, CARD_H, TEAM_CARD_Y)
+end
+
+--- Rectangle hors-écran de même taille que `to`, positionné sur le bord
+-- `side` ("left"/"right"/"top"/"bottom") -- origine OU destination d'un vol
+-- de carte sur l'écran de choix d'équipe (2026-08-29). Purement cosmétique,
+-- aucun lien avec une règle de jeu.
+function View.team_select_offscreen_rect(to, side)
+  local margin = 60
+  if side == "left" then return { x = -to.w - margin, y = to.y, w = to.w, h = to.h } end
+  if side == "right" then return { x = W + margin, y = to.y, w = to.w, h = to.h } end
+  if side == "top" then return { x = to.x, y = -to.h - margin, w = to.w, h = to.h } end
+  return { x = to.x, y = H + margin, w = to.w, h = to.h }
+end
+
+View.team_select_cancel_button = { x = 40, y = TEAM_CARD_Y, w = 150, h = 44, label = "Annuler" }
+View.team_select_confirm_button = { x = 40, y = TEAM_CARD_Y + 56, w = 150, h = 44, label = "Valider" }
+
+local TEAM_LAUNCH_W, TEAM_LAUNCH_H = 260, 64
+View.team_select_launch_button = {
+  x = W - TEAM_LAUNCH_W - 30, y = TEAM_PARTY_Y + TEAM_HERO_H + 24, w = TEAM_LAUNCH_W, h = TEAM_LAUNCH_H,
+  label = "Partir à l'aventure",
+}
+
 local function point_in(r, x, y)
   return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h
 end
@@ -754,6 +819,13 @@ local function draw_hero(controller, h, r)
   if h.discretion ~= nil then
     text("DISCR " .. tostring(h.discretion), 0, 81, r.w, 9, Theme.discretion)
   end
+  -- Corruption (2026-08-29, ressource propre au Nécromancien, voir
+  -- hero.corruption dans game.lua) : même traitement que MANA/DISCR
+  -- ci-dessus -- un seul des trois champs est jamais non-nil pour un héros
+  -- donné, pas de collision possible.
+  if h.corruption ~= nil then
+    text("CORR " .. tostring(h.corruption), 0, 81, r.w, 9, Theme.corruption)
+  end
 
   -- Plus de bouton "Jouer" (2026-08-20) : sélectionner une carte assigne
   -- directement son propriétaire (voir Game.select_card), l'encart n'a donc
@@ -779,6 +851,13 @@ local function draw_hero(controller, h, r)
   -- Provocation (2026-08-28, statut du Paladin) : uniquement côté héros, aucun
   -- ennemi ne le porte -- pas de branche équivalente dans draw_enemy.
   if (h.provocation or 0) > 0 then badges[#badges + 1] = { key = "provocation", abbr = "PROV", value = h.provocation } end
+  -- Inspiration/Encore (2026-08-29, statuts GÉNÉRIQUES du Barde -- voir
+  -- hero.inspiration/hero.encore_extra_plays dans game.lua) : N'IMPORTE QUEL
+  -- héros peut les porter (accordés par une carte Barde à un allié d'une
+  -- AUTRE classe) -- badges génériques comme Puissance/Provocation ci-dessus,
+  -- jamais conditionnés à class_id == "barde".
+  if (h.inspiration or 0) > 0 then badges[#badges + 1] = { key = "inspiration", abbr = "INSP", value = h.inspiration } end
+  if (h.encore_extra_plays or 0) > 0 then badges[#badges + 1] = { key = "encore", abbr = "ENC", value = h.encore_extra_plays } end
   -- Bouclier programmé (2026-08-28, demande explicite -- "icone dédiée",
   -- Infranchissable) : pas un vrai statut numérique (hero.scheduled_shields
   -- est un TABLEAU d'entrées {amount, turns_left}, jamais un champ dans
@@ -1085,8 +1164,35 @@ end
 
 -- Mots-clés qui portent un montant de DÉGÂTS (par opposition à "bouclier"/
 -- "soin", qui n'entrent jamais dans Combat.damage_multiplier -- rien ne les
--- fait varier avec Puissance/Incapacité/Vulnérabilité).
-local DAMAGE_KEYWORDS = { epee = true, etincelle = true, fireball = true }
+-- fait varier avec Puissance/Incapacité/Vulnérabilité). "necrose" (2026-08-29,
+-- Nécromancien) : se comporte exactement comme "etincelle" pour ce calcul
+-- (Vulnérabilité s'applique, Puissance non -- réservée à "physique").
+local DAMAGE_KEYWORDS = { epee = true, etincelle = true, fireball = true, necrose = true }
+
+--- Même principe que scale_near_keyword ci-dessus, mais ADDITIF plutôt que
+-- multiplicatif (2026-08-29, Inspiration -- "+6 flat", pas un pourcentage) :
+-- voir consume_inspiration dans combat.lua, seule source de vérité sur le
+-- montant réel -- cette fonction ne fait que prévisualiser le MÊME calcul
+-- dans le texte affiché.
+local function add_near_keyword(text, keyword, amount)
+  local out = text
+  out = out:gsub('(%d+)(%s+"' .. keyword .. '")', function(num, rest)
+    return tostring(tonumber(num) + amount) .. rest
+  end)
+  out = out:gsub('("' .. keyword .. '"%s+)(%d+)', function(pre, num)
+    return pre .. tostring(tonumber(num) + amount)
+  end)
+  return out
+end
+
+-- Mots-clés qui portent un montant de dégâts/soin/bouclier (2026-08-29,
+-- Inspiration -- "+6 flat au PREMIER effet de dégâts/soin/bouclier
+-- déclenché", voir consume_inspiration dans combat.lua) : ordre FIXE (pas
+-- `pairs`, dont l'itération n'est pas déterministe) -- une carte qui porte
+-- PLUSIEURS de ces mots-clés (ex. Rite mineur : "necrose" ET "soin") ne doit
+-- appliquer le bonus qu'à UN SEUL, toujours le même d'une frame à l'autre ;
+-- les dégâts priment sur soin/bouclier, choix arbitraire mais cohérent.
+local INSPIRATION_KEYWORDS_ORDERED = { "epee", "etincelle", "fireball", "necrose", "soin", "bouclier" }
 
 --- Aperçu du texte d'une carte si `hero` la joue (et, une fois la cible
 -- choisie/survolée, `target`) -- réutilise Combat.damage_multiplier (voir
@@ -1112,6 +1218,16 @@ local function preview_desc(def, hero, target)
   if dmg_mult ~= 1 then
     for kw in pairs(DAMAGE_KEYWORDS) do
       if Glossary.has_keyword(def.desc, kw) then text = scale_near_keyword(text, kw, dmg_mult) end
+    end
+  end
+  -- Inspiration (2026-08-29, demande explicite -- "le bonus doit être
+  -- calculé et affiché automatiquement dès que le joueur sélectionne la
+  -- carte") : `hero` ici est TOUJOURS le lanceur (previewing_hero, voir
+  -- draw_hand) -- le même hero.inspiration que consume_inspiration lira
+  -- réellement à la résolution, jamais un calcul divergent.
+  if hero and (hero.inspiration or 0) > 0 then
+    for _, kw in ipairs(INSPIRATION_KEYWORDS_ORDERED) do
+      if Glossary.has_keyword(def.desc, kw) then text = add_near_keyword(text, kw, 6) break end
     end
   end
   return text
@@ -1158,6 +1274,20 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
     set(Theme.bg or { 0.05, 0.1, 0.1 })
     love.graphics.setFont(Fonts.get(9))
     love.graphics.printf(tostring(def.mana_cost), 26, 8, 12, "center")
+  end
+
+  -- Coût variable en Corruption (2026-08-29, Nécromancien -- "1 (+X, 0-N
+  -- Corruption)") : pastille OVALE (jamais ronde comme énergie/mana, demande
+  -- explicite -- doit se distinguer d'un coup d'œil d'un coût FIXE) --
+  -- affiche le PLAFOND en dur ("X(0-3)"), jamais la valeur actuellement
+  -- disponible -- c'est le TEXTE de la carte (desc_text, substitué par
+  -- l'appelant, voir draw_hand) qui porte le X recalculé en temps réel,
+  -- jamais cette pastille.
+  if def.corruption_cost_cap then
+    set(Theme.corruption); love.graphics.ellipse("fill", 40, 12, 16, 8)
+    set(Theme.bg or { 0.05, 0.1, 0.1 })
+    love.graphics.setFont(Fonts.get(8))
+    love.graphics.printf("X(0-" .. def.corruption_cost_cap .. ")", 24, 8, 32, "center")
   end
 
   name_badge(def.name, 2, 22, w - 4, 16, palette.border, Theme.bg, 2, 1)
@@ -1342,12 +1472,25 @@ local function draw_hand(controller)
         previewing_hero = Combat.hero_by_id(state, controller.hover.target)
       end
     end
+    local owner = Combat.hero_by_id(state, def.class_id)
     local desc_text, has_bonus = def.desc, false
     if previewing_hero then
       desc_text = preview_desc(def, previewing_hero, previewing_target)
       has_bonus = desc_text ~= def.desc
     end
-    local owner = Combat.hero_by_id(state, def.class_id)
+    -- Coût variable en Corruption (2026-08-29, Nécromancien -- "la valeur du
+    -- X est bien mise à jour en temps réel dans le texte de la carte", demande
+    -- explicite) : contrairement au bonus d'Inspiration ci-dessus (limité à
+    -- la carte SÉLECTIONNÉE, "dès que le joueur sélectionne la carte"), celui-ci
+    -- s'applique à TOUTE carte en main, sélectionnée ou non -- substitution du
+    -- littéral "X" par min(corruption actuelle, plafond), recalculée CHAQUE
+    -- frame puisque draw_hand tourne à chaque frame (aucun état à mettre à jour
+    -- à part). `owner` peut être nil (carte orpheline improbable) -- (owner or {})
+    -- retombe alors sur 0, jamais une erreur.
+    if def.corruption_cost_cap then
+      local x = math.min((owner or {}).corruption or 0, def.corruption_cost_cap)
+      desc_text = desc_text:gsub("X", tostring(x))
+    end
     -- Coût EFFECTIF (2026-08-29, malédiction "Le Corrompu" -- owner.card_cost_delta) :
     -- jamais def.cost brut dès qu'un propriétaire est en jeu -- voir
     -- Combat.effective_cost, seule source de vérité, déjà utilisée par
@@ -1471,6 +1614,11 @@ local STATUS_TOOLTIP_FIELDS = {
   { field = "incapacite", glossary_key = "incapacite" },
   { field = "vulnerabilite", glossary_key = "vulnerabilite" },
   { field = "provocation", glossary_key = "provocation" },
+  -- Inspiration/Encore (2026-08-29, Barde -- voir badges dans draw_hero) :
+  -- même mécanisme générique, glossary_key pointe vers les entrées ajoutées
+  -- dans glossary.lua.
+  { field = "inspiration", glossary_key = "inspiration" },
+  { field = "encore_extra_plays", glossary_key = "encore", label = "Encore" },
 }
 
 local function active_status_lines(unit)
@@ -1578,6 +1726,15 @@ local function tooltip_lines(controller)
     -- conventionnel") : le descriptif complet vit UNIQUEMENT ici.
     local effect = h.target
     return effect.name, { effect.desc }
+  elseif h.kind == "team_hero" then
+    -- Écran "Choisis ton équipe" (2026-08-29) : contrairement au cas "hero"
+    -- ci-dessus, aucun héros réel n'existe encore dans controller.state à ce
+    -- stade (avant Game.reset_run) -- `h.target` porte directement l'ID du
+    -- def (Heroes.by_id), pas un héros de state.heroes.
+    local def = Heroes.by_id(h.target)
+    if not def then return nil end
+    local desc = Heroes.class_description[def.class_id]
+    return def.name, desc and { desc } or {}
   end
   return nil
 end
@@ -2156,6 +2313,113 @@ local function draw_temple(controller)
   end
 end
 
+--- Un cadre d'aventurier de l'écran de choix d'équipe (2026-08-29) --
+-- portrait + nom, contour or si mis en avant, léger bump vers le haut au
+-- survol ("quand je les survole, ils réagissent"), pastille verte si déjà
+-- dans l'équipe confirmée (utile côté rangée du bas ET, brièvement, pendant
+-- qu'un membre déjà confirmé est remis en avant pour être retiré).
+local function draw_team_hero_slot(r, def, hovered, focused, in_party)
+  panel(r.x, r.y, r.w, r.h, Theme.panel_light)
+  set(focused and Theme.accent or (hovered and Theme.text or Theme.muted))
+  love.graphics.setLineWidth(focused and 4 or 2)
+  love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
+  love.graphics.setLineWidth(1)
+  local bump = hovered and -5 or 0
+  local portrait_size = 58
+  draw_class_icon(def.class_id, def.icon, def.label,
+    r.x + (r.w - portrait_size) / 2, r.y + 10 + bump, portrait_size, portrait_size, Theme.text)
+  local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
+  name_badge(def.name, r.x + 6, r.y + r.h - 26, r.w - 12, 12, palette.border, Theme.bg, 2, 2)
+  if in_party then
+    set(Theme.heal); love.graphics.circle("fill", r.x + r.w - 12, r.y + 12, 7)
+  end
+  love.graphics.push()
+  love.graphics.translate(r.x, r.y)
+  draw_tooltip_hint(r.w, r.h)
+  love.graphics.pop()
+end
+
+--- Écran "Choisis ton équipe" (2026-08-29, demande explicite -- avant chaque
+-- run, choisir 4 des 6 aventuriers débloqués) : cliquer un aventurier
+-- disponible (rangée du haut) le met en avant et fait voler SES cartes
+-- (Départ + Avancé) depuis un bord aléatoire jusqu'au centre -- voir
+-- Controller:team_select_focus/team_select_spawn_cards, `controller.
+-- team_select.card_anims` porte à la fois le vol entrant du héros mis en
+-- avant ET le vol sortant de l'ancien (les deux coexistent le temps du
+-- croisement, voir Controller:update pour leur avancement). "Annuler" les
+-- renvoie sans rien changer ; "Valider" bascule l'aventurier vers la rangée
+-- du bas (équipe confirmée) -- ou l'en RETIRE s'il y était déjà ("resélectionné
+-- normalement pour être sorti du groupe", le bouton se relabellise "Retirer"
+-- dans ce cas). Le gros bouton "Partir à l'aventure" ne s'active (et ne
+-- clignote) qu'à 4 aventuriers confirmés.
+local function draw_team_select(controller)
+  local ts = controller.team_select
+  Background.draw(nil, W, H)
+  text("Choisis ton équipe", 0, 18, W, 22, Theme.text)
+  text(#ts.selected_ids .. " / 4 aventuriers", 0, 44, W, 12, Theme.muted)
+
+  local available_rects = View.team_select_available_rects(controller)
+  for _, id in ipairs(ts.available_ids) do
+    local def = Heroes.by_id(id)
+    local r = available_rects[id]
+    local hovered = controller.hover.kind == "team_hero" and controller.hover.target == id
+    draw_team_hero_slot(r, def, hovered, ts.focused_id == id, false)
+  end
+
+  -- Cartes en vol (voir le commentaire de fonction) : "in" se fige à sa
+  -- position cible une fois l'animation finie (elapsed clampé à duration =>
+  -- p=1, plus aucun mouvement) -- pas besoin d'un 2ᵉ système pour "les cartes
+  -- au repos", cette même liste EST l'état affiché tant qu'un focus est actif.
+  for _, a in ipairs(ts.card_anims) do
+    local p = math.min(1, a.elapsed / a.duration)
+    local ease = a.mode == "in" and ease_out_back(a.elapsed, a.duration) or (1 - (1 - p) ^ 2)
+    local x = a.from.x + (a.to.x - a.from.x) * ease
+    local y = a.from.y + (a.to.y - a.from.y) * ease
+    local alpha = a.mode == "in" and math.min(1, p * 1.6) or (1 - p)
+    if alpha > 0 then draw_faded_card(a.def, x, y, alpha) end
+  end
+
+  if ts.focused_id then
+    local cb = View.team_select_cancel_button
+    set(Theme.panel_light); love.graphics.rectangle("fill", cb.x, cb.y, cb.w, cb.h, 8, 8)
+    set(Theme.accent); love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", cb.x, cb.y, cb.w, cb.h, 8, 8)
+    love.graphics.setLineWidth(1)
+    text(cb.label, cb.x, cb.y + 14, cb.w, 14, Theme.text, "center")
+
+    local already_in = false
+    for _, sid in ipairs(ts.selected_ids) do if sid == ts.focused_id then already_in = true end end
+    local vb = View.team_select_confirm_button
+    local blocked = (not already_in) and #ts.selected_ids >= 4
+    set(blocked and Theme.panel or Theme.accent)
+    love.graphics.rectangle("fill", vb.x, vb.y, vb.w, vb.h, 8, 8)
+    text(already_in and "Retirer" or "Valider", vb.x, vb.y + 14, vb.w, 14, blocked and Theme.muted or Theme.bg, "center")
+  end
+
+  local party_rects = View.team_select_party_rects(controller)
+  text("Ton équipe", 20, TEAM_PARTY_Y - 16, 200, 10, Theme.muted, "left")
+  for _, id in ipairs(ts.selected_ids) do
+    local def = Heroes.by_id(id)
+    local r = party_rects[id]
+    local hovered = controller.hover.kind == "team_hero" and controller.hover.target == id
+    draw_team_hero_slot(r, def, hovered, ts.focused_id == id, true)
+  end
+
+  local lb = View.team_select_launch_button
+  local ready = #ts.selected_ids == 4
+  if ready then
+    local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 4)
+    set(Theme.accent, 0.35 + 0.35 * pulse)
+    love.graphics.rectangle("fill", lb.x - 5, lb.y - 5, lb.w + 10, lb.h + 10, 12, 12)
+  end
+  set(ready and Theme.heal or Theme.panel_light)
+  love.graphics.rectangle("fill", lb.x, lb.y, lb.w, lb.h, 10, 10)
+  set(ready and Theme.accent or Theme.muted); love.graphics.setLineWidth(3)
+  love.graphics.rectangle("line", lb.x, lb.y, lb.w, lb.h, 10, 10)
+  love.graphics.setLineWidth(1)
+  text(lb.label, lb.x, lb.y + lb.h / 2 - 9, lb.w, 18, ready and Theme.bg or Theme.muted, "center")
+end
+
 -- Bouton plein, contour doré, texte centré (2026-08-21, demande explicite --
 -- menu/en travaux/options) : même style pour les 3 écrans, jamais un rendu
 -- dupliqué par écran.
@@ -2208,6 +2472,7 @@ function View.draw(controller)
   if controller.screen == "menu" then draw_menu(controller); return end
   if controller.screen == "options" then draw_options(controller); return end
   if controller.screen == "bossVictory" then draw_boss_victory(controller); return end
+  if controller.screen == "team_select" then draw_team_select(controller); return end
 
   local state = controller.state
   Background.draw(state.enemies, W, H)

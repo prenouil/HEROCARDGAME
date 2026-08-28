@@ -22,6 +22,10 @@ local Theme = {
   -- Ressource propre à l'Assassin (2026-08-24) : même principe que Theme.mana
   -- -- teinte reprise du liseré de ses cartes (Theme.card_class.assassin.border).
   discretion = hex("5cae6e"),
+  -- Ressource propre au Nécromancien (2026-08-29) : même principe que
+  -- Theme.mana/Theme.discretion -- teinte reprise du liseré de ses cartes
+  -- (Theme.card_class.necromancien.border, vert maladif -- décomposition).
+  corruption = hex("8fae6a"),
   -- Cendres d'une carte "Amnésie" qui se disperse (2026-08-28) : gris chaud
   -- neutre, jamais utilisé ailleurs (Theme.muted est un lavande éteint, pas un
   -- vrai gris) -- doit se lire comme "matière consumée", pas comme un statut.
@@ -54,6 +58,13 @@ Theme.card_class = {
   paladin  = { bg = hex("22283a"), border = hex("6fa8dc") },
   mage     = { bg = hex("241f3a"), border = hex("8a7bd8") },
   assassin = { bg = hex("1c2a20"), border = hex("5cae6e") },
+  -- Nécromancien/Barde (2026-08-29, sélectionnables à l'écran de choix
+  -- d'équipe -- voir heroes.lua) : vert maladif/décomposition pour l'un,
+  -- ambre chaleureux/musical pour l'autre -- distincts de l'or de
+  -- Theme.accent (réservé au signal "carte sélectionnée") malgré la parenté
+  -- de teinte avec le Barde.
+  necromancien = { bg = hex("1e2418"), border = hex("8fae6a") },
+  barde = { bg = hex("332012"), border = hex("e0955c") },
 }
 
 

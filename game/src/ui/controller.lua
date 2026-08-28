@@ -7,6 +7,11 @@ local Combat = require("src.rules.combat")
 local Draft = require("src.rules.draft")
 local Forge = require("src.rules.forge")
 local Temple = require("src.rules.temple")
+-- Écran "Choisis ton équipe" (2026-08-29, avant chaque run -- voir
+-- Controller:enter_team_select) : catalogue des 6 aventuriers débloqués
+-- (Heroes.defs) et leurs cartes (Cards.list, filtrées par class_id).
+local Heroes = require("src.data.heroes")
+local Cards = require("src.data.cards")
 local Sequencer = require("src.util.sequencer")
 -- Dépendance à la UI (rects de layout, purs -- aucun appel love.graphics dedans)
 -- nécessaire pour savoir D'OÙ une carte part visuellement quand elle est piochée
@@ -102,6 +107,13 @@ local FORGE_UPGRADE_HOLD_PAUSE = 1.0
 local TEMPLE_CHOICE_ANIM_DURATION = 0.5
 local TEMPLE_CHOICE_HOLD_PAUSE = 1.0
 
+-- Écran "Choisis ton équipe" (2026-08-29, demande explicite -- avant chaque
+-- run, choisir 4 des 6 `Heroes.defs`) : durée du vol des cartes du héros mis
+-- en avant, entrant OU sortant (même durée dans les 2 sens, voir
+-- Controller:team_select_spawn_cards/team_select_fly_out_current).
+local TEAM_CARD_FLY_DURATION = 0.4
+local TEAM_CARD_SIDES = { "left", "right", "top", "bottom" }
+
 -- VFX de lisibilité (2026-08-09, party "amélioration des visuels") : tous
 -- dérivés du même mécanisme de diff avant/après déjà en place pour la
 -- secousse (voir Controller:react_to_diff, ex-shake_from_diff), pas de
@@ -131,7 +143,7 @@ function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "menu" -- "menu" | "options" | "playing" | "draft" | "forge" | "temple" | "bossVictory" | "defeat"
+  self.screen = "menu" -- "menu" | "options" | "team_select" | "playing" | "draft" | "forge" | "temple" | "bossVictory" | "defeat"
   -- Mode de run choisi au menu (2026-08-21, demande explicite) : "infini"
   -- (illimité, l'ancien comportement par défaut), "bounded" (5 combats puis
   -- l'Homme Arbre, voir Controller:advance_to_next_combat/Game.start_boss_combat)
@@ -140,6 +152,17 @@ function Controller.new()
   -- d'enchaîner un faux combat suivant). nil tant qu'aucun run n'a encore
   -- démarré (écran "menu").
   self.run_mode = nil
+  -- Dernière équipe lancée avec succès (2026-08-29, écran de choix
+  -- d'équipe) : liste de 4 ids -- reconduite par "Rejouer" après une défaite
+  -- (voir restart_after_defeat, input.lua) sans repasser par l'écran de
+  -- sélection, même logique de confort que self.run_mode. nil tant qu'aucune
+  -- run n'a encore été lancée via cet écran (Heroes.DEFAULT_PARTY_IDS sert
+  -- alors de repli, voir Controller:reset_run).
+  self.last_selected_ids = nil
+  -- { mode, available_ids = {id,...}, selected_ids = {id,...}, focused_id,
+  -- card_anims = {{def, from, to, elapsed, duration, mode="in"|"out"}, ...} },
+  -- voir Controller:enter_team_select.
+  self.team_select = nil
   self.draft_picks = nil
   -- File des écrans "camp" restant à montrer après le combat qui vient d'être
   -- gagné (2026-08-28) -- {"forge"}/{"temple"}/{"forge","temple"}/{} selon les
@@ -196,8 +219,149 @@ function Controller.new()
   self.arrow_hand_hover_uid = nil -- carte de la main survolée en mode "arrow" (agrandissement immédiat, sans délai de tooltip)
   -- Plus de run démarré automatiquement (2026-08-21, demande explicite --
   -- l'appli s'ouvre désormais sur le menu principal) : `self:reset_run(mode)`
-  -- n'est appelé qu'au clic sur "Jouer un run"/"Mode infini", voir Input.mousepressed.
+  -- n'est appelé qu'au clic sur "Jouer un run"/"Mode infini", voir Input.mousepressed --
+  -- en passant désormais par l'écran de choix d'équipe (2026-08-29), voir
+  -- Controller:enter_team_select.
   return self
+end
+
+-- ---------- écran "Choisis ton équipe" ----------
+
+--- Entre sur l'écran de choix d'équipe (2026-08-29, demande explicite --
+-- avant chaque run, choisir 4 des 6 `Heroes.defs`) : appelé au clic sur
+-- "Jouer un run"/"Mode infini" au menu (voir menu_click, input.lua), PAS sur
+-- "Tester le boss" (reste un raccourci fixe à l'équipe historique, voir
+-- Controller:start_boss_test -- aucune sélection n'a de sens pour un test
+-- isolé). `mode` ("infini"/"bounded") est juste mémorisé ici, transmis tel
+-- quel à Controller:reset_run une fois "Partir à l'aventure" cliqué.
+function Controller:enter_team_select(mode)
+  self.screen = "team_select"
+  local available = {}
+  for _, def in ipairs(Heroes.defs) do available[#available + 1] = def.id end
+  self.team_select = {
+    mode = mode, available_ids = available, selected_ids = {},
+    focused_id = nil, card_anims = {},
+  }
+end
+
+--- Toutes les cartes de `class_id` (Départ + Avancé, 6 au total) -- ordre de
+-- Cards.list, jamais recalculé/trié différemment d'un affichage à l'autre.
+local function cards_of_class(class_id)
+  local out = {}
+  for _, def in ipairs(Cards.list) do
+    if def.class_id == class_id then out[#out + 1] = def end
+  end
+  return out
+end
+
+--- Bascule chaque vol "in" encore actif en vol "out" vers un NOUVEAU bord
+-- aléatoire (2026-08-29) : point commun à "changer de héros mis en avant",
+-- "Annuler" et "Valider" -- capture la position ACTUELLE de la carte (elle
+-- peut être interrompue en plein vol d'entrée, pas seulement déjà posée) pour
+-- que le vol de sortie reparte de là, jamais un saut brusque vers sa
+-- position cible d'abord. Les entrées déjà "out" (un 2ᵉ changement avant la
+-- fin de la 1ʳᵉ sortie) restent telles quelles, jamais relancées.
+function Controller:team_select_fly_out_current()
+  local ts = self.team_select
+  if not ts then return end
+  for _, a in ipairs(ts.card_anims) do
+    if a.mode == "in" then
+      local p = math.min(1, a.elapsed / a.duration)
+      local cur = { x = a.from.x + (a.to.x - a.from.x) * p, y = a.from.y + (a.to.y - a.from.y) * p, w = a.to.w, h = a.to.h }
+      a.mode = "out"
+      a.from = cur
+      a.to = View.team_select_offscreen_rect(a.to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
+      a.elapsed = 0
+      a.duration = TEAM_CARD_FLY_DURATION
+    end
+  end
+end
+
+--- Fait voler TOUTES les cartes de `id` depuis un bord aléatoire (chacune le
+-- sien, indépendamment) jusqu'à sa position cible au centre (2026-08-29) --
+-- AJOUTE ces entrées à `ts.card_anims`, ne le vide jamais (les vols "out" en
+-- cours, voir team_select_fly_out_current ci-dessus, doivent pouvoir
+-- continuer à se dessiner/s'auto-supprimer en parallèle, voir
+-- Controller:update). Abandonne si le focus a déjà changé entre-temps
+-- (appelé via self.seq -- voir Controller:team_select_focus).
+function Controller:team_select_spawn_cards(id)
+  local ts = self.team_select
+  if not ts or ts.focused_id ~= id then return end
+  local def = Heroes.by_id(id)
+  local defs = cards_of_class(def.class_id)
+  local targets = View.team_select_card_rects(#defs)
+  for i, card_def in ipairs(defs) do
+    local to = targets[i]
+    local from = View.team_select_offscreen_rect(to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
+    ts.card_anims[#ts.card_anims + 1] = {
+      def = card_def, from = from, to = to, elapsed = 0,
+      duration = TEAM_CARD_FLY_DURATION, mode = "in",
+    }
+  end
+end
+
+--- Clique un aventurier (disponible OU déjà dans l'équipe -- "il peut être
+-- resélectionné normalement", 2026-08-29) : le met en avant, fait sortir les
+-- cartes actuellement affichées (s'il y en a) puis entrer les siennes --
+-- l'entrée est différée d'exactement la durée du vol de sortie via self.seq,
+-- pour ne jamais les faire se croiser au même endroit en même temps.
+-- Re-cliquer le héros DÉJÀ mis en avant ne fait rien (idempotent).
+function Controller:team_select_focus(id)
+  local ts = self.team_select
+  if not ts or ts.focused_id == id then return end
+  local had_focus = ts.focused_id ~= nil
+  self:team_select_fly_out_current()
+  ts.focused_id = id
+  local self_ = self
+  if had_focus then self.seq:push(function() end, TEAM_CARD_FLY_DURATION) end
+  self.seq:push(function() self_:team_select_spawn_cards(id) end)
+end
+
+--- "Annuler" (2026-08-29) : referme le focus sans rien changer à l'équipe --
+-- fait juste sortir les cartes affichées.
+function Controller:team_select_cancel()
+  local ts = self.team_select
+  if not ts or not ts.focused_id then return end
+  self:team_select_fly_out_current()
+  ts.focused_id = nil
+end
+
+--- "Valider" (2026-08-29) : bascule l'aventurier mis en avant entre les 2
+-- listes -- l'AJOUTE à l'équipe s'il n'y était pas (refusé, sans effet, si
+-- l'équipe compte déjà 4 -- bouton visuellement désactivé dans ce cas, voir
+-- draw_team_select), ou l'en RETIRE s'il y était déjà ("resélectionné
+-- normalement pour être sorti du groupe" -- le bouton se relabellise
+-- "Retirer" côté vue). Referme le focus dans les 2 cas, comme "Annuler".
+function Controller:team_select_confirm()
+  local ts = self.team_select
+  if not ts or not ts.focused_id then return end
+  local id = ts.focused_id
+  local index_in_selected
+  for i, sid in ipairs(ts.selected_ids) do if sid == id then index_in_selected = i break end end
+  if index_in_selected then
+    table.remove(ts.selected_ids, index_in_selected)
+    ts.available_ids[#ts.available_ids + 1] = id
+  else
+    if #ts.selected_ids >= 4 then return end
+    ts.selected_ids[#ts.selected_ids + 1] = id
+    local index_in_available
+    for i, aid in ipairs(ts.available_ids) do if aid == id then index_in_available = i break end end
+    if index_in_available then table.remove(ts.available_ids, index_in_available) end
+  end
+  self:team_select_fly_out_current()
+  ts.focused_id = nil
+end
+
+--- "Partir à l'aventure" (2026-08-29) : n'a d'effet qu'à exactement 4
+-- aventuriers confirmés (bouton visuellement inerte sinon, voir
+-- draw_team_select) -- lance la run avec CETTE sélection précise via
+-- Controller:reset_run, qui accepte désormais `selected_ids` en plus de `mode`.
+function Controller:team_select_launch()
+  local ts = self.team_select
+  if not ts or #ts.selected_ids ~= 4 then return end
+  local mode, selected_ids = ts.mode, ts.selected_ids
+  self.team_select = nil
+  self:reset_run(mode, selected_ids)
 end
 
 function Controller:toggle_input_mode()
@@ -256,11 +420,18 @@ end
 -- Input.mousepressed), reconduit le dernier mode actif plutôt que d'en
 -- imposer un par défaut -- mourir en run borné puis "Rejouer" doit relancer
 -- un run borné, pas basculer sur l'infini.
-function Controller:reset_run(mode)
+-- `selected_ids` (optionnel, 2026-08-29, écran de choix d'équipe -- voir
+-- Controller:team_select_launch) : liste de 4 ids. Absent, reconduit la
+-- DERNIÈRE équipe lancée avec succès (self.last_selected_ids -- même confort
+-- que `mode` pour "Rejouer", qui ne repasse jamais par l'écran de sélection),
+-- ou Heroes.DEFAULT_PARTY_IDS si aucune run n'est encore passée par cet écran.
+function Controller:reset_run(mode, selected_ids)
   self.run_mode = mode or self.run_mode or "infini"
+  selected_ids = selected_ids or self.last_selected_ids or Heroes.DEFAULT_PARTY_IDS
+  self.last_selected_ids = selected_ids
   self.screen = "playing"
   self:clear_animation_state()
-  Game.reset_run(self.state)
+  Game.reset_run(self.state, nil, selected_ids)
   -- Game.start_turn (appelé par reset_run) ne peut plus infliger de dégâts à
   -- ce jour -- garde-fou conservé par précaution, voir advance_after_discard_sequenced.
   if self.state.over then self:handle_combat_victory(); return end
@@ -743,6 +914,19 @@ function Controller:update(dt)
     local a = self.card_anims[i]
     a.elapsed = a.elapsed + dt
     if a.elapsed >= a.delay + a.duration then table.remove(self.card_anims, i) end
+  end
+  -- Écran "Choisis ton équipe" (2026-08-29) : "in" ne se supprime JAMAIS tout
+  -- seul (elapsed clampé à duration par le rendu -- voir draw_team_select --
+  -- fige la carte à sa position cible, c'est l'état "posée" -- pas de 2ᵉ
+  -- système séparé pour ça) ; seul "out" se retire une fois son vol de sortie
+  -- terminé.
+  if self.team_select then
+    local ts_anims = self.team_select.card_anims
+    for i = #ts_anims, 1, -1 do
+      local a = ts_anims[i]
+      a.elapsed = a.elapsed + dt
+      if a.mode == "out" and a.elapsed >= a.duration then table.remove(ts_anims, i) end
+    end
   end
   for i = #self.floaters, 1, -1 do
     local f = self.floaters[i]

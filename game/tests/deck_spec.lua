@@ -15,9 +15,10 @@ local function fake_cards(n)
 end
 
 describe("Deck.build_starting_deck", function()
-  it("contient 12 cartes : les 3 cartes depart de chaque classe, 1 exemplaire chacune", function()
+  it("contient 12 cartes : les 3 cartes depart de chaque classe SÉLECTIONNÉE, 1 exemplaire chacune", function()
     local uid = 0
-    local deck = Deck.build_starting_deck(function() uid = uid + 1 return uid end, Rng.new(1))
+    local class_ids = { "guerrier", "paladin", "mage", "assassin" }
+    local deck = Deck.build_starting_deck(class_ids, function() uid = uid + 1 return uid end, Rng.new(1))
     assert.equal(12, #deck)
     local counts = {}
     for _, c in ipairs(deck) do counts[c.def.code] = (counts[c.def.code] or 0) + 1 end
@@ -33,6 +34,36 @@ describe("Deck.build_starting_deck", function()
     assert.equal(1, counts["plan-attaque"]) -- pas "coup-direct-assassin" (renommée 2026-08-28)
     assert.equal(1, counts["se-cacher"]) -- pas "encaisser-assassin" (renommée 2026-08-28)
     assert.equal(1, counts["repli-strategique"]) -- pas "strategie" (renommée 2026-08-28)
+  end)
+
+  -- Écran de sélection d'équipe (2026-08-29) : le deck de départ suit
+  -- désormais N'IMPORTE QUELLE composition de 4 classes parmi les 6
+  -- `Heroes.defs`, y compris Nécromancien/Barde -- plus une liste figée à 4
+  -- classes fixes.
+  it("s'adapte à N'IMPORTE QUELLE sélection de classes (ex. Nécromancien/Barde)", function()
+    local uid = 0
+    local class_ids = { "necromancien", "barde" }
+    local deck = Deck.build_starting_deck(class_ids, function() uid = uid + 1 return uid end, Rng.new(1))
+    assert.equal(6, #deck) -- 3 cartes depart x 2 classes
+    local counts = {}
+    for _, c in ipairs(deck) do counts[c.def.code] = (counts[c.def.code] or 0) + 1 end
+    assert.equal(1, counts["rite-mineur"])
+    assert.equal(1, counts["sceau-faiblesse"])
+    assert.equal(1, counts["voile-ossements"])
+    assert.equal(1, counts["air-belliqueux"])
+    assert.equal(1, counts["choeur-bataille"])
+    assert.equal(1, counts["improvisation"])
+  end)
+end)
+
+describe("Deck.starting_cards_for_class", function()
+  it("retourne exactement les 3 cartes de tier 'depart' de la classe", function()
+    local cards = Deck.starting_cards_for_class("guerrier")
+    assert.equal(3, #cards)
+    for _, def in ipairs(cards) do
+      assert.equal("guerrier", def.class_id)
+      assert.equal("depart", def.tier)
+    end
   end)
 end)
 

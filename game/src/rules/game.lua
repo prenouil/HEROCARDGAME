@@ -408,9 +408,16 @@ end
 -- demande explicite) : fixe la seed maîtresse des 4 flux aléatoires de la run
 -- (voir Game.new_rng_streams) -- même run rejouée à l'identique si redonnée ;
 -- par défaut une seed dérivée de l'horloge, comme avant.
-function Game.reset_run(state, seed)
+-- `selected_ids` (optionnel, 2026-08-29, écran de sélection d'équipe -- voir
+-- Controller:enter_team_select) : liste des 4 ids choisis parmi les 6
+-- `Heroes.defs` (n'importe quel ordre/sous-ensemble) -- par défaut
+-- `Heroes.DEFAULT_PARTY_IDS` (les 4 héros historiques), pour que tout appel
+-- existant (tests compris) qui ne passe rien continue de se comporter
+-- exactement comme avant.
+function Game.reset_run(state, seed, selected_ids)
+  selected_ids = selected_ids or Heroes.DEFAULT_PARTY_IDS
   local heroes = {}
-  for i, def in ipairs(Heroes.defs) do heroes[i] = fresh_hero(def) end
+  for i, id in ipairs(selected_ids) do heroes[i] = fresh_hero(Heroes.by_id(id)) end
   state.heroes = heroes
   state.run = { combat_index = 1, is_boss = false }
   state.rng = Game.new_rng_streams(seed)
@@ -421,7 +428,7 @@ function Game.reset_run(state, seed)
     enemies[i] = Encounter.instantiate_enemy(inst.template, inst.level, function() return Game.next_uid(state) end, state.rng.encounter)
   end
   state.enemies = enemies
-  state.deck = Deck.build_starting_deck(function() return Game.next_uid(state) end, state.rng.deck)
+  state.deck = Deck.build_starting_deck(selected_ids, function() return Game.next_uid(state) end, state.rng.deck)
   state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.over = false; state.energy = 0
   state.log = {}
@@ -466,14 +473,15 @@ end
 -- (Encounter.boss_encounter) plutôt que tirée par le budget. Ne touche jamais
 -- `state.run.combat_index`/le mode de run -- ce n'est pas un run normal, voir
 -- Controller:start_boss_test (self.run_mode reste nil).
-function Game.start_boss_test(state, seed)
+function Game.start_boss_test(state, seed, selected_ids)
+  selected_ids = selected_ids or Heroes.DEFAULT_PARTY_IDS
   local heroes = {}
-  for i, def in ipairs(Heroes.defs) do heroes[i] = fresh_hero(def) end
+  for i, id in ipairs(selected_ids) do heroes[i] = fresh_hero(Heroes.by_id(id)) end
   state.heroes = heroes
   state.run = { combat_index = 1, is_boss = true }
   state.rng = Game.new_rng_streams(seed)
   state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter)
-  state.deck = Deck.build_starting_deck(function() return Game.next_uid(state) end, state.rng.deck)
+  state.deck = Deck.build_starting_deck(selected_ids, function() return Game.next_uid(state) end, state.rng.deck)
   state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.over = false; state.energy = 0
   state.log = {}

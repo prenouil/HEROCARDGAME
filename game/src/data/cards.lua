@@ -8,9 +8,10 @@
 -- Forge") : {desc, effect} de la version "+" -- voir Cards.upgraded_def.
 --
 -- Cartes regroupées par classe : chaque classe a 3 cartes "depart" (sa
--- "Coup direct" + son "Encaisser" + 1 carte propre) et 3 cartes "avance",
--- pour un deck de départ à 12 cartes (voir Deck.STARTING_DECK_CODES) -- 1
--- exemplaire de chaque carte "depart". Le Guerrier a échangé ses cartes
+-- "Coup direct" + son "Encaisser" + 1 carte propre) et 3 cartes "avance" --
+-- 1 exemplaire de chaque carte "depart" des 4 classes sélectionnées à
+-- l'écran de choix d'équipe forme le deck de départ (2026-08-29, voir
+-- Deck.build_starting_deck/Deck.starting_cards_for_class). Le Guerrier a échangé ses cartes
 -- "depart"/"avance" (2026-08-24) : "Coup de taille" est désormais "depart"
 -- (dégâts réduits 2->3) et "Coup d'estoc" "avance" -- l'inverse d'avant.
 --
@@ -352,7 +353,7 @@ Cards.list = {
   -- malgré son nom "feu" (voir git log), maintenant un VRAI coup de feu --
   -- magique, tag "feu" (déclenche la sensibilité au feu de l'Homme Arbre, voir
   -- Combat.damage_multiplier, ET la Régénération bloquée du Troll, déjà
-  -- existante) -- code interne "flameche" conservé (voir Deck.STARTING_DECK_CODES).
+  -- existante) -- code interne "flameche" conservé (Deck.starting_cards_for_class le retrouve par class_id+tier, pas par ce code).
   {
     code = "flameche", name = "Main de feu", class_id = "mage", tier = "depart", cost = 1, mana_cost = 0,
     cats = { "melee", "degats", "feu" }, dmg_type = "magique", target = "enemy",
@@ -597,10 +598,9 @@ Cards.list = {
   },
 
   -- ---------- Nécromancien ----------
-  -- Conçues avec agent_content (2026-08-29, voir content/memory/) -- PAS
-  -- encore jouables en jeu (Nécromancien n'est pas dans Heroes.defs/le
-  -- roster actif, voir heroes.lua) : codées et testées (busted) en
-  -- prévision d'une future décision de sélection d'équipe. `corruption_cost_cap`
+  -- Conçues avec agent_content (2026-08-29, voir content/memory/) --
+  -- sélectionnable à l'écran de choix d'équipe (2026-08-29, voir
+  -- Heroes.defs/Controller:enter_team_select). `corruption_cost_cap`
   -- (nouveau champ, 2026-08-29) : coût variable "1 (+X, 0-N Corruption)" --
   -- X = tout ce que le lanceur peut fournir jusqu'à ce plafond, calculé et
   -- déduit par Game.resolve_pending (jamais un choix du joueur), exposé aux

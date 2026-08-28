@@ -9,6 +9,7 @@ local Cards = require("src.data.cards")
 local Enemies = require("src.data.enemies")
 local Encounter = require("src.rules.encounter")
 local Rng = require("src.util.rng")
+local Heroes = require("src.data.heroes")
 
 describe("Game.reset_run", function()
   it("démarre une run avec 4 héros vivants, une main de 5 et un deck de 5", function()
@@ -21,6 +22,48 @@ describe("Game.reset_run", function()
     assert.equal(1, state.turn)
     assert.equal(1, state.run.combat_index)
     assert.is_false(state.over)
+  end)
+end)
+
+-- Écran de choix d'équipe (2026-08-29) : Game.reset_run/Game.start_boss_test
+-- acceptent désormais un `selected_ids` optionnel -- absent, ils retombent
+-- sur Heroes.DEFAULT_PARTY_IDS (les 4 héros historiques), pour que tout appel
+-- existant (dont le test juste au-dessus) continue de se comporter à
+-- l'identique.
+describe("Game.reset_run/Game.start_boss_test : selected_ids (2026-08-29)", function()
+  it("Game.reset_run construit le roster EXACTEMENT depuis selected_ids, dans l'ordre donné", function()
+    local state = Game.new_state()
+    Game.reset_run(state, 1, { "necromancien", "barde", "guerrier", "assassin" })
+    assert.equal(4, #state.heroes)
+    assert.equal("necromancien", state.heroes[1].class_id)
+    assert.equal("barde", state.heroes[2].class_id)
+    assert.equal("guerrier", state.heroes[3].class_id)
+    assert.equal("assassin", state.heroes[4].class_id)
+  end)
+
+  it("Game.reset_run sans selected_ids retombe sur Heroes.DEFAULT_PARTY_IDS", function()
+    local state = Game.new_state()
+    Game.reset_run(state, 1)
+    local classes = {}
+    for i, h in ipairs(state.heroes) do classes[i] = h.class_id end
+    assert.same(Heroes.DEFAULT_PARTY_IDS, classes)
+  end)
+
+  it("Game.start_boss_test respecte aussi selected_ids", function()
+    local state = Game.new_state()
+    Game.start_boss_test(state, 1, { "mage", "paladin", "necromancien", "barde" })
+    assert.equal(4, #state.heroes)
+    assert.equal("mage", state.heroes[1].class_id)
+    assert.equal("barde", state.heroes[4].class_id)
+  end)
+end)
+
+describe("Heroes.by_id / Heroes.defs (2026-08-29, écran de choix d'équipe)", function()
+  it("Heroes.defs liste les 6 aventuriers débloqués, Heroes.by_id les retrouve par id", function()
+    assert.equal(6, #Heroes.defs)
+    assert.equal("Nécromancien", Heroes.by_id("necromancien").name)
+    assert.equal("Barde", Heroes.by_id("barde").name)
+    assert.is_nil(Heroes.by_id("inexistant"))
   end)
 end)
 

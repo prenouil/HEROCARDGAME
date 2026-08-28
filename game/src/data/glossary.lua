@@ -72,9 +72,8 @@ Glossary.terms = {
   -- l'explication affichée, jamais une deuxième source de vérité.
   { key = "amnesie", icon = nil, has_icon = false, related = "", explain = "Après utilisation, la carte disparaît pour le reste du combat (elle revient au combat suivant)." },
   -- Nécromancien/Barde (2026-08-29, 2 classes conçues avec agent_content --
-  -- voir memory/ -- codées et testées via busted, mais PAS encore ajoutées à
-  -- Heroes.defs/au roster actif : une vraie run reste à 4 héros tant qu'une
-  -- décision de sélection d'équipe n'est pas prise). "necrose" : dégâts
+  -- voir content/memory/ -- sélectionnables à l'écran de choix d'équipe, voir
+  -- Heroes.defs/Controller:enter_team_select). "necrose" : dégâts
   -- magiques nécrotiques, se comporte exactement comme "etincelle" (Vulnérabilité
   -- s'applique, Puissance non -- réservée aux dégâts "physique", voir
   -- Combat.damage_multiplier) -- seul le nom/la thématique diffèrent.

@@ -259,8 +259,8 @@ describe("Cartes Guerrier (2026-08-28, refonte)", function()
   end)
 end)
 
--- Nécromancien/Barde (2026-08-29, conçues avec agent_content -- PAS encore
--- dans Heroes.defs/le roster actif, voir heroes.lua) : `corruption_spent` est
+-- Nécromancien/Barde (2026-08-29, conçues avec agent_content, sélectionnables
+-- à l'écran de choix d'équipe -- voir heroes.lua) : `corruption_spent` est
 -- normalement calculé par Game.resolve_pending (voir game_spec.lua pour ce
 -- calcul), donc renseigné à la main ici -- ces tests appellent def.effect
 -- directement, comme tout le reste de ce fichier.

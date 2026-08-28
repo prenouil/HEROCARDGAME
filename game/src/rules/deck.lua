@@ -8,25 +8,21 @@ local Deck = {}
 
 Deck.HAND_SIZE = 5
 
--- Run Infini : deck de départ à 12 cartes (2026-08-11, plus de cartes
--- génériques -- les 3 cartes "depart" de chaque classe, 1 exemplaire chacune :
--- son "Coup direct", son "Encaisser", et sa carte "depart" propre). Guerrier
--- (2026-08-28, refonte -- plus de bouclier "depart" propre) : "coup-appuye"
--- remplace "encaisser-guerrier" (2ᵉ coup offensif, pas un bouclier) ;
--- "coup-taille" inchangée (pas "coup-estoc", devenu "avance", 2026-08-24 --
--- voir cards.lua). Mage : "flameche"/"barriere" (renommées, pas
--- "coup-direct-mage"/"encaisser-mage"). Assassin (2026-08-28, refonte
--- complète) : "plan-attaque"/"se-cacher"/"repli-strategique" (renommées,
--- pas "coup-direct-assassin"/"encaisser-assassin"/"strategie"). Paladin
--- (2026-08-28, refonte -- plus AUCUNE carte de dégâts) : "provocateur"/
--- "infranchissable" (remplacent "coup-direct-paladin"/"encaisser-paladin",
--- disparues), Rempart inchangée.
-Deck.STARTING_DECK_CODES = {
-  { "coup-direct-guerrier", 1 }, { "coup-appuye", 1 }, { "coup-taille", 1 },
-  { "provocateur", 1 }, { "infranchissable", 1 }, { "rempart", 1 },
-  { "flameche", 1 }, { "barriere", 1 }, { "missile-magique", 1 },
-  { "plan-attaque", 1 }, { "se-cacher", 1 }, { "repli-strategique", 1 },
-}
+--- Les 3 cartes "depart" d'une classe donnée (2026-08-29, remplace la table
+-- figée `Deck.STARTING_DECK_CODES` -- écran de sélection d'équipe : la
+-- composition d'une run varie désormais selon les 4 héros choisis parmi les
+-- 6 `Heroes.defs`, un deck de départ figé à 4 classes fixes n'a plus de sens).
+-- Dérivée directement de `Cards.list` (class_id + tier == "depart") -- chaque
+-- classe en a toujours exactement 3 (convention établie, voir le commentaire
+-- en tête de src/data/cards.lua), jamais une 2ᵉ source de vérité à tenir
+-- synchronisée avec les cartes elles-mêmes.
+function Deck.starting_cards_for_class(class_id)
+  local out = {}
+  for _, def in ipairs(Cards.list) do
+    if def.class_id == class_id and def.tier == "depart" then out[#out + 1] = def end
+  end
+  return out
+end
 
 -- `rng` (2026-08-10, demande explicite -- ordre du deck reproductible à l'identique
 -- pour un run donné) : instance de src/util/rng.lua, jamais math.random directement
@@ -41,12 +37,14 @@ function Deck.shuffle(arr, rng)
   return a
 end
 
-function Deck.build_starting_deck(uid_gen, rng)
+--- `class_ids` (2026-08-29, liste des class_id des héros sélectionnés pour
+-- cette run, ex. {"guerrier","mage","necromancien","barde"}) : 1 exemplaire
+-- de chacune des 3 cartes "depart" de CHAQUE classe listée -- remplace
+-- l'ancienne liste figée à 4 classes (voir Deck.starting_cards_for_class).
+function Deck.build_starting_deck(class_ids, uid_gen, rng)
   local cards = {}
-  for _, entry in ipairs(Deck.STARTING_DECK_CODES) do
-    local code, n = entry[1], entry[2]
-    local def = Cards.by_code(code)
-    for _ = 1, n do
+  for _, class_id in ipairs(class_ids) do
+    for _, def in ipairs(Deck.starting_cards_for_class(class_id)) do
       cards[#cards + 1] = { uid = uid_gen(), def = def }
     end
   end

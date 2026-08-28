@@ -13,12 +13,38 @@
 local Heroes = {}
 
 -- PV doublés (2026-08-28, demande explicite) : 18/14/10/12 -> 36/28/20/24.
+-- Nécromancien/Barde (2026-08-29, conçues avec agent_content) fusionnées ici
+-- (2026-08-29, écran de sélection d'équipe) : `Heroes.defs` est désormais le
+-- CATALOGUE des 6 aventuriers débloqués, plus le roster automatique d'une
+-- run -- voir `Heroes.DEFAULT_PARTY_IDS` ci-dessous pour les 4 utilisés par
+-- défaut (héros/boss "de test", ou tout appelant qui ne passe pas de
+-- `selected_ids` explicite à Game.reset_run/Game.start_boss_test).
 Heroes.defs = {
   { id = "guerrier", class_id = "guerrier", name = "Guerrier", icon = "\u{2694}\u{FE0F}", label = "GUE", max_hp = 36 },
   { id = "paladin", class_id = "paladin", name = "Paladin", icon = "\u{1F6E1}\u{FE0F}", label = "PAL", max_hp = 28 },
   { id = "mage", class_id = "mage", name = "Mage", icon = "\u{1F52E}", label = "MAG", max_hp = 20 },
   { id = "assassin", class_id = "assassin", name = "Assassin", icon = "\u{1F5E1}\u{FE0F}", label = "ASS", max_hp = 24 },
+  { id = "necromancien", class_id = "necromancien", name = "Nécromancien", icon = "\u{1F480}", label = "NEC", max_hp = 24 },
+  { id = "barde", class_id = "barde", name = "Barde", icon = "\u{1F3B5}", label = "BAR", max_hp = 24 },
 }
+
+--- Retrouve un def par son id (voir Heroes.defs ci-dessus) -- point d'entrée
+-- unique pour l'écran de sélection d'équipe/Game.reset_run, jamais une
+-- boucle dupliquée ailleurs.
+function Heroes.by_id(id)
+  for _, def in ipairs(Heroes.defs) do
+    if def.id == id then return def end
+  end
+  return nil
+end
+
+-- Équipe par défaut (2026-08-29) : les 4 héros historiques, utilisés quand
+-- aucune sélection explicite n'est fournie (Game.start_boss_test -- "Tester
+-- le boss" au menu reste un raccourci fixe, pas concerné par l'écran de
+-- sélection -- et tout appel existant qui ne passe pas `selected_ids`, ex.
+-- les tests). Écran "team_select" (Controller) : construit sa propre
+-- sélection de 4 parmi les 6 `Heroes.defs`, jamais limitée à cette liste.
+Heroes.DEFAULT_PARTY_IDS = { "guerrier", "paladin", "mage", "assassin" }
 
 Heroes.class_icon = {
   generic = "\u{26AA}",
@@ -38,23 +64,6 @@ Heroes.class_label = {
   assassin = "ASS",
   necromancien = "NEC",
   barde = "BAR",
-}
-
--- Nécromancien/Barde (2026-08-29, 2 classes conçues avec agent_content --
--- design finalisé après plusieurs tours de retours, voir
--- content/memory/MEMORY.md) : def complètes, codées et testées (voir
--- tests/game_spec.lua/combat_spec.lua), mais délibérément PAS ajoutées à
--- `Heroes.defs` ci-dessus (2026-08-29, décision explicite -- `Heroes.defs`
--- EST le roster actif de chaque run, aucune sélection d'équipe n'existe
--- encore dans le jeu ; les ajouter là ferait passer TOUTE run de 4 à 6 héros
--- sans que ce soit tranché). Table à part, jamais lue par Game.reset_run/
--- Game.start_boss_test -- seul point d'entrée pour ces defs aujourd'hui :
--- les tests, qui construisent leurs propres héros directement depuis cette
--- table. À fusionner dans Heroes.defs (ou une future logique de sélection)
--- le jour où le roster est tranché -- pas avant.
-Heroes.pending_defs = {
-  { id = "necromancien", class_id = "necromancien", name = "Nécromancien", icon = "\u{1F480}", label = "NEC", max_hp = 24 },
-  { id = "barde", class_id = "barde", name = "Barde", icon = "\u{1F3B5}", label = "BAR", max_hp = 24 },
 }
 
 -- Nom complet par classe (2026-08-20, demande explicite -- indiquer sur

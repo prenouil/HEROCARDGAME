@@ -87,11 +87,42 @@ local function draw_generic(cx, cy, r, color)
   love.graphics.setLineWidth(1)
 end
 
+--- Crâne (Nécromancien, 2026-08-29 -- écran de choix d'équipe) : même
+-- silhouette que draw_skull plus bas dans ce fichier (bestiaire, ennemi
+-- "squelette"), dupliquée ICI volontairement plutôt que réordonner le
+-- fichier pour une seule référence -- DRAW_BY_CLASS doit rester déclarée
+-- avant la section bestiaire, pas l'inverse. Bug corrigé au passage
+-- (2026-08-29) : sans entrée ici, Icons.draw_class renvoyait false et le
+-- repli texte (icon_text, view.lua) essayait d'afficher le label ("NEC")
+-- avec `size` (un rayon de portrait, ~58px) traité comme une TAILLE DE
+-- POLICE -- chaque lettre finissait alors sur sa propre ligne, géante.
+local function draw_class_skull(cx, cy, r, color)
+  set(color)
+  love.graphics.circle("fill", cx, cy - r * 0.1, r * 0.6)
+  love.graphics.rectangle("fill", cx - r * 0.35, cy + r * 0.25, r * 0.7, r * 0.3, r * 0.08)
+  set({ 0, 0, 0 }, 0.55)
+  love.graphics.circle("fill", cx - r * 0.22, cy - r * 0.12, r * 0.13)
+  love.graphics.circle("fill", cx + r * 0.22, cy - r * 0.12, r * 0.13)
+end
+
+--- Note de musique (Barde, 2026-08-29) : tête ovale + hampe + crochet --
+-- même correctif que ci-dessus (sans elle, même bug de repli texte géant).
+local function draw_class_note(cx, cy, r, color)
+  set(color)
+  love.graphics.ellipse("fill", cx - r * 0.15, cy + r * 0.55, r * 0.34, r * 0.24)
+  love.graphics.setLineWidth(math.max(1, r * 0.14))
+  love.graphics.line(cx + r * 0.18, cy + r * 0.55, cx + r * 0.18, cy - r * 0.75)
+  love.graphics.setLineWidth(1)
+  love.graphics.polygon("fill", cx + r * 0.18, cy - r * 0.75, cx + r * 0.58, cy - r * 0.4, cx + r * 0.18, cy - r * 0.1)
+end
+
 local DRAW_BY_CLASS = {
   guerrier = draw_sword,
   paladin = draw_shield,
   mage = draw_orb,
   assassin = draw_dagger,
+  necromancien = draw_class_skull,
+  barde = draw_class_note,
   generic = draw_generic,
 }
 
@@ -383,6 +414,27 @@ local function draw_status_temple_curse(cx, cy, r, color, alpha)
     cx + r * 0.25, cy - r * 0.15, cx + r * 0.5, cy - r * 0.15)
 end
 
+--- Étincelle d'Inspiration (Barde, 2026-08-29) : losange à 4 pointes (2 axes
+-- perpendiculaires, l'un plus large que l'autre) -- distinct de la
+-- Puissance (triangle plein) et de Provocation (point d'exclamation).
+local function draw_status_inspiration(cx, cy, r, color, alpha)
+  set(color, alpha)
+  love.graphics.polygon("fill",
+    cx, cy - r * 0.85, cx + r * 0.22, cy - r * 0.22, cx + r * 0.85, cy, cx + r * 0.22, cy + r * 0.22,
+    cx, cy + r * 0.85, cx - r * 0.22, cy + r * 0.22, cx - r * 0.85, cy, cx - r * 0.22, cy - r * 0.22)
+end
+
+--- "Encore" (carte "Bis" du Barde, 2026-08-29) : arc + flèche, symbole
+-- générique de répétition -- suggestion d'origine 🔁, voir glossary.lua.
+local function draw_status_encore(cx, cy, r, color, alpha)
+  set(color, alpha)
+  love.graphics.setLineWidth(math.max(1, r * 0.18))
+  love.graphics.arc("line", "open", cx, cy, r * 0.6, math.rad(30), math.rad(300))
+  love.graphics.setLineWidth(1)
+  local ax, ay = cx + r * 0.6 * math.cos(math.rad(300)), cy + r * 0.6 * math.sin(math.rad(300))
+  love.graphics.polygon("fill", ax, ay, ax - r * 0.28, ay - r * 0.05, ax - r * 0.05, ay + r * 0.28)
+end
+
 local DRAW_BY_STATUS = {
   defense = draw_status_defense,
   esquive = draw_status_esquive,
@@ -398,6 +450,8 @@ local DRAW_BY_STATUS = {
   fireweak = draw_status_fireweak,
   bonus = draw_status_bonus,
   malus = draw_status_malus,
+  inspiration = draw_status_inspiration,
+  encore = draw_status_encore,
 }
 
 --- Dessine l'icône d'un statut (clé Lua, ex. "defense", "esquive"...) centrée

@@ -7,7 +7,6 @@
 -- prioritaire sur toutes les règles ci-dessus.
 
 local Cards = require("src.data.cards")
-local Heroes = require("src.data.heroes")
 
 local Draft = {}
 
@@ -19,8 +18,13 @@ local function contains(set, v) return set[v] == true end
 -- l'identique pour un run donné) : jamais math.random directement, voir Game.reset_run.
 function Draft.pick_cards(state)
   local rng = state.rng.draft
+  -- Classes RÉELLEMENT présentes dans CETTE run (2026-08-29, écran de
+  -- sélection d'équipe -- avant, `Heroes.defs` listait directement les 4
+  -- classes fixes de toute run, ça ne tient plus puisque `Heroes.defs` est
+  -- désormais le catalogue des 6 débloqués) : state.heroes reflète toujours
+  -- l'équipe réellement choisie, jamais le catalogue complet.
   local present_classes = {}
-  for _, h in ipairs(Heroes.defs) do present_classes[h.class_id] = true end
+  for _, h in ipairs(state.heroes) do present_classes[h.class_id] = true end
 
   local eligible = {}
   for _, def in ipairs(Cards.list) do

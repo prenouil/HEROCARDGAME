@@ -25,8 +25,8 @@ local function menu_click(controller, x, y)
     for _, b in ipairs(View.menu_buttons) do
       if View.point_in(b, x, y) then
         if b.id == "boss" then controller:start_boss_test()
-        elseif b.id == "run" then controller:reset_run("bounded")
-        elseif b.id == "infini" then controller:reset_run("infini")
+        elseif b.id == "run" then controller:enter_team_select("bounded")
+        elseif b.id == "infini" then controller:enter_team_select("infini")
         elseif b.id == "options" then controller:enter_options()
         elseif b.id == "quit" then love.event.quit()
         end
@@ -96,6 +96,38 @@ local function post_combat_click(controller, x, y)
   return false
 end
 
+--- Écran "Choisis ton équipe" (2026-08-29, demande explicite -- avant chaque
+-- run) : même geste quel que soit le mode d'entrée (tap/flèche), comme
+-- menu_click/post_combat_click ci-dessus. Cliquer un aventurier (disponible
+-- OU déjà dans l'équipe) le met en avant ("resélectionné normalement" pour
+-- en sortir un déjà confirmé, voir Controller:team_select_focus) ; "Annuler"/
+-- "Valider" ne sont testés que quand un focus est actif ; "Partir à
+-- l'aventure" seulement à 4 aventuriers confirmés. Un clic hors de toute
+-- zone active ne fait rien de plus que "return true" (l'écran a bien traité
+-- le clic), jamais retomber sur la logique "playing" en dessous.
+local function team_select_click(controller, x, y)
+  if controller.screen ~= "team_select" then return false end
+  local ts = controller.team_select
+  if not ts then return true end
+
+  if ts.focused_id then
+    if View.point_in(View.team_select_cancel_button, x, y) then controller:team_select_cancel(); return true end
+    if View.point_in(View.team_select_confirm_button, x, y) then controller:team_select_confirm(); return true end
+  end
+
+  local available_id = find_rect(View.team_select_available_rects(controller), x, y)
+  if available_id then controller:team_select_focus(available_id); return true end
+  local party_id = find_rect(View.team_select_party_rects(controller), x, y)
+  if party_id then controller:team_select_focus(party_id); return true end
+
+  if #ts.selected_ids == 4 and View.point_in(View.team_select_launch_button, x, y) then
+    controller:team_select_launch()
+    return true
+  end
+
+  return true
+end
+
 --- "Rejouer" sur l'écran de défaite (2026-08-21, demande explicite) : relance
 -- le même mode qu'à la mort -- `run_mode == "boss_test"` relance le test du
 -- boss (Game.start_boss_test, jamais Game.reset_run, qui tirerait une
@@ -110,6 +142,7 @@ end
 local function mousepressed_tap(controller, x, y, button)
   if button ~= 1 then return end
   if menu_click(controller, x, y) then return end
+  if team_select_click(controller, x, y) then return end
   if controller.screen == "bossVictory" then return end
   local state = controller.state
 
@@ -180,6 +213,7 @@ end
 local function mousepressed_arrow(controller, x, y, button)
   if button ~= 1 then return end
   if menu_click(controller, x, y) then return end
+  if team_select_click(controller, x, y) then return end
   if controller.screen == "bossVictory" then return end
   local state = controller.state
 
@@ -285,10 +319,28 @@ local function post_combat_hovering(controller, x, y)
   return false
 end
 
+--- Curseur main sur l'écran "Choisis ton équipe" (2026-08-29) : partagée
+-- entre les 2 modes, même geste que team_select_click ci-dessus -- vraie
+-- opportunité d'action seulement (un aventurier, Annuler/Valider si un focus
+-- est actif, "Partir à l'aventure" seulement à 4 confirmés).
+local function team_select_hovering(controller, x, y)
+  local ts = controller.team_select
+  if not ts then return false end
+  if ts.focused_id then
+    if View.point_in(View.team_select_cancel_button, x, y) then return true end
+    if View.point_in(View.team_select_confirm_button, x, y) then return true end
+  end
+  if find_rect(View.team_select_available_rects(controller), x, y) then return true end
+  if find_rect(View.team_select_party_rects(controller), x, y) then return true end
+  if #ts.selected_ids == 4 and View.point_in(View.team_select_launch_button, x, y) then return true end
+  return false
+end
+
 local function is_hovering_clickable_tap(controller, x, y)
   if controller.screen == "menu" or controller.screen == "options" then
     return menu_hovering(controller, x, y)
   end
+  if controller.screen == "team_select" then return team_select_hovering(controller, x, y) end
   if controller.screen == "bossVictory" then return false end
   local state = controller.state
 
@@ -336,6 +388,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
   if controller.screen == "menu" or controller.screen == "options" then
     return menu_hovering(controller, x, y)
   end
+  if controller.screen == "team_select" then return team_select_hovering(controller, x, y) end
   if controller.screen == "bossVictory" then return false end
   local state = controller.state
 
@@ -383,6 +436,24 @@ end
 
 function Input.mousemoved(controller, x, y)
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
+    controller:set_hover(nil, nil)
+    return
+  end
+
+  -- Écran "Choisis ton équipe" (2026-08-29) : "quand je les survole, ils
+  -- réagissent" -- survole aussi bien la rangée du haut (disponibles) que
+  -- celle du bas (équipe confirmée), même kind "team_hero" pour les 2 (voir
+  -- tooltip_lines/h.kind == "team_hero" dans view.lua -- aucun héros réel
+  -- n'existe encore dans controller.state à ce stade, h.target porte l'ID du
+  -- def directement, pas un héros de state.heroes).
+  if controller.screen == "team_select" then
+    local ts = controller.team_select
+    if ts then
+      local available_id = find_rect(View.team_select_available_rects(controller), x, y)
+      if available_id then controller:set_hover("team_hero", available_id); return end
+      local party_id = find_rect(View.team_select_party_rects(controller), x, y)
+      if party_id then controller:set_hover("team_hero", party_id); return end
+    end
     controller:set_hover(nil, nil)
     return
   end
