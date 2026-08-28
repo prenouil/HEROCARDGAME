@@ -358,6 +358,31 @@ local function draw_status_provocation(cx, cy, r, color, alpha)
   love.graphics.circle("fill", cx, cy + r * 0.55, r * 0.14)
 end
 
+--- Silhouette de statue "bénie" (2026-08-29, demande explicite -- "une icone
+-- de statue de la bonne couleur, 1 pour les bénédictions, l'autre pour les
+-- malédictions") : tête/halo rond + robe évasée, silhouette douce -- même
+-- forme pour LES 8 bénédictions, seule la couleur change (voir
+-- TEMPLE_STATUE_COLORS dans view.lua, appliquée par l'appelant via `color`).
+local function draw_status_temple_blessing(cx, cy, r, color, alpha)
+  set(color, alpha)
+  love.graphics.circle("fill", cx, cy - r * 0.55, r * 0.28)
+  love.graphics.polygon("fill",
+    cx - r * 0.5, cy + r * 0.75, cx - r * 0.32, cy - r * 0.05,
+    cx + r * 0.32, cy - r * 0.05, cx + r * 0.5, cy + r * 0.75)
+end
+
+--- Silhouette de statue "maudite" (2026-08-29) : pareil, mais anguleuse avec
+-- 2 pointes façon cornes/gargouille -- distincte au premier coup d'œil de la
+-- version bénie ci-dessus même en silhouette pure, sans dépendre de la couleur.
+local function draw_status_temple_curse(cx, cy, r, color, alpha)
+  set(color, alpha)
+  love.graphics.polygon("fill",
+    cx, cy - r * 0.85,
+    cx - r * 0.5, cy - r * 0.15, cx - r * 0.25, cy - r * 0.15,
+    cx - r * 0.45, cy + r * 0.8, cx + r * 0.45, cy + r * 0.8,
+    cx + r * 0.25, cy - r * 0.15, cx + r * 0.5, cy - r * 0.15)
+end
+
 local DRAW_BY_STATUS = {
   defense = draw_status_defense,
   esquive = draw_status_esquive,
@@ -368,6 +393,8 @@ local DRAW_BY_STATUS = {
   vulnerabilite = draw_status_vulnerabilite,
   provocation = draw_status_provocation,
   shield_pending = draw_status_scheduled_shield,
+  temple_blessing = draw_status_temple_blessing,
+  temple_curse = draw_status_temple_curse,
   fireweak = draw_status_fireweak,
   bonus = draw_status_bonus,
   malus = draw_status_malus,

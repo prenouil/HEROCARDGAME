@@ -95,6 +95,13 @@ local POST_COMBAT_TEMPLE_CHANCE = 0.4
 local FORGE_UPGRADE_ANIM_DURATION = 0.5
 local FORGE_UPGRADE_HOLD_PAUSE = 1.0
 
+-- Choix au Temple (2026-08-29, refonte -- "après le choix, les statues non
+-- choisies fade et laisse la place à celle choisie, avec l'indication 'Bonne
+-- chance ...'") : même timing que la Forge ci-dessus, même raison d'être
+-- (laisser le joueur voir/lire le résultat avant d'enchaîner).
+local TEMPLE_CHOICE_ANIM_DURATION = 0.5
+local TEMPLE_CHOICE_HOLD_PAUSE = 1.0
+
 -- VFX de lisibilité (2026-08-09, party "amélioration des visuels") : tous
 -- dérivés du même mécanisme de diff avant/après déjà en place pour la
 -- secousse (voir Controller:react_to_diff, ex-shake_from_diff), pas de
@@ -142,7 +149,12 @@ function Controller.new()
   self.forge = nil -- { choices = {instance,...}, resolved = bool|nil }, voir enter_forge_screen
   self.forge_upgrade_anim = nil -- { chosen_index, base_def, t = elapsed }, voir choose_forge_card
   self.forge_upgrade_anim_duration = FORGE_UPGRADE_ANIM_DURATION -- lu par view.lua pour l'easing
-  self.temple = nil -- { blessing = def|nil, eligible = {hero,...}, resolved = bool|nil }, voir enter_temple_screen
+  -- { type = "blessing"|"curse", choices = {effect,...}, eligible = {hero,...},
+  -- chosen_effect_index = nil|int, chosen_hero_id = nil|id, resolved = bool|nil },
+  -- voir Controller:enter_temple_screen (2026-08-29, refonte complète).
+  self.temple = nil
+  self.temple_choice_anim = nil -- { chosen_index, t = elapsed }, voir Controller:confirm_temple_choice
+  self.temple_choice_anim_duration = TEMPLE_CHOICE_ANIM_DURATION -- lu par view.lua pour l'easing
   self.victory_anim = nil -- { t = elapsed } pendant le zoom+bump du titre "Victoire !"
   self.victory_title_duration = VICTORY_TITLE_DURATION -- lu par view.lua pour l'easing
   self.draft_cards_shown = false -- les 3 cartes (de dos) n'apparaissent qu'après le titre
@@ -223,6 +235,7 @@ function Controller:clear_animation_state()
   self.forge = nil
   self.forge_upgrade_anim = nil
   self.temple = nil
+  self.temple_choice_anim = nil
   self.victory_anim = nil
   self.draft_cards_shown = false
   self.draft_flip = {}
@@ -585,14 +598,14 @@ end
 -- second mécanisme de rebond à maintenir. `state.heroes` est déjà dans l'ordre
 -- d'affichage gauche->droite (voir View.hero_rects), donc une simple itération
 -- suffit -- pas besoin de trier.
--- `hero_ref.combat_start_heal` (2026-08-28, demande explicite -- bénédiction
--- du Temple) : posé par Game.carried_hero AVANT que ce beat ne joue (chaque
--- entrée en combat rebâtit les héros via carried_hero, voir
--- advance_to_next_combat) -- affiché ICI, synchronisé sur le saut de CE
--- héros précisément plutôt qu'en un seul bloc au tout début, pour que le
--- flottant vert de soin morde sur le même instant que son p'tit bond "prêt".
--- Consommé (mis à nil) tout de suite après affichage : ne doit jamais
--- rejouer sur un tour normal, seulement à l'entrée en combat.
+-- `hero_ref.combat_start_heal`/`combat_start_curse_damage` (2026-08-28/29,
+-- demande explicite -- bénédiction/malédiction du Temple) : posés par
+-- Game.carried_hero AVANT que ce beat ne joue (chaque entrée en combat
+-- rebâtit les héros via carried_hero, voir advance_to_next_combat) --
+-- affichés ICI, synchronisés sur le saut de CE héros précisément plutôt
+-- qu'en un seul bloc au tout début. Consommés (mis à nil) tout de suite
+-- après affichage : ne doivent jamais rejouer sur un tour normal, seulement
+-- à l'entrée en combat.
 function Controller:play_hero_ready_hops()
   local self_ = self
   for _, h in ipairs(self_.state.heroes) do
@@ -604,6 +617,10 @@ function Controller:play_hero_ready_hops()
         if hero_ref.combat_start_heal then
           self_:spawn_floater(hero_ref.id, hero_ref.combat_start_heal, "heal")
           hero_ref.combat_start_heal = nil
+        end
+        if hero_ref.combat_start_curse_damage then
+          self_:spawn_floater(hero_ref.id, -hero_ref.combat_start_curse_damage, "damage")
+          hero_ref.combat_start_curse_damage = nil
         end
       end, HERO_READY_STAGGER)
     end
@@ -768,6 +785,7 @@ function Controller:update(dt)
   if self.victory_anim then self.victory_anim.t = self.victory_anim.t + dt end
   for _, f in pairs(self.draft_flip) do f.t = f.t + dt end
   if self.forge_upgrade_anim then self.forge_upgrade_anim.t = self.forge_upgrade_anim.t + dt end
+  if self.temple_choice_anim then self.temple_choice_anim.t = self.temple_choice_anim.t + dt end
 end
 
 function Controller:set_hover(kind, target)
@@ -1099,16 +1117,29 @@ function Controller:finish_forge(pause)
   end)
 end
 
---- Entre sur l'écran "Le Temple" (2026-08-28, demande explicite) : liste les
--- aventuriers éligibles (vivants, pas déjà bénis) et tire LA bénédiction qui
--- sera proposée -- tirée ICI, une seule fois, via state.rng.temple. Aucun
--- aventurier éligible (tous déjà bénis) laisse `blessing` à nil -- l'écran
--- affiche alors "Passer" comme seule option (voir draw_temple, view.lua).
+--- Entre sur l'écran "Le Temple" (2026-08-29, refonte complète -- demande
+-- explicite) : tire d'abord le TYPE de cette visite (bénédiction OU
+-- malédiction, jamais les deux -- voir Temple.roll_type), puis jusqu'à 3
+-- effets distincts de ce type et la liste des aventuriers éligibles -- tout
+-- ICI, une seule fois, via state.rng.temple. AUCUN "Passer" possible sur cet
+-- écran ("il ne peut pas ne pas choisir") : si aucun type n'a rien à
+-- proposer, Temple.roll_type renvoie nil et cet écran n'apparaît simplement
+-- pas -- on saute directement à la suite de la file, exactement comme si le
+-- Temple n'avait pas été tiré du tout ce combat-ci.
 function Controller:enter_temple_screen()
+  local rng = self.state.rng.temple
+  local t = Temple.roll_type(self.state, rng)
+  if not t then
+    self:advance_post_combat_queue()
+    return
+  end
   self.screen = "temple"
-  local eligible = Temple.eligible_heroes(self.state)
-  local blessing = #eligible > 0 and Temple.pick_blessing(self.state.rng.temple) or nil
-  self.temple = { blessing = blessing, eligible = eligible }
+  self.temple = {
+    type = t,
+    choices = Temple.pick_choices(t, rng),
+    eligible = Temple.eligible_heroes(self.state, t),
+    chosen_effect_index = nil, chosen_hero_id = nil,
+  }
 end
 
 local function temple_choosable(self)
@@ -1116,39 +1147,58 @@ local function temple_choosable(self)
   return self.screen == "temple" and t ~= nil and not t.resolved
 end
 
---- Le JOUEUR choisit QUI reçoit la bénédiction (déjà tirée, voir
--- enter_temple_screen) en cliquant l'un des 4 aventuriers affichés -- refuse
--- silencieusement un id hors de `eligible` (aventurier mort ou déjà béni,
--- voir View.temple_hero_rects/input.lua pour le hit-test réel).
+--- Le joueur clique une des statues proposées -- change juste la sélection
+-- tant que non confirmé (voir Controller:confirm_temple_choice), comme pour
+-- l'aventurier ci-dessous. Les 3 statues sont toujours du MÊME type, donc
+-- toujours compatibles avec n'importe quel aventurier éligible -- pas de
+-- grisage entre les deux dimensions, seule l'éligibilité de l'AVENTURIER
+-- limite quoi que ce soit (voir choose_temple_hero).
+function Controller:choose_temple_effect(index)
+  if not temple_choosable(self) then return end
+  local t = self.temple
+  if not t.choices[index] then return end
+  t.chosen_effect_index = index
+end
+
+--- Le joueur clique un des aventuriers -- refuse silencieusement un id hors
+-- de `eligible` (aventurier mort ou déjà porteur de ce TYPE d'effet, voir
+-- Temple.eligible_heroes -- grisés côté UI, voir View.temple_hero_rects/
+-- draw_temple).
 function Controller:choose_temple_hero(hero_id)
   if not temple_choosable(self) then return end
   local t = self.temple
-  if not t.blessing then return end
-  local hero
-  for _, h in ipairs(t.eligible) do if h.id == hero_id then hero = h end end
-  if not hero then return end
-  t.resolved = true
+  local found = false
+  for _, h in ipairs(t.eligible) do if h.id == hero_id then found = true end end
+  if not found then return end
   t.chosen_hero_id = hero_id
-  Temple.bless(hero, t.blessing)
-  Sfx.play("heal")
-  self:finish_temple()
 end
 
---- "Passer" -- seule option valide quand aucun aventurier n'est éligible (tous
--- déjà bénis, voir Temple.eligible_heroes).
-function Controller:choose_temple_skip()
+--- "Confirmer" (2026-08-29, demande explicite -- "le joueur doit choisir 1
+-- aventurier et 1 effet, puis confirmer") : ne fait rien tant que les DEUX ne
+-- sont pas choisis -- jamais de résolution automatique dès le 2ᵉ clic,
+-- contrairement à la Forge/Assassinat/etc. Lance ensuite l'anim "les statues
+-- non choisies fade, celle choisie reste + 'Bonne chance'" (voir
+-- temple_choice_anim, consommée par draw_temple dans view.lua).
+function Controller:confirm_temple_choice()
   if not temple_choosable(self) then return end
   local t = self.temple
-  if t.blessing then return end
+  if not t.chosen_effect_index or not t.chosen_hero_id then return end
+  local hero
+  for _, h in ipairs(t.eligible) do if h.id == t.chosen_hero_id then hero = h end end
+  if not hero then return end
   t.resolved = true
-  self:finish_temple()
+  Temple.assign(hero, t.choices[t.chosen_effect_index])
+  self.temple_choice_anim = { chosen_index = t.chosen_effect_index, t = 0 }
+  Sfx.play("heal")
+  self:finish_temple(TEMPLE_CHOICE_ANIM_DURATION + TEMPLE_CHOICE_HOLD_PAUSE)
 end
 
-function Controller:finish_temple()
+function Controller:finish_temple(pause)
   local self_ = self
-  self.seq:push(function() end, POST_COMBAT_RESOLVE_PAUSE)
+  self.seq:push(function() end, pause or POST_COMBAT_RESOLVE_PAUSE)
   self.seq:push(function()
     self_.temple = nil
+    self_.temple_choice_anim = nil
     self_:advance_post_combat_queue()
   end)
 end

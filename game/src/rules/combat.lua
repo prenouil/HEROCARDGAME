@@ -27,6 +27,18 @@ function Combat.living_enemies(state)
   return out
 end
 
+--- Coût réel en énergie de `def` pour CE héros précis (2026-08-29, malédiction
+-- "Le Corrompu" -- hero.card_cost_delta, un champ simple copié depuis
+-- Temple.effects par Game.apply_combat_start_temple_effects, jamais une
+-- connaissance directe de Temple ici, même principe que hero.discretion
+-- ailleurs) : def.cost + l'éventuel surcoût. Seule source de vérité sur
+-- "combien ça coûte VRAIMENT" -- Combat.can_play, Game.resolve_pending
+-- (déduction) et l'affichage en main (draw_hand, view.lua) doivent tous
+-- passer par elle, jamais lire def.cost brut pour un coût vérifié/affiché.
+function Combat.effective_cost(hero, def)
+  return def.cost + ((hero and hero.card_cost_delta) or 0)
+end
+
 function Combat.hero_by_id(state, id)
   for _, h in ipairs(state.heroes) do
     if h.id == id then return h end
@@ -56,6 +68,26 @@ end
 -- les règles ne touchent jamais l'affichage directement.
 function Combat.log(state, text, cls)
   state.log[#state.log + 1] = { text = text, cls = cls }
+end
+
+--- Inspiration (2026-08-29, statut GÉNÉRIQUE du Barde -- hero.inspiration,
+-- n'importe quel héros peut le porter, voir game.lua) : +6 FLAT au premier
+-- effet de dégâts/soin/bouclier que `ctx.hero` déclenche en jouant SA carte,
+-- consommé une seule fois par carte jouée (jamais par coup si la carte touche
+-- plusieurs cibles, ex. "Coup de taille") -- le garde-fou est `ctx` lui-même :
+-- la MÊME table est partagée par tous les appels à Combat.deal_damage/
+-- grant_heal/grant_defense au sein d'un seul def.effect(ctx), donc marquer
+-- `ctx.inspiration_consumed` dessus bloque tout appel suivant. `ctx` vaut nil
+-- pour les dégâts qui NE viennent PAS d'une carte jouée (attaque ennemie,
+-- épines, saignement...) -- Inspiration ne s'applique alors jamais, par
+-- construction plutôt que par un check explicite en plus.
+local function consume_inspiration(amount, ctx)
+  if ctx and ctx.hero and (ctx.hero.inspiration or 0) > 0 and not ctx.inspiration_consumed then
+    ctx.inspiration_consumed = true
+    ctx.hero.inspiration = ctx.hero.inspiration - 1
+    return amount + 6
+  end
+  return amount
 end
 
 --- Multiplicateur total de dégâts pour un coup donné : Puissance/Incapacité de
@@ -116,6 +148,7 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
     end
   end
   local amount = round(base * Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire))
+  amount = consume_inspiration(amount, ctx)
 
   local absorbed = 0
   if not opts.brut then
@@ -124,6 +157,20 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
   end
   local to_hp = amount - absorbed
   target_unit.hp = target_unit.hp - to_hp
+
+  -- "La Renaissante" (2026-08-29, bénédiction -- hero.death_ward, un simple
+  -- booléen copié depuis Temple.effects par
+  -- Game.apply_combat_start_temple_effects, jamais une connaissance directe
+  -- de Temple ici) : au lieu de mourir, reste debout à 1 PV -- consommé
+  -- (remis à false) au premier déclenchement, jamais réutilisable dans le
+  -- même combat. Game.tick_bleed a son propre appel équivalent (le
+  -- saignement ne passe pas par cette fonction) -- même logique dupliquée là,
+  -- volontairement, plutôt qu'un détour par ce module pour 3 lignes.
+  if target_unit.hp <= 0 and target_unit.death_ward then
+    target_unit.hp = 1
+    target_unit.death_ward = false
+    Combat.log(state, target_unit.name .. " aurait dû mourir, mais reste debout à 1 PV !", "power")
+  end
 
   Combat.log(state,
     (source_hero and source_hero.name or "Un ennemi") .. " inflige " .. amount .. " dégâts"
@@ -150,6 +197,29 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
     Combat.log(state, target_unit.name .. " perd sa Discrétion en encaissant des dégâts.", "foe")
   end
 
+  -- Corruption (2026-08-29, ressource propre au Nécromancien -- hero.corruption) :
+  -- +1 par VRAIE perte de PV (to_hp > 0), quelle qu'en soit la source --
+  -- dégâts ennemis OU auto-infligés par ses propres cartes (Sceau de
+  -- faiblesse/Pacte funeste, voir cards.lua, toutes deux réutilisent CETTE
+  -- fonction pour leur propre coût en PV plutôt qu'une mutation directe de
+  -- `hp`) -- même idiome générique que la perte de Discrétion juste au-dessus.
+  if to_hp > 0 and target_unit.corruption ~= nil then
+    target_unit.corruption = target_unit.corruption + to_hp
+  end
+
+  -- "Le Rancunier" (2026-08-29, bénédiction -- hero.thorns) : renvoie ce
+  -- montant à l'attaquant à chaque VRAIE perte de PV -- `source_unit` porte le
+  -- VRAI frappeur même pour une attaque ennemie (voir sa doc plus haut, jamais
+  -- `source_hero` seul, toujours nil côté ennemi). `brut = true` : les épines
+  -- transpercent, jamais absorbées par un bouclier. Garde `source_unit ~=
+  -- target_unit` : jamais de retour sur soi-même (ex. Riposte, qui frappe déjà
+  -- l'attaquant directement -- source_unit y est nil, cette carte reste hors
+  -- de portée du garde-fou par construction).
+  if to_hp > 0 and target_unit.thorns and source_unit and source_unit ~= target_unit and source_unit.hp > 0 then
+    Combat.deal_damage(state, nil, source_unit, target_unit.thorns, nil, nil, { brut = true, source_unit = target_unit })
+    Combat.log(state, target_unit.name .. " renvoie " .. target_unit.thorns .. " dégâts à " .. source_unit.name .. ".", "you")
+  end
+
   -- Run Infini : marque l'ennemi comme touché ce tour (Golem) / touché par du feu ce tour (Troll).
   local is_enemy_target = false
   for _, e in ipairs(state.enemies) do
@@ -160,17 +230,34 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
     if is_fire then target_unit.took_fire_damage_this_turn = true end
   end
 
+  -- "Le Blessé" (2026-08-29, malédiction -- hero.self_damage_on_hit) :
+  -- l'aventurier maudit se blesse lui-même à chaque attaque qui inflige
+  -- RÉELLEMENT des dégâts à un ennemi (jamais sur un allié touché par erreur,
+  -- jamais sur un coup entièrement paré). `source_hero` (pas source_unit) :
+  -- seul un héros qui joue une carte peut porter cette malédiction.
+  if to_hp > 0 and is_enemy_target and source_hero and source_hero.self_damage_on_hit and source_hero.hp > 0 then
+    Combat.deal_damage(state, nil, source_hero, source_hero.self_damage_on_hit, nil, nil, { brut = true })
+    Combat.log(state, source_hero.name .. " se blesse en attaquant (Le Blessé).", "foe")
+  end
+
   return shook
 end
 
-function Combat.grant_defense(target_unit, base)
-  local amount = round(base)
+--- `ctx` (optionnel, 2026-08-29, Inspiration -- voir consume_inspiration
+-- ci-dessus) : à passer par TOUT effet de carte qui accorde du bouclier,
+-- pour que l'Inspiration du lanceur (`ctx.hero`) puisse s'y appliquer -- même
+-- convention que le `ctx` déjà passé à Combat.deal_damage. Omis (nil), comme
+-- pour tout gain de bouclier hors carte (bouclier programmé, début de tour...) :
+-- aucun bonus, jamais d'erreur.
+function Combat.grant_defense(target_unit, base, ctx)
+  local amount = round(consume_inspiration(base, ctx))
   target_unit.defense = (target_unit.defense or 0) + amount
   return amount
 end
 
-function Combat.grant_heal(target_unit, base)
-  local amount = round(base)
+--- `ctx` (optionnel) : même convention que Combat.grant_defense ci-dessus.
+function Combat.grant_heal(target_unit, base, ctx)
+  local amount = round(consume_inspiration(base, ctx))
   target_unit.hp = math.min(target_unit.max_hp, target_unit.hp + amount)
   return amount
 end
@@ -195,7 +282,7 @@ end
 -- sans case spéciale par classe ici.
 function Combat.can_play(state, hero, pending)
   if not pending or hero.hp <= 0 then return false end
-  if state.energy < pending.def.cost then return false end
+  if state.energy < Combat.effective_cost(hero, pending.def) then return false end
   if pending.def.mana_cost and (hero.mana or 0) < pending.def.mana_cost then return false end
   if pending.def.requires_camouflage and (hero.camoufle or 0) <= 0 then return false end
   return true

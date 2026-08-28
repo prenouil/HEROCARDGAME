@@ -258,3 +258,155 @@ describe("Cartes Guerrier (2026-08-28, refonte)", function()
     assert.is_not_nil(attacker.next_move) -- l'attaque n'est PAS annulée
   end)
 end)
+
+-- Nécromancien/Barde (2026-08-29, conçues avec agent_content -- PAS encore
+-- dans Heroes.defs/le roster actif, voir heroes.lua) : `corruption_spent` est
+-- normalement calculé par Game.resolve_pending (voir game_spec.lua pour ce
+-- calcul), donc renseigné à la main ici -- ces tests appellent def.effect
+-- directement, comme tout le reste de ce fichier.
+describe("Cartes Nécromancien (2026-08-29)", function()
+  it("Rite mineur : inflige 6 necrose, se soigne de 2*X (ctx.corruption_spent)", function()
+    local base = Cards.by_code("rite-mineur")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 10, max_hp = 20, class_id = "necromancien", corruption = 5 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    base.effect({ state = state, hero = hero, target = target, card_def = base, corruption_spent = 3 })
+    assert.equal(14, target.hp) -- 20 - 6
+    assert.equal(16, hero.hp) -- 10 + 2*3
+  end)
+
+  it("Rite mineur à X=0 reste jouable : dégâts garantis, pas de soin (voulu, pas un oubli)", function()
+    local base = Cards.by_code("rite-mineur")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 10, max_hp = 20, class_id = "necromancien", corruption = 0 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    base.effect({ state = state, hero = hero, target = target, card_def = base, corruption_spent = 0 })
+    assert.equal(14, target.hp)
+    assert.equal(10, hero.hp) -- aucun soin
+  end)
+
+  it("Sceau de faiblesse : auto-inflige 2 PV via Combat.deal_damage, gagne donc 2 Corruption automatiquement", function()
+    local base = Cards.by_code("sceau-faiblesse")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 10, max_hp = 20, class_id = "necromancien", corruption = 0 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0, vulnerabilite = 0 }
+    base.effect({ state = state, hero = hero, target = target, card_def = base })
+    assert.equal(8, hero.hp) -- 10 - 2
+    assert.equal(2, hero.corruption) -- gagnée par le hook générique de Combat.deal_damage, pas ajoutée par la carte
+    assert.equal(3, target.vulnerabilite)
+  end)
+
+  it("Voile d'ossements (corrigée 2026-08-29) : 4 bouclier à l'allié, 1 (2 amélioré) par Corruption pour le Nécromancien -- ne DÉPENSE jamais la Corruption", function()
+    local base = Cards.by_code("voile-ossements")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0, class_id = "necromancien", corruption = 5 }
+    local ally = { id = "h2", name = "h2", hp = 20, max_hp = 20, defense = 0 }
+    base.effect({ state = state, hero = hero, target = ally, card_def = base })
+    assert.equal(4, ally.defense)
+    assert.equal(5, hero.defense) -- 1 * 5 Corruption
+    assert.equal(5, hero.corruption) -- pas dépensée
+
+    local up = Cards.upgraded_def(base)
+    local hero2 = { id = "h3", name = "h3", hp = 20, max_hp = 20, defense = 0, class_id = "necromancien", corruption = 5 }
+    local ally2 = { id = "h4", name = "h4", hp = 20, max_hp = 20, defense = 0 }
+    up.effect({ state = state, hero = hero2, target = ally2, card_def = up })
+    assert.equal(6, ally2.defense)
+    assert.equal(10, hero2.defense) -- 2 * 5 Corruption
+  end)
+
+  it("Pacte funeste : perd la moitié de ses PV (arrondi sup), inflige 2 necrose par PV perdu, gagne autant de Corruption (via le hook générique)", function()
+    local base = Cards.by_code("pacte-funeste")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 7, max_hp = 20, class_id = "necromancien", corruption = 0 } -- ceil(7/2) = 4
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    base.effect({ state = state, hero = hero, target = target, card_def = base })
+    assert.equal(3, hero.hp) -- 7 - 4
+    assert.equal(4, hero.corruption) -- autant que de PV perdus
+    assert.equal(12, target.hp) -- 20 - (4 * 2)
+  end)
+
+  it("Servant d'os : programme X dégâts brut sur 3 (4 amélioré) tours via Game.schedule_damage, rien à X=0", function()
+    local base = Cards.by_code("servant-os")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "necromancien", scheduled_damages = {} }
+    base.effect({ state = state, hero = hero, target = hero, card_def = base, corruption_spent = 3 })
+    assert.equal(3, #hero.scheduled_damages)
+    assert.equal(3, hero.scheduled_damages[1].amount)
+
+    local hero0 = { id = "h2", name = "h2", hp = 20, max_hp = 20, class_id = "necromancien", scheduled_damages = {} }
+    base.effect({ state = state, hero = hero0, target = hero0, card_def = base, corruption_spent = 0 })
+    assert.equal(0, #hero0.scheduled_damages) -- aucun effet garanti à X=0, voulu
+
+    local up = Cards.upgraded_def(base)
+    local hero2 = { id = "h3", name = "h3", hp = 20, max_hp = 20, class_id = "necromancien", scheduled_damages = {} }
+    up.effect({ state = state, hero = hero2, target = hero2, card_def = up, corruption_spent = 2 })
+    assert.equal(4, #hero2.scheduled_damages)
+  end)
+
+  it("Communion des morts : se soigne de 2*X (3*X amélioré)", function()
+    local base = Cards.by_code("communion-morts")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 5, max_hp = 30, class_id = "necromancien" }
+    base.effect({ state = state, hero = hero, target = hero, card_def = base, corruption_spent = 4 })
+    assert.equal(13, hero.hp) -- 5 + 2*4
+  end)
+end)
+
+describe("Cartes Barde (2026-08-29)", function()
+  it("Air belliqueux : lit passivement l'Inspiration cumulée de TOUS les alliés (jamais dépensée)", function()
+    local base = Cards.by_code("air-belliqueux")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "barde", inspiration = 0 }
+    local ally = { id = "h2", name = "h2", hp = 20, max_hp = 20, inspiration = 3 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    state.heroes = { hero, ally } -- living_heroes(ctx) lit ctx.state.heroes
+    base.effect({ state = state, hero = hero, target = target, card_def = base })
+    assert.equal(20 - (5 + 2 * 3), target.hp) -- 5 base + 2*3 (Inspiration cumulée des alliés) = 11 dégâts
+    assert.equal(3, ally.inspiration) -- jamais dépensée par une lecture passive
+  end)
+
+  it("Chœur de bataille : Inspiration 2 (3 amélioré) à TOUS les alliés vivants", function()
+    local base = Cards.by_code("choeur-bataille")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "barde", inspiration = 0 }
+    local ally = { id = "h2", name = "h2", hp = 20, max_hp = 20, inspiration = 0 }
+    local dead = { id = "h3", name = "h3", hp = 0, max_hp = 20, inspiration = 0 }
+    state.heroes = { hero, ally, dead }
+    base.effect({ state = state, hero = hero, target = hero, card_def = base })
+    assert.equal(2, hero.inspiration)
+    assert.equal(2, ally.inspiration)
+    assert.equal(0, dead.inspiration) -- mort, exclu
+  end)
+
+  it("Bis : consomme l'Inspiration de la cible et pose Encore (2 déclenchements base, 3 amélioré) -- rien si pas d'Inspiration", function()
+    local base = Cards.by_code("bis")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "barde" }
+    local ally = { id = "h2", name = "h2", hp = 20, max_hp = 20, inspiration = 4 }
+    base.effect({ state = state, hero = hero, target = ally, card_def = base })
+    assert.equal(0, ally.inspiration)
+    assert.equal(1, ally.encore_extra_plays) -- "jouée 2 fois" = 1 déclenchement EN PLUS
+
+    local ally_no_insp = { id = "h3", name = "h3", hp = 20, max_hp = 20, inspiration = 0 }
+    base.effect({ state = state, hero = hero, target = ally_no_insp, card_def = base })
+    assert.is_nil(ally_no_insp.encore_extra_plays) -- pas d'Inspiration : ne fait rien
+
+    local up = Cards.upgraded_def(base)
+    local ally2 = { id = "h4", name = "h4", hp = 20, max_hp = 20, inspiration = 2 }
+    up.effect({ state = state, hero = hero, target = ally2, card_def = up })
+    assert.equal(2, ally2.encore_extra_plays) -- "jouée 3 fois" = 2 déclenchements EN PLUS
+  end)
+
+  it("Rappel triomphal : Inspiration 2 + 6 bouclier (3 + 9 amélioré) à tous les alliés", function()
+    local base = Cards.by_code("rappel-triomphal")
+    local state = { log = {}, enemies = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0, class_id = "barde", inspiration = 0 }
+    local ally = { id = "h2", name = "h2", hp = 20, max_hp = 20, defense = 0, inspiration = 0 }
+    state.heroes = { hero, ally }
+    base.effect({ state = state, hero = hero, target = hero, card_def = base })
+    assert.equal(2, hero.inspiration)
+    assert.equal(6, hero.defense)
+    assert.equal(2, ally.inspiration)
+    assert.equal(6, ally.defense)
+  end)
+end)

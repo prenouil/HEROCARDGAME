@@ -23,6 +23,17 @@ local Deck = require("src.rules.deck")
 
 local View = {}
 
+-- Couleurs des statues du Temple (2026-08-29, demande explicite -- une par
+-- effet, voir Temple.effects dans temple.lua) : purement décoratives,
+-- utilisées à la fois par les badges sur le cadre des héros (draw_hero) et
+-- par l'écran du Temple lui-même (draw_temple) -- une seule table partagée,
+-- jamais 2 palettes qui pourraient diverger.
+local TEMPLE_STATUE_COLORS = {
+  vert = { 0.35, 0.72, 0.42 }, bleu = { 0.35, 0.55, 0.85 }, rouge = { 0.82, 0.32, 0.32 },
+  blanc = { 0.92, 0.92, 0.92 }, violet = { 0.62, 0.42, 0.82 }, noir = { 0.38, 0.35, 0.42 },
+  orange = { 0.88, 0.58, 0.24 }, gris = { 0.62, 0.62, 0.65 },
+}
+
 local function combats_won_text(controller)
   return tostring(math.max(0, controller.state.run.combat_index - 1))
 end
@@ -272,21 +283,33 @@ function View.forge_card_rects(controller)
 end
 View.forge_skip_button = { x = W / 2 - 100, y = FORGE_CARD_Y + CARD_H + 40, w = 200, h = 44, label = "Passer" }
 
--- Écran "Le Temple" (2026-08-28, demande explicite) : les 4 aventuriers en
--- rangée fixe (même principe que View.hero_rects) devant la statue
--- (placeholder procédural, voir draw_temple_statue) -- toujours les 4,
--- jamais recalculé selon l'éligibilité : un aventurier mort ou déjà béni
--- reste affiché, juste grisé/non cliquable (voir draw_temple/
--- Controller:choose_temple_hero).
+-- Écran "Le Temple" (2026-08-29, refonte complète -- demande explicite) :
+-- jusqu'à 3 statues d'effet EN LIGNE au-dessus des 4 aventuriers (toujours
+-- les 4, jamais recalculé selon l'éligibilité -- un aventurier mort ou déjà
+-- porteur reste affiché, juste grisé/non cliquable, voir draw_temple/
+-- Controller:choose_temple_hero). Aucun "Passer" sur cet écran (choix
+-- obligatoire) -- un bouton "Confirmer" à la place, actif seulement quand
+-- aventurier ET effet sont choisis (voir Controller:confirm_temple_choice).
+local TEMPLE_EFFECT_W, TEMPLE_EFFECT_H = 140, 150
+local TEMPLE_EFFECT_Y = 108
+local TEMPLE_EFFECT_GAP = 30
+function View.temple_effect_rects(controller)
+  local t = controller.temple
+  if not t then return {} end
+  return centered_row(#t.choices, TEMPLE_EFFECT_W, TEMPLE_EFFECT_H, TEMPLE_EFFECT_Y, TEMPLE_EFFECT_GAP)
+end
+
 local TEMPLE_HERO_W, TEMPLE_HERO_H = 130, 136
-local TEMPLE_HERO_Y = 310
+local TEMPLE_HERO_Y = 300
 function View.temple_hero_rects(controller)
   local rects = centered_row(#controller.state.heroes, TEMPLE_HERO_W, TEMPLE_HERO_H, TEMPLE_HERO_Y)
   local out = {}
   for i, h in ipairs(controller.state.heroes) do out[h.id] = rects[i] end
   return out
 end
-View.temple_skip_button = { x = W / 2 - 100, y = 300, w = 200, h = 44, label = "Passer" }
+View.temple_confirm_button = {
+  x = W / 2 - 100, y = TEMPLE_HERO_Y + TEMPLE_HERO_H + 20, w = 200, h = 44, label = "Confirmer",
+}
 
 local function point_in(r, x, y)
   return r and x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h
@@ -680,20 +703,36 @@ local function draw_hero(controller, h, r)
   set(Theme.text, dead and 0.45 or 1)
   local HERO_PORTRAIT_SIZE = 54
   draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, HERO_PORTRAIT_SIZE, Theme.text)
-  -- Badge de bénédiction du Temple (2026-08-28, demande explicite --
-  -- "s'ajoute, sous forme d'une icone dédiée, au cadre de l'aventurier durant
-  -- les combats") : coin haut-droit, seule zone encore libre du cadre --
-  -- portrait au centre, PV/mana/statuts en dessous, nom tout en bas (voir
-  -- plus loin). `h.blessing` ne porte que l'id (voir Temple.bless) -- l'icône/
-  -- le texte d'infobulle viennent de Temple.by_id, jamais dupliqués ici.
+  -- Badges de bénédiction/malédiction du Temple (2026-08-28/29, demande
+  -- explicite -- "représenté par une icone de statue de la bonne couleur, 1
+  -- pour les bénédictions, l'autre pour les malédictions") : coin haut-droit
+  -- pour la bénédiction, haut-gauche pour la malédiction -- les 2 seules
+  -- zones encore libres du cadre (portrait au centre, PV/mana/statuts en
+  -- dessous, nom tout en bas). Un aventurier peut porter les DEUX à la fois
+  -- (2 champs indépendants, voir temple.lua) -- jamais un seul badge qui
+  -- devrait choisir lequel montrer. `h.blessing`/`h.curse` ne portent que
+  -- l'id -- couleur/texte d'infobulle viennent de Temple.by_id, jamais
+  -- dupliqués ici.
   if not dead and h.blessing then
     local blessing = Temple.by_id(h.blessing)
     if blessing then
-      set(Theme.heal); love.graphics.circle("fill", r.w - 14, 14, 11)
+      local color = TEMPLE_STATUE_COLORS[blessing.color] or Theme.heal
+      set(color); love.graphics.circle("fill", r.w - 14, 14, 11)
       set(Theme.black); love.graphics.setLineWidth(2)
       love.graphics.circle("line", r.w - 14, 14, 11)
       love.graphics.setLineWidth(1)
-      icon_text(blessing.icon, "+", r.w - 25, 6, 22, 14, Theme.text)
+      Icons.draw_status("temple_blessing", r.w - 14, 14, 8, Theme.bg)
+    end
+  end
+  if not dead and h.curse then
+    local curse = Temple.by_id(h.curse)
+    if curse then
+      local color = TEMPLE_STATUE_COLORS[curse.color] or Theme.hp
+      set(color); love.graphics.circle("fill", 14, 14, 11)
+      set(Theme.black); love.graphics.setLineWidth(2)
+      love.graphics.circle("line", 14, 14, 11)
+      love.graphics.setLineWidth(1)
+      Icons.draw_status("temple_curse", 14, 14, 8, Theme.bg)
     end
   end
   local name_y = r.h - 24
@@ -1308,13 +1347,17 @@ local function draw_hand(controller)
       desc_text = preview_desc(def, previewing_hero, previewing_target)
       has_bonus = desc_text ~= def.desc
     end
-    local cost_text = tostring(def.cost)
     local owner = Combat.hero_by_id(state, def.class_id)
+    -- Coût EFFECTIF (2026-08-29, malédiction "Le Corrompu" -- owner.card_cost_delta) :
+    -- jamais def.cost brut dès qu'un propriétaire est en jeu -- voir
+    -- Combat.effective_cost, seule source de vérité, déjà utilisée par
+    -- Combat.can_play/Game.resolve_pending pour la vraie vérification/déduction.
+    local cost_text = tostring(Combat.effective_cost(owner, def))
     -- Coût en rouge quand la réserve globale (ou, pour les sorts du Mage, sa
     -- mana) ne couvre plus le coût (2026-08-24, demande explicite) : pur
     -- retour visuel, ne duplique pas la règle -- Combat.can_play/
     -- Game.select_card (voir game.lua) refusent déjà la sélection dans ce cas.
-    local cost_insufficient = state.energy < def.cost
+    local cost_insufficient = state.energy < Combat.effective_cost(owner, def)
     local mana_insufficient = def.mana_cost and (not owner or (owner.mana or 0) < def.mana_cost)
     -- Voile gris (2026-08-24, demande explicite) : le propriétaire est vaincu,
     -- cette carte ne redeviendra jouable à aucun prix ce combat-ci -- signal
@@ -1460,12 +1503,20 @@ local function tooltip_lines(controller)
     local lines = {}
     local desc = Heroes.class_description[hero.class_id]
     if desc then lines[#lines + 1] = desc end
-    -- Bénédiction du Temple (2026-08-28, demande explicite) : juste après la
-    -- description de classe, avant les statuts de combat -- c'est un effet
-    -- permanent du run, pas un statut temporaire (voir active_status_lines).
+    -- Bénédiction/malédiction du Temple (2026-08-28/29, demande explicite) :
+    -- juste après la description de classe, avant les statuts de combat --
+    -- ce sont des effets permanents du run, pas des statuts temporaires (voir
+    -- active_status_lines). "Le descriptif s'ajoute à l'infobulle de
+    -- l'aventurier" (2026-08-29) : ni l'un ni l'autre n'a de badge cliquable
+    -- séparé, cette ligne EST leur seule explication en jeu (voir aussi le
+    -- badge sur le cadre, draw_hero, qui pointe ici).
     if hero.blessing then
       local blessing = Temple.by_id(hero.blessing)
       if blessing then lines[#lines + 1] = blessing.name .. " — " .. blessing.desc end
+    end
+    if hero.curse then
+      local curse = Temple.by_id(hero.curse)
+      if curse then lines[#lines + 1] = curse.name .. " — " .. curse.desc end
     end
     for _, l in ipairs(active_status_lines(hero)) do lines[#lines + 1] = l end
     return hero.name, lines
@@ -1521,6 +1572,12 @@ local function tooltip_lines(controller)
   elseif h.kind == "end_turn" then
     -- 2026-08-27, demande explicite.
     return "Fin de tour", { "Les cartes restantes en main seront défaussées et cela passe au tour des ennemis." }
+  elseif h.kind == "temple_effect" then
+    -- Écran "Le Temple" (2026-08-29, demande explicite -- "seul le titre
+    -- apparait sous chaque statue... il faut donc ajouter le '?'
+    -- conventionnel") : le descriptif complet vit UNIQUEMENT ici.
+    local effect = h.target
+    return effect.name, { effect.desc }
   end
   return nil
 end
@@ -2009,65 +2066,72 @@ local function draw_forge(controller)
   end
 end
 
---- Statue du Temple, placeholder procédural (2026-08-28 -- "image à ajouter",
--- aucune génération d'assets IA possible dans cet environnement : pas de
--- .env/identifiants Cloudflare ici, voir tools/asset-manifest.js pour
--- l'entrée à générer plus tard sur un poste qui en dispose) : un pot
--- volontairement irrégulier (contour à 8 points non symétrique, "difforme")
--- surmonté d'une fleur simple (tige + 6 pétales + coeur) -- juste de quoi
--- donner un point focal reconnaissable tant que le vrai sprite n'existe pas.
-local function draw_temple_statue(cx, cy)
-  local pot = {
-    cx - 34, cy + 46, cx - 40, cy + 10, cx - 26, cy - 4, cx - 30, cy - 30,
-    cx + 24, cy - 34, cx + 32, cy - 6, cx + 42, cy + 14, cx + 30, cy + 46,
-  }
-  set(Theme.panel_light)
-  love.graphics.polygon("fill", pot)
-  set(Theme.black); love.graphics.setLineWidth(2)
-  love.graphics.polygon("line", pot)
-  love.graphics.setLineWidth(1)
-  set(Theme.heal)
-  love.graphics.rectangle("fill", cx - 4, cy - 70, 8, 40)
-  local petal_colors = { Theme.accent, Theme.hp, Theme.energy }
-  for i = 0, 5 do
-    local angle = (i / 6) * math.pi * 2
-    set(petal_colors[(i % #petal_colors) + 1])
-    love.graphics.circle("fill", cx + math.cos(angle) * 16, cy - 78 + math.sin(angle) * 16, 10)
-  end
-  set(Theme.accent)
-  love.graphics.circle("fill", cx, cy - 78, 9)
-end
-
---- Écran "Le Temple" (2026-08-28, demande explicite) : les 4 aventuriers
--- devant la statue (ci-dessus), le joueur clique celui qui reçoit LA
--- bénédiction déjà tirée (voir Controller:enter_temple_screen -- un seul
--- tirage à l'entrée sur l'écran, jamais reroll par clic). Aucun aventurier
--- éligible (tous déjà bénis) -> message + "Passer", même principe que
--- draw_forge à 0 choix.
+--- Écran "Le Temple" (2026-08-29, refonte complète -- demande explicite,
+-- remplace la statue unique "pot difforme + fleur" par une statue PAR EFFET
+-- proposé -- voir Icons.draw_status("temple_blessing"/"temple_curse")) :
+-- jusqu'à 3 statues d'effet (toujours du même type, bénédiction OU
+-- malédiction -- tiré une fois à l'entrée sur l'écran, voir
+-- Controller:enter_temple_screen) en ligne au-dessus des 4 aventuriers.
+-- Choix obligatoire ("il ne peut pas ne pas choisir") : aucun "Passer" sur
+-- cet écran -- le joueur clique 1 statue ET 1 aventurier, dans l'ordre qu'il
+-- veut, puis confirme (voir Controller:choose_temple_effect/
+-- choose_temple_hero/confirm_temple_choice). Seul le TITRE de chaque effet
+-- apparaît sous sa statue (2026-08-29, demande explicite) : le descriptif
+-- complet est dans l'infobulle au survol (le "?" conventionnel).
 local function draw_temple(controller)
   local t = controller.temple
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
-  text("Le Temple", 0, 60, W, 24, Theme.text)
-  draw_temple_statue(W / 2, 200)
+  local type_label = t.type == "blessing" and "bénédiction" or "malédiction"
+  local icon_key = t.type == "blessing" and "temple_blessing" or "temple_curse"
+  text("Le Temple", 0, 26, W, 20, Theme.text)
 
-  if not t.blessing then
-    text("Tous vos aventuriers sont déjà bénis.", 0, 250, W, 12, Theme.muted)
-    local b = View.temple_skip_button
-    set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
-    set(Theme.bg); text(b.label, b.x, b.y + 14, b.w, 14, Theme.bg)
-    return
+  local anim = controller.temple_choice_anim
+  local effect_rects = View.temple_effect_rects(controller)
+  for i, effect in ipairs(t.choices) do
+    local r = effect_rects[i]
+    local color = TEMPLE_STATUE_COLORS[effect.color] or Theme.accent
+    local selected = t.chosen_effect_index == i
+    local alpha = 1
+    if anim and anim.chosen_index ~= i then
+      local p = math.min(1, anim.t / (controller.temple_choice_anim_duration or 1))
+      alpha = 1 - p
+    end
+    if alpha > 0 then
+      set(Theme.panel_light, alpha)
+      love.graphics.rectangle("fill", r.x, r.y, r.w, r.h, 10, 10)
+      set(selected and Theme.accent or color, alpha)
+      love.graphics.setLineWidth(selected and 4 or 2)
+      love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
+      love.graphics.setLineWidth(1)
+      Icons.draw_status(icon_key, r.x + r.w / 2, r.y + 55, 38, color, alpha)
+      set(Theme.text, alpha)
+      text(effect.name, r.x + 4, r.y + r.h - 28, r.w - 8, 12, Theme.text)
+      if not anim then
+        love.graphics.push()
+        love.graphics.translate(r.x, r.y)
+        draw_tooltip_hint(r.w, r.h, Theme.text)
+        love.graphics.pop()
+      end
+    end
   end
 
-  text(t.blessing.name .. " — " .. t.blessing.desc, 0, 250, W, 12, Theme.muted)
-  text("Choisis l'aventurier qui recevra cette bénédiction.", 0, 268, W, 11, Theme.muted)
+  if anim then
+    local hero
+    for _, h in ipairs(t.eligible) do if h.id == t.chosen_hero_id then hero = h end end
+    text("Bonne chance, " .. (hero and hero.name or "?") .. " !", 0, TEMPLE_EFFECT_Y + TEMPLE_EFFECT_H + 14, W, 13, Theme.accent)
+  else
+    text("Choisis l'élu de cette " .. type_label .. " !", 0, TEMPLE_EFFECT_Y + TEMPLE_EFFECT_H + 14, W, 12, Theme.muted)
+  end
 
-  local rects = View.temple_hero_rects(controller)
+  local hero_rects = View.temple_hero_rects(controller)
   for _, h in ipairs(controller.state.heroes) do
-    local r = rects[h.id]
-    local eligible = h.hp > 0 and not h.blessing
+    local r = hero_rects[h.id]
+    local eligible = false
+    for _, e in ipairs(t.eligible) do if e.id == h.id then eligible = true end end
+    local selected = t.chosen_hero_id == h.id
     panel(r.x, r.y, r.w, r.h, eligible and Theme.panel_light or Theme.panel)
-    set(eligible and Theme.accent or Theme.muted)
-    love.graphics.setLineWidth(eligible and 3 or 2)
+    set(selected and Theme.accent or (eligible and Theme.accent or Theme.muted))
+    love.graphics.setLineWidth(selected and 4 or 2)
     love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
     love.graphics.setLineWidth(1)
     local portrait_size = 70
@@ -2078,9 +2142,17 @@ local function draw_temple(controller)
     name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
     if h.hp <= 0 then
       text("Mort", r.x, r.y + 112, r.w, 11, Theme.muted)
-    elseif h.blessing then
-      text("Déjà béni", r.x, r.y + 112, r.w, 11, Theme.muted)
+    elseif not eligible then
+      text(t.type == "blessing" and "Déjà béni" or "Déjà maudit", r.x, r.y + 112, r.w, 11, Theme.muted)
     end
+  end
+
+  if not anim then
+    local b = View.temple_confirm_button
+    local can_confirm = t.chosen_effect_index and t.chosen_hero_id
+    set(can_confirm and Theme.accent or Theme.panel_light)
+    love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
+    text(b.label, b.x, b.y + 14, b.w, 14, can_confirm and Theme.bg or Theme.muted)
   end
 end
 

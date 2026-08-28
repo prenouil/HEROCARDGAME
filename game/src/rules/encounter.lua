@@ -130,6 +130,13 @@ end
 -- QUE la durée (1 stack perdu par tour, voir Game.start_turn), pas l'ampleur
 -- du bonus. Comme Discrétion, ne joue qu'en mode "random", après le filtre
 -- Camouflé (un héros Camouflé reste intouchable même en pleine Provocation).
+--
+-- "Le Martyr" (2026-08-29, malédiction du Temple -- hero.targeting_bonus) :
+-- même formule et même bonus (+50%) que Provocation, mais PERMANENT (pas de
+-- décroissance -- copié une seule fois depuis Temple.effects à l'entrée en
+-- combat, voir Game.apply_combat_start_temple_effects) et cumulable AVEC
+-- Provocation si jamais le même héros porte les deux (×1.5 ×1.5, jamais
+-- plafonné -- pas de raison de les rendre exclusifs l'un de l'autre).
 function Encounter.pick_hero_target(state, mode, rng)
   local alive = Combat.living_heroes(state)
   if #alive == 0 then return nil end
@@ -148,6 +155,7 @@ function Encounter.pick_hero_target(state, mode, rng)
   for i, h in ipairs(alive) do
     local w = math.max(0, 1 - 0.1 * (h.discretion or 0))
     if (h.provocation or 0) > 0 then w = w * 1.5 end
+    if h.targeting_bonus then w = w * (1 + h.targeting_bonus) end
     weights[i] = w
     total_weight = total_weight + w
   end

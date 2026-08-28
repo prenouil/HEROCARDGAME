@@ -357,6 +357,38 @@ describe("Game.decay_end_of_turn_statuses (bug signalé 2026-08-24 : Vulnérabil
     assert.equal(0, enemy.incapacite)
     assert.equal(0, enemy.vulnerabilite)
   end)
+
+  -- Inspiration/Encore (2026-08-29, Barde) : décroissance de fin de tour --
+  -- Inspiration -1 automatique SAUF protection active ("Dernier rappel",
+  -- hero.inspiration_shielded_turns) ; Encore toujours effacé s'il n'a servi
+  -- à aucune carte jouée d'ici là (voir Game.resolve_pending, seul autre
+  -- endroit qui le consomme).
+  it("Inspiration décroît de 1 automatiquement en fin de tour", function()
+    local state = Game.new_state()
+    state.heroes = { { id = "h1", name = "h1", hp = 20, max_hp = 20, inspiration = 3, inspiration_shielded_turns = 0 } }
+    state.enemies = {}
+    Game.decay_end_of_turn_statuses(state)
+    assert.equal(2, state.heroes[1].inspiration)
+  end)
+
+  it("'Dernier rappel' (inspiration_shielded_turns > 0) bloque la décroissance auto, pas la valeur elle-même", function()
+    local state = Game.new_state()
+    state.heroes = { { id = "h1", name = "h1", hp = 20, max_hp = 20, inspiration = 3, inspiration_shielded_turns = 1 } }
+    state.enemies = {}
+    Game.decay_end_of_turn_statuses(state)
+    assert.equal(3, state.heroes[1].inspiration) -- protégé ce tour
+    assert.equal(0, state.heroes[1].inspiration_shielded_turns)
+    Game.decay_end_of_turn_statuses(state)
+    assert.equal(2, state.heroes[1].inspiration) -- protection épuisée, décroît normalement au tour suivant
+  end)
+
+  it("Encore (encore_extra_plays) est toujours effacé en fin de tour, utilisé ou non", function()
+    local state = Game.new_state()
+    state.heroes = { { id = "h1", name = "h1", hp = 20, max_hp = 20, encore_extra_plays = 2 } }
+    state.enemies = {}
+    Game.decay_end_of_turn_statuses(state)
+    assert.is_nil(state.heroes[1].encore_extra_plays)
+  end)
 end)
 
 -- Provocation (2026-08-28, statut du Paladin) : décroît via Game.start_turn,
@@ -418,6 +450,35 @@ describe("Game.schedule_shield / Game.start_turn : boucliers programmés", funct
   end)
 end)
 
+-- Servant d'os (2026-08-29, Nécromancien) : voir Game.schedule_damage,
+-- consommé par Game.start_turn -- même principe que schedule_shield
+-- ci-dessus, mais cible un ennemi ALÉATOIRE tiré au moment du déclenchement.
+describe("Game.schedule_damage / Game.start_turn : dégâts programmés (Servant d'os)", function()
+  it("inflige les dégâts au bon début de tour, à un ennemi vivant", function()
+    local state = Game.new_state()
+    state.rng = Game.new_rng_streams(1)
+    local hero = { id = "h1", name = "h1", hp = 18, max_hp = 18, defense = 0, scheduled_damages = {} }
+    local enemy = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    state.heroes = { hero }
+    state.enemies = { enemy }
+    Game.schedule_damage(hero, 5, 1)
+    Game.start_turn(state) -- turns_left 1 -> 0 : déclenché CE tour
+    assert.equal(15, enemy.hp) -- 20 - 5 brut
+    assert.equal(0, #hero.scheduled_damages)
+  end)
+
+  it("ne fait rien (ni erreur) si plus aucun ennemi n'est vivant", function()
+    local state = Game.new_state()
+    state.rng = Game.new_rng_streams(1)
+    local hero = { id = "h1", name = "h1", hp = 18, max_hp = 18, defense = 0, scheduled_damages = {} }
+    state.heroes = { hero }
+    state.enemies = { { id = "e1", name = "e1", hp = 0, max_hp = 20, defense = 0 } }
+    Game.schedule_damage(hero, 5, 1)
+    Game.start_turn(state)
+    assert.equal(0, #hero.scheduled_damages) -- l'entrée est quand même consommée
+  end)
+end)
+
 -- "Amnésie" (2026-08-28, carte Clairvoyance du Paladin) : voir
 -- Game.finish_card (routage) et Game.start_next_combat (retour au combat suivant).
 describe("Amnésie : Game.finish_card route vers state.exhausted, jamais la défausse", function()
@@ -441,6 +502,71 @@ describe("Amnésie : Game.finish_card route vers state.exhausted, jamais la déf
     Game.finish_card(state, state.pending, { card_def = normal_def })
     assert.equal(1, #state.discard)
     assert.equal(0, #state.exhausted)
+  end)
+
+  it("une carte d'un aventurier 'Amnésique' (malédiction) part aussi en state.exhausted, même sans le tag sur la carte", function()
+    local state = Game.new_state()
+    local normal_def = { code = "test-normal", cats = { "melee" } }
+    local cursed_hero = { id = "h1", force_amnesie = true }
+    state.hand = { { uid = 1, def = normal_def } }
+    state.pending = { uid = 1 }
+    Game.finish_card(state, state.pending, { card_def = normal_def, hero = cursed_hero })
+    assert.equal(0, #state.discard)
+    assert.equal(1, #state.exhausted)
+  end)
+end)
+
+-- Effets de Temple appliqués à l'entrée en combat (2026-08-29, refonte
+-- complète -- liste fournie) : Game.start_next_combat rebâtit chaque héros
+-- via carried_hero -> apply_combat_start_temple_effects (fonctions locales,
+-- testées ici seulement à travers ce point d'entrée public, même principe
+-- que les autres tests de ce fichier qui pilotent Game directement).
+describe("Effets de Temple à l'entrée en combat (2026-08-29)", function()
+  local function make_run_state()
+    local state = Game.new_state()
+    Game.reset_run(state, 1)
+    return state
+  end
+
+  it("'La Guérisseuse' (soin 5) et 'Le Maudit' (perte 2) s'appliquent au bon héros, indépendamment", function()
+    local state = make_run_state()
+    local healed = state.heroes[1]
+    local cursed = state.heroes[2]
+    healed.blessing = "guerisseuse"
+    healed.hp = healed.max_hp - 10
+    cursed.curse = "maudit"
+    local hp_before = cursed.hp
+    Game.start_next_combat(state)
+    local new_healed, new_cursed = state.heroes[1], state.heroes[2]
+    assert.equal(math.min(healed.max_hp, healed.hp + 5), new_healed.hp)
+    assert.equal(5, new_healed.combat_start_heal)
+    assert.equal(hp_before - 2, new_cursed.hp)
+    assert.equal(2, new_cursed.combat_start_curse_damage)
+  end)
+
+  it("'Le Maudit' ne peut jamais tuer par un simple tic passif (plancher à 1 PV)", function()
+    local state = make_run_state()
+    local cursed = state.heroes[1]
+    cursed.curse = "maudit"
+    cursed.hp = 2 -- mourrait à -0 sans le plancher
+    Game.start_next_combat(state)
+    assert.equal(1, state.heroes[1].hp)
+  end)
+
+  it("'Le Puissant' (statut combat_start_status) donne bien Puissance 3", function()
+    local state = make_run_state()
+    state.heroes[1].blessing = "puissant"
+    Game.start_next_combat(state)
+    assert.equal(3, state.heroes[1].puissance)
+  end)
+
+  it("les champs miroir (thorns, card_cost_delta, ...) sont recopiés à CHAQUE combat, jamais figés une fois pour toutes", function()
+    local state = make_run_state()
+    state.heroes[1].blessing = "rancunier"
+    state.heroes[2].curse = "corrompu"
+    Game.start_next_combat(state)
+    assert.equal(2, state.heroes[1].thorns)
+    assert.equal(1, state.heroes[2].card_cost_delta)
   end)
 end)
 
@@ -470,6 +596,65 @@ describe("Flux de jeu : jouer une carte", function()
     assert.equal(0, #state.hand)
     assert.equal(1, #state.discard)
     assert.is_nil(state.pending)
+  end)
+end)
+
+-- Coût variable en Corruption (2026-08-29, Nécromancien -- "1 (+X, 0-N
+-- Corruption)") : Game.resolve_pending calcule et déduit X, jamais un choix
+-- du joueur -- voir def.corruption_cost_cap/ctx.corruption_spent.
+describe("Game.resolve_pending : coût variable en Corruption (2026-08-29)", function()
+  it("déduit min(corruption disponible, plafond de la carte), jamais plus", function()
+    local state = Game.new_state()
+    local hero = { id = "h1", class_id = "necromancien", name = "h1", hp = 10, max_hp = 20, corruption = 5, defense = 0 }
+    state.heroes = { hero }
+    local enemy = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    state.enemies = { enemy }
+    state.energy = 3
+    local rite = Cards.by_code("rite-mineur") -- cout 1 energie, plafond 3 Corruption
+    state.hand = { { uid = 1, def = rite } }
+    Game.select_card(state, 1)
+    Game.resolve_pending(state, "enemy", enemy.id)
+    assert.equal(2, hero.corruption) -- 5 - min(5,3) = 2
+    assert.equal(16, hero.hp) -- 10 + 2*3 (soin, X=3)
+    assert.equal(14, enemy.hp) -- 20 - 6 (dégâts fixes)
+  end)
+
+  it("X plafonne à ce qui est disponible si la Corruption est sous le plafond de la carte", function()
+    local state = Game.new_state()
+    local hero = { id = "h1", class_id = "necromancien", name = "h1", hp = 10, max_hp = 20, corruption = 1, defense = 0 }
+    state.heroes = { hero }
+    local enemy = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    state.enemies = { enemy }
+    state.energy = 3
+    local rite = Cards.by_code("rite-mineur")
+    state.hand = { { uid = 1, def = rite } }
+    Game.select_card(state, 1)
+    Game.resolve_pending(state, "enemy", enemy.id)
+    assert.equal(0, hero.corruption) -- 1 - min(1,3) = 0
+    assert.equal(12, hero.hp) -- 10 + 2*1 (X=1)
+  end)
+end)
+
+-- "Encore" (2026-08-29, carte "Bis" du Barde) : la carte suivante jouée PAR
+-- LA MÊME cible se déclenche N fois de plus -- consommé par
+-- Game.resolve_pending, quelle que soit la classe de cette carte suivante.
+describe("Game.resolve_pending : Encore (hero.encore_extra_plays)", function()
+  it("rejoue l'effet de la PROCHAINE carte jouée par le porteur autant de fois que la charge l'indique", function()
+    local state = Game.new_state()
+    local hero = {
+      id = "h1", class_id = "guerrier", name = "h1", hp = 18, max_hp = 18, defense = 0,
+      encore_extra_plays = 2, -- 2 déclenchements EN PLUS => joué 3 fois au total
+    }
+    state.heroes = { hero }
+    local enemy = { id = "e1", name = "e1", hp = 100, max_hp = 100, defense = 0 }
+    state.enemies = { enemy }
+    state.energy = 3
+    local coup_direct = Cards.by_code("coup-direct-guerrier") -- coût 0, 4 dégâts
+    state.hand = { { uid = 1, def = coup_direct } }
+    Game.select_card(state, 1)
+    Game.resolve_pending(state, "enemy", enemy.id)
+    assert.equal(88, enemy.hp) -- 100 - 4*3 (jouée 3 fois au total)
+    assert.is_nil(hero.encore_extra_plays) -- consommée
   end)
 end)
 

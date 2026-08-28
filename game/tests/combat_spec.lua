@@ -84,6 +84,47 @@ describe("Combat.deal_damage", function()
     Combat.deal_damage(state, nil, target, 4, "physique", nil)
     assert.is_nil(target.discretion)
   end)
+
+  -- "La Renaissante" (2026-08-29, bénédiction du Temple -- hero.death_ward,
+  -- "1 seule fois" par combat).
+  it("death_ward sauve la cible à 1 PV puis se consomme (jamais 2 fois)", function()
+    local state = make_state()
+    local target = make_hero("h1", { hp = 5, death_ward = true })
+    Combat.deal_damage(state, nil, target, 20, "physique", nil, { brut = true })
+    assert.equal(1, target.hp)
+    assert.is_false(target.death_ward)
+    Combat.deal_damage(state, nil, target, 20, "physique", nil, { brut = true })
+    assert.is_true(target.hp <= 0) -- 2e mort : plus de garde-fou disponible
+  end)
+
+  -- "Le Rancunier" (2026-08-29, bénédiction -- hero.thorns) : renvoie à
+  -- l'attaquant, jamais à soi-même.
+  it("thorns renvoie le montant déclaré à l'attaquant (opts.source_unit)", function()
+    local state = make_state()
+    local target = make_hero("h1", { thorns = 2 })
+    local attacker = make_enemy("e1")
+    Combat.deal_damage(state, nil, target, 4, "physique", nil, { source_unit = attacker })
+    assert.equal(18, attacker.hp) -- 20 - 2, ignore la défense (brut)
+  end)
+
+  it("thorns ne se déclenche pas sur un coup entièrement absorbé (to_hp == 0)", function()
+    local state = make_state()
+    local target = make_hero("h1", { thorns = 2, defense = 10 })
+    local attacker = make_enemy("e1")
+    Combat.deal_damage(state, nil, target, 4, "physique", nil, { source_unit = attacker })
+    assert.equal(20, attacker.hp) -- inchangé
+  end)
+
+  -- "Le Blessé" (2026-08-29, malédiction -- hero.self_damage_on_hit) : se
+  -- blesse en attaquant un ENNEMI, jamais sur un allié ou un coup manqué.
+  it("self_damage_on_hit blesse le héros quand il inflige de vrais dégâts à un ennemi", function()
+    local state = make_state()
+    local hero = make_hero("h1", { self_damage_on_hit = 1 })
+    local enemy = make_enemy("e1")
+    state.enemies = { enemy }
+    Combat.deal_damage(state, hero, enemy, 4, "physique", nil)
+    assert.equal(19, hero.hp) -- 20 - 1
+  end)
 end)
 
 describe("Combat.damage_multiplier : sensibilité au feu de l'Homme Arbre (2026-08-24)", function()
@@ -139,7 +180,31 @@ describe("Combat.apply_status", function()
   end)
 end)
 
+-- "Le Corrompu" (2026-08-29, malédiction -- hero.card_cost_delta).
+describe("Combat.effective_cost", function()
+  it("ajoute card_cost_delta au coût de base", function()
+    local hero = make_hero("h1", { card_cost_delta = 1 })
+    assert.equal(3, Combat.effective_cost(hero, { cost = 2 }))
+  end)
+
+  it("ne change rien pour un héros non maudit (card_cost_delta == nil)", function()
+    local hero = make_hero("h1")
+    assert.equal(2, Combat.effective_cost(hero, { cost = 2 }))
+  end)
+
+  it("gère un hero nil sans erreur (def.cost brut)", function()
+    assert.equal(2, Combat.effective_cost(nil, { cost = 2 }))
+  end)
+end)
+
 describe("Combat.can_play", function()
+  it("refuse le coût EFFECTIF (Le Corrompu, +1) même si le coût de base serait payable", function()
+    local state = make_state({ energy = 2 })
+    local hero = make_hero("h1", { card_cost_delta = 1 })
+    local pending = { def = { cost = 2, requires_camouflage = false } }
+    assert.is_false(Combat.can_play(state, hero, pending))
+  end)
+
   it("refuse si la réserve d'énergie globale (state.energy) est sous le coût de la carte", function()
     local state = make_state({ energy = 2 })
     local hero = make_hero("h1")
@@ -213,5 +278,85 @@ describe("Combat.enemy_targeting", function()
       make_enemy("e2", { hp = 10, next_move = { kind = "heal-self" }, target_hero_id = "h1" }),
     }
     assert.is_nil(Combat.enemy_targeting(state, hero))
+  end)
+end)
+
+-- Inspiration (2026-08-29, statut GÉNÉRIQUE du Barde -- hero.inspiration, voir
+-- game.lua/cards.lua) : +6 flat au PREMIER effet de dégâts/soin/bouclier
+-- déclenché en jouant une carte, consommé une seule fois par carte (garde-fou
+-- porté par `ctx`, partagé entre tous les appels au sein d'un même effect()).
+describe("Inspiration (consume_inspiration, combat.lua)", function()
+  it("Combat.deal_damage ajoute +6 flat si ctx.hero a de l'Inspiration, et consomme 1 charge", function()
+    local state = make_state()
+    local hero = make_hero("h1", { inspiration = 2 })
+    local target = make_enemy("e1")
+    local ctx = { state = state, hero = hero, target = target }
+    Combat.deal_damage(state, hero, target, 5, "physique", ctx)
+    assert.equal(20 - (5 + 6), target.hp)
+    assert.equal(1, hero.inspiration) -- 1 charge consommée
+  end)
+
+  it("ne s'applique qu'UNE fois par carte, même si plusieurs cibles/effets dans le même ctx", function()
+    local state = make_state()
+    local hero = make_hero("h1", { inspiration = 1 })
+    local target1, target2 = make_enemy("e1"), make_enemy("e2")
+    local ctx = { state = state, hero = hero }
+    Combat.deal_damage(state, hero, target1, 5, "physique", ctx)
+    Combat.deal_damage(state, hero, target2, 5, "physique", ctx)
+    assert.equal(20 - (5 + 6), target1.hp) -- le 1er appel prend le bonus
+    assert.equal(20 - 5, target2.hp) -- le 2e n'a plus rien à consommer
+    assert.equal(0, hero.inspiration)
+  end)
+
+  it("ne s'applique jamais sans ctx (attaque ennemie, épines, dégâts hors carte)", function()
+    local state = make_state()
+    local target = make_hero("h1", { inspiration = 3 })
+    Combat.deal_damage(state, nil, target, 5, "physique", nil)
+    assert.equal(15, target.hp) -- 20 - 5, aucun bonus
+    assert.equal(3, target.inspiration) -- rien consommé
+  end)
+
+  it("Combat.grant_heal/grant_defense appliquent aussi le bonus via ctx (synergie inter-classes)", function()
+    local state = make_state()
+    local hero = make_hero("h1", { inspiration = 1 })
+    local ctx = { state = state, hero = hero }
+    local ally = make_hero("h2")
+    Combat.grant_heal(ally, 4, ctx)
+    assert.equal(20, ally.hp) -- déjà au max, mais le calcul interne est 4+6=10 (plafonné)
+    assert.equal(0, hero.inspiration)
+
+    local hero2 = make_hero("h3", { inspiration = 1 })
+    local ctx2 = { state = state, hero = hero2 }
+    local target = make_hero("h4", { defense = 0 })
+    Combat.grant_defense(target, 4, ctx2)
+    assert.equal(10, target.defense) -- 4 + 6
+    assert.equal(0, hero2.inspiration)
+  end)
+end)
+
+-- Corruption (2026-08-29, ressource propre au Nécromancien -- hero.corruption,
+-- voir game.lua) : +1 par VRAIE perte de PV, dégâts ennemis OU auto-infligés
+-- (les 2 passent par Combat.deal_damage, voir cards.lua -- Sceau de
+-- faiblesse/Pacte funeste).
+describe("Corruption (gain automatique dans Combat.deal_damage)", function()
+  it("gagne 1 Corruption par PV réellement perdu", function()
+    local state = make_state()
+    local target = make_hero("h1", { corruption = 0, defense = 0 })
+    Combat.deal_damage(state, nil, target, 7, "physique", nil)
+    assert.equal(7, target.corruption)
+  end)
+
+  it("ne gagne rien si les dégâts sont entièrement absorbés par le Bouclier", function()
+    local state = make_state()
+    local target = make_hero("h1", { corruption = 0, defense = 10 })
+    Combat.deal_damage(state, nil, target, 7, "physique", nil)
+    assert.equal(0, target.corruption)
+  end)
+
+  it("n'affecte jamais une unité sans champ corruption (toute autre classe)", function()
+    local state = make_state()
+    local target = make_hero("h1") -- pas de champ corruption
+    Combat.deal_damage(state, nil, target, 7, "physique", nil)
+    assert.is_nil(target.corruption)
   end)
 end)

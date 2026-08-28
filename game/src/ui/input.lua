@@ -79,14 +79,17 @@ local function post_combat_click(controller, x, y)
   end
   if controller.screen == "temple" then
     local t = controller.temple
-    if t and t.blessing then
-      local rects = View.temple_hero_rects(controller)
+    if t and not t.resolved then
+      local effect_rects = View.temple_effect_rects(controller)
+      for i, r in ipairs(effect_rects) do
+        if View.point_in(r, x, y) then controller:choose_temple_effect(i); return true end
+      end
+      local hero_rects = View.temple_hero_rects(controller)
       for _, h in ipairs(t.eligible) do
-        local r = rects[h.id]
+        local r = hero_rects[h.id]
         if r and View.point_in(r, x, y) then controller:choose_temple_hero(h.id); return true end
       end
-    elseif t and View.point_in(View.temple_skip_button, x, y) then
-      controller:choose_temple_skip()
+      if View.point_in(View.temple_confirm_button, x, y) then controller:confirm_temple_choice() end
     end
     return true
   end
@@ -266,12 +269,16 @@ local function post_combat_hovering(controller, x, y)
   end
   if controller.screen == "temple" then
     local t = controller.temple
-    if not t then return false end
-    if not t.blessing then return View.point_in(View.temple_skip_button, x, y) end
-    local rects = View.temple_hero_rects(controller)
+    if not t or t.resolved then return false end
+    local effect_rects = View.temple_effect_rects(controller)
+    for _, r in ipairs(effect_rects) do if View.point_in(r, x, y) then return true end end
+    local hero_rects = View.temple_hero_rects(controller)
     for _, h in ipairs(t.eligible) do
-      local r = rects[h.id]
+      local r = hero_rects[h.id]
       if r and View.point_in(r, x, y) then return true end
+    end
+    if t.chosen_effect_index and t.chosen_hero_id and View.point_in(View.temple_confirm_button, x, y) then
+      return true
     end
     return false
   end
@@ -414,12 +421,21 @@ function Input.mousemoved(controller, x, y)
     return
   end
 
-  -- Écran "temple" (2026-08-28) : infobulle aventurier sur chaque portrait
-  -- (description de classe + statuts + la nouvelle ligne de bénédiction, voir
-  -- tooltip_lines dans view.lua) -- même souci de cohérence, un aventurier
-  -- mort/déjà béni reste survolable pour l'infobulle même s'il n'est pas
-  -- cliquable (voir post_combat_hovering, plus restrictif).
+  -- Écran "temple" (2026-08-28/29) : infobulle sur chaque statue (nom +
+  -- descriptif complet -- "seul le titre apparait sous chaque statue", voir
+  -- tooltip_lines/h.kind == "temple_effect" dans view.lua) ET sur chaque
+  -- portrait d'aventurier (description de classe + statuts + la ligne de
+  -- bénédiction/malédiction) -- un aventurier mort/déjà porteur reste
+  -- survolable pour l'infobulle même s'il n'est pas cliquable (voir
+  -- post_combat_hovering, plus restrictif).
   if controller.screen == "temple" then
+    local t = controller.temple
+    if t then
+      local effect_rects = View.temple_effect_rects(controller)
+      for i, r in ipairs(effect_rects) do
+        if View.point_in(r, x, y) then controller:set_hover("temple_effect", t.choices[i]); return end
+      end
+    end
     local rects = View.temple_hero_rects(controller)
     local hero_id = find_rect(rects, x, y)
     if hero_id then controller:set_hover("hero", hero_id); return end

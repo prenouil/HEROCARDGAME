@@ -26,6 +26,8 @@ Heroes.class_icon = {
   paladin = "\u{1F6E1}\u{FE0F}",
   mage = "\u{1F52E}",
   assassin = "\u{1F5E1}\u{FE0F}",
+  necromancien = "\u{1F480}",
+  barde = "\u{1F3B5}",
 }
 
 Heroes.class_label = {
@@ -34,6 +36,25 @@ Heroes.class_label = {
   paladin = "PAL",
   mage = "MAG",
   assassin = "ASS",
+  necromancien = "NEC",
+  barde = "BAR",
+}
+
+-- Nécromancien/Barde (2026-08-29, 2 classes conçues avec agent_content --
+-- design finalisé après plusieurs tours de retours, voir
+-- content/memory/MEMORY.md) : def complètes, codées et testées (voir
+-- tests/game_spec.lua/combat_spec.lua), mais délibérément PAS ajoutées à
+-- `Heroes.defs` ci-dessus (2026-08-29, décision explicite -- `Heroes.defs`
+-- EST le roster actif de chaque run, aucune sélection d'équipe n'existe
+-- encore dans le jeu ; les ajouter là ferait passer TOUTE run de 4 à 6 héros
+-- sans que ce soit tranché). Table à part, jamais lue par Game.reset_run/
+-- Game.start_boss_test -- seul point d'entrée pour ces defs aujourd'hui :
+-- les tests, qui construisent leurs propres héros directement depuis cette
+-- table. À fusionner dans Heroes.defs (ou une future logique de sélection)
+-- le jour où le roster est tranché -- pas avant.
+Heroes.pending_defs = {
+  { id = "necromancien", class_id = "necromancien", name = "Nécromancien", icon = "\u{1F480}", label = "NEC", max_hp = 24 },
+  { id = "barde", class_id = "barde", name = "Barde", icon = "\u{1F3B5}", label = "BAR", max_hp = 24 },
 }
 
 -- Nom complet par classe (2026-08-20, demande explicite -- indiquer sur
@@ -45,6 +66,8 @@ Heroes.class_name = {
   paladin = "Paladin",
   mage = "Mage",
   assassin = "Assassin",
+  necromancien = "Nécromancien",
+  barde = "Barde",
 }
 
 -- Description de classe (2026-08-24, demande explicite -- affichée en tête de
@@ -63,6 +86,14 @@ Heroes.class_description = {
     .. "- +5 s'il passe son tour sans agir.\n"
     .. "Devient Camouflé avec 10 de Discrétion\n"
     .. "Discrétion revient à 0 après avoir agi",
+  necromancien = "Dépense ses propres PV pour amasser de la Corruption, puis la libère dans des rituels :\n"
+    .. "- +1 Corruption par PV perdu (dégâts subis ou PV sacrifiés)\n"
+    .. "- Repart à 0 Corruption à chaque nouveau combat\n"
+    .. "- Certaines cartes en dépensent jusqu'à un plafond pour amplifier leur effet",
+  barde = "Insuffle de l'Inspiration à ses alliés pour amplifier leur prochaine carte, quelle que soit leur classe :\n"
+    .. "- Inspiration : +6 flat au premier effet de dégâts/soin/bouclier du porteur\n"
+    .. "- -1 charge à l'utilisation, -1 automatique en fin de tour\n"
+    .. "- Repart à 0 à chaque nouveau combat",
 }
 
 return Heroes

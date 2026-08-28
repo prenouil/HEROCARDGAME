@@ -81,44 +81,126 @@ local function fresh_hero(def)
     played_card_this_turn = false,
     mana = def.class_id == "mage" and 2 or nil,
     discretion = def.class_id == "assassin" and 0 or nil,
-    -- Bénédiction du Temple (2026-08-28, demande explicite) : nil tant qu'aucune
-    -- n'a été accordée -- voir src/rules/temple.lua (Temple.bless) pour
-    -- l'attribution, et son application ci-dessous dans carried_hero.
-    blessing = nil,
+    -- Corruption (2026-08-29, ressource propre au Nécromancien, voir
+    -- Combat.deal_damage pour le gain automatique par PV perdu) : même
+    -- convention que mana/discretion, nil pour toute autre classe.
+    corruption = def.class_id == "necromancien" and 0 or nil,
+    -- Inspiration/Encore (2026-08-29, statuts GÉNÉRIQUES du Barde -- voir
+    -- consume_inspiration dans combat.lua/Game.resolve_pending) :
+    -- contrairement à mana/discretion, N'IMPORTE QUEL héros peut les porter
+    -- (accordés par une carte Barde à n'importe quel allié) -- initialisés
+    -- pour TOUTE classe, comme puissance/esquive, pas conditionnés à
+    -- class_id == "barde". `inspiration_shielded_turns` ("Dernier rappel") :
+    -- bloque la décroissance auto de fin de tour pour N tours, indépendant de
+    -- la consommation à l'usage.
+    inspiration = 0, inspiration_shielded_turns = 0, encore_extra_plays = nil,
+    -- Servant d'os (Nécromancien) : dégâts "brut" programmés à un ennemi
+    -- ALÉATOIRE tiré au moment où l'entrée se déclenche -- voir
+    -- Game.schedule_damage, même structure que scheduled_shields ci-dessus.
+    scheduled_damages = {},
+    -- Bénédiction/malédiction du Temple (2026-08-28/29, demande explicite) :
+    -- nil tant qu'aucune n'a été accordée -- voir src/rules/temple.lua
+    -- (Temple.assign) pour l'attribution, 2 champs INDÉPENDANTS (un
+    -- aventurier peut cumuler les deux à la fois, voir temple.lua). Tous les
+    -- champs "miroir" en dessous (thorns, card_cost_delta, etc.) sont
+    -- recopiés depuis l'effet actif par
+    -- Game.apply_combat_start_temple_effects à CHAQUE entrée en combat --
+    -- jamais lus directement ailleurs comme "nil au départ", cette fonction
+    -- ne fait qu'exister pour que les champs soient documentés une fois ici.
+    blessing = nil, curse = nil,
+    thorns = nil, card_cost_delta = nil, targeting_bonus = nil, force_amnesie = nil,
+    extra_draw = nil, turn_start_shield = nil, death_ward = nil, reserviste = nil,
+    discard_on_draw_chance = nil,
   }
 end
 
---- `combat_start_heal` (2026-08-28, demande explicite) : montant EFFECTIVEMENT
--- rendu par la bénédiction de soin de cet aventurier à cette entrée en combat
--- précise (peut être < Temple.by_id(...).combat_start_heal si déjà proche du
--- plafond, ou nil si pas de bénédiction/déjà mort/déjà à PV pleins) -- lu et
--- remis à nil par Controller:play_hero_ready_hops (view.lua affiche le flottant
--- vert exact, synchronisé avec le petit saut de CET aventurier). La RÈGLE (le
--- soin lui-même) vit ici, pas dans le contrôleur -- lui ne fait que le retour
--- visuel, jamais recalculé indépendamment.
-local function apply_combat_start_blessing(n)
+--- Retranscrit l'effet de Temple actif de `n` (bénédiction ET malédiction,
+-- indépendamment) en CHAMPS SIMPLES sur le héros -- seul endroit qui
+-- connaisse Temple.effects ; combat.lua/encounter.lua/deck.lua ne lisent
+-- ensuite que ces champs, jamais "Temple"/"blessing"/"curse" directement
+-- (même principe que hero.discretion pour l'Assassin). Appelé à CHAQUE
+-- entrée en combat (fresh_hero n'a jamais d'effet, mais carried_hero si) --
+-- recalcule tout depuis zéro plutôt que de préserver l'ancien état, donc
+-- "1 fois par combat" (death_ward/reserviste) redevient vrai à chaque
+-- nouveau combat sans logique de reset séparée.
+-- `combat_start_heal`/`combat_start_curse_damage` (2026-08-28/29) : montant
+-- EFFECTIVEMENT appliqué à CETTE entrée en combat précise (peut être <
+-- l'effet déclaré si déjà proche du plafond/déjà bas, ou nil si rien à
+-- montrer) -- lus et remis à nil par Controller:play_hero_ready_hops
+-- (view.lua affiche le flottant vert/rouge exact, synchronisé avec le petit
+-- saut de CET aventurier). La RÈGLE vit ici, pas dans le contrôleur.
+local function apply_combat_start_temple_effects(n)
   n.combat_start_heal = nil
-  if not n.blessing or n.hp <= 0 then return end
-  local blessing = Temple.by_id(n.blessing)
-  if not blessing or not blessing.combat_start_heal then return end
-  local before = n.hp
-  n.hp = math.min(n.max_hp, n.hp + blessing.combat_start_heal)
-  local healed = n.hp - before
-  if healed > 0 then n.combat_start_heal = healed end
+  n.combat_start_curse_damage = nil
+  n.thorns = nil; n.card_cost_delta = nil; n.targeting_bonus = nil; n.force_amnesie = nil
+  n.extra_draw = nil; n.turn_start_shield = nil; n.death_ward = nil; n.reserviste = nil
+  n.discard_on_draw_chance = nil
+  if n.hp <= 0 then return end
+
+  local blessing = n.blessing and Temple.by_id(n.blessing)
+  if blessing then
+    if blessing.combat_start_heal then
+      local before = n.hp
+      n.hp = math.min(n.max_hp, n.hp + blessing.combat_start_heal)
+      local healed = n.hp - before
+      if healed > 0 then n.combat_start_heal = healed end
+    end
+    if blessing.combat_start_status then
+      for field, amount in pairs(blessing.combat_start_status) do
+        n[field] = (n[field] or 0) + amount
+      end
+    end
+    n.thorns = blessing.thorns
+    n.extra_draw = blessing.extra_draw
+    n.turn_start_shield = blessing.turn_start_shield
+    n.death_ward = blessing.death_ward or nil
+    n.reserviste = blessing.reserviste or nil
+  end
+
+  local curse = n.curse and Temple.by_id(n.curse)
+  if curse then
+    if curse.combat_start_damage then
+      local before = n.hp
+      n.hp = math.max(1, n.hp - curse.combat_start_damage) -- jamais tué par un simple tic passif
+      local lost = before - n.hp
+      if lost > 0 then n.combat_start_curse_damage = lost end
+    end
+    if curse.combat_start_status then
+      for field, amount in pairs(curse.combat_start_status) do
+        n[field] = (n[field] or 0) + amount
+      end
+    end
+    n.card_cost_delta = curse.card_cost_delta
+    n.targeting_bonus = curse.targeting_bonus
+    n.force_amnesie = curse.force_amnesie or nil
+    n.discard_on_draw_chance = curse.discard_on_draw_chance
+  end
 end
 
 local function carried_hero(h)
   -- Entre deux combats d'un même run, seuls les PV persistent (blessures non
-  -- soignées) ; tout le reste repart à zéro -- SAUF `blessing` (2026-08-28),
-  -- qui dure tout le run une fois accordée par le Temple (voir
-  -- src/rules/temple.lua) : `shallow_copy` la propage déjà telle quelle, rien
-  -- à faire de spécial ici pour ce champ.
+  -- soignées) ; tout le reste repart à zéro -- SAUF `blessing`/`curse`
+  -- (2026-08-28/29), qui durent tout le run une fois accordés par le Temple
+  -- (voir src/rules/temple.lua) : `shallow_copy` les propage déjà tels quels,
+  -- rien à faire de spécial ici pour ces 2 champs.
   local n = shallow_copy(h)
   n.defense = 0; n.esquive = 0; n.camoufle = 0
   n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.saignements = 0
   n.provocation = 0; n.scheduled_shields = {}
   n.played_card_this_turn = false
-  apply_combat_start_blessing(n)
+  -- Inspiration/Encore/Bouclier programmé de Servant d'os (2026-08-29) : des
+  -- statuts de COMBAT comme puissance/provocation ci-dessus, jamais reportés
+  -- d'un combat à l'autre -- Corruption, elle, EST une ressource propre à la
+  -- classe (comme mana/discretion) mais DOIT repartir à 0 à chaque nouveau
+  -- combat (intention de design confirmée explicitement, 2026-08-29 -- "en
+  -- général... les ressources spécifiques sont reset aux débuts de chaque
+  -- combat" -- contrairement au bug déjà connu sur mana/discretion, voir
+  -- reference_reset-ressource-par-combat.md côté agent_content -- Corruption
+  -- ne doit pas hériter du même oubli).
+  n.inspiration = 0; n.inspiration_shielded_turns = 0; n.encore_extra_plays = nil
+  n.scheduled_damages = {}
+  if n.corruption ~= nil then n.corruption = 0 end
+  apply_combat_start_temple_effects(n)
   return n
 end
 
@@ -216,6 +298,18 @@ function Game.new_rng_streams(master_seed)
     forge = Rng.new(master_seed + 4),
     temple = Rng.new(master_seed + 5),
     post_combat = Rng.new(master_seed + 6),
+    -- "Le Maladroit" (2026-08-29, malédiction -- 50% de chance qu'une carte
+    -- piochée soit aussitôt défaussée, voir Game.fill_hand_with_bonus_draws) :
+    -- flux dédié, jamais state.rng.deck (qui pilote l'ORDRE du deck -- un tirage
+    -- de plus ou de moins ici ne doit jamais décaler ce que la pioche aurait
+    -- sorti sans cette malédiction).
+    curse = Rng.new(master_seed + 7),
+    -- Servant d'os (2026-08-29, Nécromancien -- hero.scheduled_damages) : tire
+    -- la cible ALÉATOIRE de chaque dégât programmé qui se déclenche (voir
+    -- Game.start_turn) -- flux dédié, jamais state.rng.encounter/enemy_turn,
+    -- même raison d'être que "curse" ci-dessus (ne jamais décaler un AUTRE
+    -- tirage reproductible pour un contenu qui n'existait pas encore).
+    necro = Rng.new(master_seed + 8),
   }
 end
 
@@ -426,21 +520,116 @@ function Game.schedule_shield(hero, amount, turns_from_now)
   hero.scheduled_shields[#hero.scheduled_shields + 1] = { amount = amount, turns_left = turns_from_now }
 end
 
+--- Programme `amount` dégâts "brut" à un ennemi ALÉATOIRE, `turns_from_now`
+-- débuts de tour plus tard (2026-08-29, carte "Servant d'os", Nécromancien) :
+-- même principe que Game.schedule_shield ci-dessus, mais la cible n'est tirée
+-- qu'AU MOMENT où l'entrée se déclenche (voir Game.start_turn), jamais fixée
+-- ici -- 3 (ou 4, version améliorée) entrées DISTINCTES programmées séparément
+-- par la carte, chacune peut donc toucher un ennemi différent.
+function Game.schedule_damage(hero, amount, turns_from_now)
+  hero.scheduled_damages = hero.scheduled_damages or {}
+  hero.scheduled_damages[#hero.scheduled_damages + 1] = { amount = amount, turns_left = turns_from_now }
+end
+
+--- "Le Réserviste" (2026-08-29, bénédiction -- hero.reserviste, "1 fois par
+-- combat") : au lieu de la remise à niveau FIXE habituelle, l'énergie non
+-- dépensée du tour précédent (`state.energy`, encore intacte à cet instant --
+-- rien d'autre ne la touche entre la fin d'un tour et le prochain start_turn)
+-- s'AJOUTE à Game.TURN_START_ENERGY, une seule fois pour tout le combat.
+-- Jamais sur le tout 1er tour d'un combat (`state.turn == 1`, voir l'appelant)
+-- : `state.energy` y vaut toujours 0 (remis par start_next_combat/reset_run/
+-- start_boss_combat/start_boss_test), le déclencher là gâcherait la charge
+-- pour rien. Ne consomme qu'UNE charge par tour même si plusieurs aventuriers
+-- la portent (l'énergie est une réserve globale, pas cumulable par porteur).
+local function reserviste_bonus_energy(state)
+  for _, h in ipairs(state.heroes) do
+    if h.hp > 0 and h.reserviste then
+      h.reserviste = false
+      Combat.log(state, h.name .. " (Le Réserviste) conserve l'énergie du tour précédent.", "power")
+      return state.energy
+    end
+  end
+  return 0
+end
+
+--- "Le Maladroit" (2026-08-29, malédiction -- hero.discard_on_draw_chance) :
+-- chaque carte de `drawn_uids` qui appartient à un aventurier maudit a une
+-- chance de partir aussitôt en défausse au lieu de rester en main. Retourne
+-- la liste FILTRÉE (sans les uids défaussés) : ces cartes ne doivent JAMAIS
+-- apparaître dans l'animation de pioche (Controller:consume_drawn_animation)
+-- -- une carte qui "arrive" en main pour en repartir aussitôt serait plus
+-- confus qu'utile, elle atterrit directement en défausse, sans vol du tout.
+function Game.apply_maladroit_discards(state, drawn_uids)
+  local survivors = {}
+  for _, uid in ipairs(drawn_uids) do
+    local idx
+    for i, c in ipairs(state.hand) do if c.uid == uid then idx = i break end end
+    local discarded = false
+    if idx then
+      local card = state.hand[idx]
+      local owner = Combat.hero_by_id(state, card.def.class_id)
+      if owner and owner.discard_on_draw_chance and state.rng.curse:random() < owner.discard_on_draw_chance then
+        table.remove(state.hand, idx)
+        state.discard[#state.discard + 1] = card
+        Combat.log(state, card.def.name .. " (Le Maladroit) est défaussée aussitôt piochée.", "foe")
+        discarded = true
+      end
+    end
+    if not discarded then survivors[#survivors + 1] = uid end
+  end
+  return survivors
+end
+
+--- Pioche jusqu'à Deck.HAND_SIZE, PLUS les piochers supplémentaires accordés
+-- par "L'Archiviste" (2026-08-29, bénédiction -- hero.extra_draw), PUIS
+-- applique "Le Maladroit" sur tout le lot -- fusionne pioche normale + pioche
+-- bonus en un seul retour pour que l'animation les traite comme un seul
+-- geste, remélange compris s'il survient dans l'un OU l'autre lot. Seul
+-- point d'entrée "pioche de début de tour" -- Clairvoyance (carte, milieu de
+-- tour) appelle Deck.draw_cards directement et gère son propre appel à
+-- Game.apply_maladroit_discards, voir cards.lua.
+function Game.fill_hand_with_bonus_draws(state)
+  local drawn = Deck.fill_hand(state)
+  local reshuffled_at = state.last_draw_reshuffled_at
+  local extra = 0
+  for _, h in ipairs(state.heroes) do
+    if h.hp > 0 and h.extra_draw then extra = extra + h.extra_draw end
+  end
+  if extra > 0 then
+    local extra_drawn = Deck.draw_cards(state, extra)
+    if state.last_draw_reshuffled_at and not reshuffled_at then
+      reshuffled_at = #drawn + state.last_draw_reshuffled_at
+    end
+    for _, uid in ipairs(extra_drawn) do drawn[#drawn + 1] = uid end
+  end
+  drawn = Game.apply_maladroit_discards(state, drawn)
+  state.last_drawn_uids = drawn
+  state.last_draw_reshuffled_at = reshuffled_at
+  return drawn
+end
+
 --- Équivalent startTurn : énergie globale remise à Game.TURN_START_ENERGY
 -- PILE (2026-08-11, précisé par le porteur de projet -- ni un plancher ni un
--- plafond, une remise à niveau fixe qu'il en reste plus ou moins avant),
--- statuts qui décroissent, télégraphie ennemie, pioche à HAND_SIZE.
+-- plafond, une remise à niveau fixe qu'il en reste plus ou moins avant), SAUF
+-- "Le Réserviste" ci-dessus (2026-08-29) -- statuts qui décroissent,
+-- télégraphie ennemie, pioche à HAND_SIZE (+ bonus/malédictions).
 -- Retourne la liste des uids piochés (pour que la UI puisse les animer).
 function Game.start_turn(state)
   if state.over then return {} end
-  state.energy = Game.TURN_START_ENERGY
+  local bonus_energy = state.turn > 1 and reserviste_bonus_energy(state) or 0
+  state.energy = Game.TURN_START_ENERGY + bonus_energy
   for _, h in ipairs(state.heroes) do
     if h.hp > 0 then
       h.defense = 0
       h.played_card_this_turn = false
       if h.puissance > 0 then h.puissance = h.puissance - 1 end
-      -- Boucliers programmés (2026-08-28, "Infranchissable") : APRÈS la remise
-      -- à 0 de la Défense juste au-dessus, sinon le gain serait effacé aussitôt.
+      -- "Le Protecteur" (2026-08-29, bénédiction -- hero.turn_start_shield) :
+      -- APRÈS la remise à 0 de la Défense juste au-dessus, sinon le gain
+      -- serait effacé aussitôt -- chaque DÉBUT DE TOUR, pas seulement à
+      -- l'entrée en combat (contrairement à la plupart des autres effets).
+      if h.turn_start_shield then Combat.grant_defense(h, h.turn_start_shield) end
+      -- Boucliers programmés (2026-08-28, "Infranchissable") : même raison
+      -- d'être qu'au-dessus (après la remise à 0 de la Défense).
       if h.scheduled_shields and #h.scheduled_shields > 0 then
         local remaining = {}
         for _, entry in ipairs(h.scheduled_shields) do
@@ -453,6 +642,28 @@ function Game.start_turn(state)
           end
         end
         h.scheduled_shields = remaining
+      end
+      -- Servant d'os (2026-08-29, Nécromancien) : même mécanique que les
+      -- boucliers programmés juste au-dessus, mais la cible (un ennemi VIVANT
+      -- au moment du déclenchement, jamais fixée à la pose) est tirée via
+      -- state.rng.necro -- rien ne se passe s'il n'y a plus d'ennemi vivant
+      -- (combat déjà gagné), l'entrée est simplement consommée.
+      if h.scheduled_damages and #h.scheduled_damages > 0 then
+        local remaining_dmg = {}
+        for _, entry in ipairs(h.scheduled_damages) do
+          entry.turns_left = entry.turns_left - 1
+          if entry.turns_left <= 0 then
+            local targets = Combat.living_enemies(state)
+            if #targets > 0 then
+              local target = targets[state.rng.necro:random(#targets)]
+              Combat.deal_damage(state, h, target, entry.amount, nil, nil, { brut = true })
+              Combat.log(state, h.name .. " frappe " .. target.name .. " avec un Servant d'os (" .. entry.amount .. " brut).", "you")
+            end
+          else
+            remaining_dmg[#remaining_dmg + 1] = entry
+          end
+        end
+        h.scheduled_damages = remaining_dmg
       end
     end
   end
@@ -469,7 +680,7 @@ function Game.start_turn(state)
   end
 
   Game.snapshot_turn(state)
-  local drawn = Deck.fill_hand(state)
+  local drawn = Game.fill_hand_with_bonus_draws(state)
 
   return drawn
 end
@@ -529,7 +740,7 @@ function Game.assign_hero(state, hero_id)
   local hero = Combat.hero_by_id(state, hero_id)
   local def = pending.def
   if not hero or hero.hp <= 0 then return false end
-  if state.energy < def.cost then return false end
+  if state.energy < Combat.effective_cost(hero, def) then return false end
   if def.mana_cost and (hero.mana or 0) < def.mana_cost then return false end
   if def.requires_camouflage and (hero.camoufle or 0) <= 0 then return false end
 
@@ -558,8 +769,9 @@ function Game.resolve_pending(state, kind, target_id)
   if not pending or not pending.hero_id then return end
   local hero = Combat.hero_by_id(state, pending.hero_id)
   local def = pending.def
-  local cost = def.cost
-  if not hero or state.energy < cost or (def.mana_cost and (hero.mana or 0) < def.mana_cost) then
+  if not hero then state.pending = nil; return end
+  local cost = Combat.effective_cost(hero, def)
+  if state.energy < cost or (def.mana_cost and (hero.mana or 0) < def.mana_cost) then
     state.pending = nil; return
   end
 
@@ -579,8 +791,32 @@ function Game.resolve_pending(state, kind, target_id)
 
   state.energy = state.energy - cost
   if def.mana_cost then hero.mana = hero.mana - def.mana_cost end
-  local ctx = { state = state, hero = hero, target = target, card_def = def }
+  -- Coût variable en Corruption (2026-08-29, Nécromancien -- "1 (+X, 0-N
+  -- Corruption)") : X = tout ce que le héros peut fournir jusqu'au plafond
+  -- `def.corruption_cost_cap`, déduit ICI (jamais un choix du joueur, jamais
+  -- une case à cocher) -- exposé à l'effet via `ctx.corruption_spent`, calculé
+  -- une seule fois avant l'effet (pas recalculé si l'effet touche la
+  -- Corruption entre-temps, ex. Pacte funeste -- ce champ est un instantané
+  -- au moment où la carte se résout).
+  local corruption_spent = 0
+  if def.corruption_cost_cap then
+    corruption_spent = math.min(hero.corruption or 0, def.corruption_cost_cap)
+    hero.corruption = (hero.corruption or 0) - corruption_spent
+  end
+  local ctx = { state = state, hero = hero, target = target, card_def = def, corruption_spent = corruption_spent }
   def.effect(ctx)
+  -- "Encore" (2026-08-29, carte "Bis" du Barde -- hero.encore_extra_plays) :
+  -- rejoue le MÊME effet, avec le MÊME ctx, autant de fois que la charge
+  -- l'indique -- consommée AVANT la boucle pour ne jamais se déclencher sur
+  -- elle-même. `ctx.inspiration_consumed` reste partagé entre les répétitions
+  -- (voir consume_inspiration, combat.lua) : le bonus d'Inspiration éventuel
+  -- ne s'applique qu'une fois au total, jamais une fois par répétition.
+  local extra_plays = hero.encore_extra_plays
+  if extra_plays and extra_plays > 0 then
+    hero.encore_extra_plays = nil
+    for _ = 1, extra_plays do def.effect(ctx) end
+    Combat.log(state, def.name .. " se déclenche " .. extra_plays .. " fois de plus (Encore).", "power")
+  end
   Game.on_card_played(state, hero, def)
   Game.check_victory(state)
   Game.finish_card(state, pending, ctx)
@@ -649,7 +885,9 @@ end
 
 --- Équivalent finishCard : retire la carte de la main vers défausse/main/dessus
 -- du deck/zone "Amnésie" selon ce que l'effet a demandé (ctx.return_to_hand /
--- return_to_deck_top / carte taguée "amnesie", voir cards.lua -- Clairvoyance).
+-- return_to_deck_top / carte taguée "amnesie", voir cards.lua -- Clairvoyance
+-- / "L'Amnésique", malédiction -- TOUTES les cartes de l'aventurier maudit,
+-- voir ctx.hero.force_amnesie ci-dessous).
 -- `ctx.zero_cost` (2026-08-28, "Avalanche de coups") : appliqué à CETTE
 -- instance précise avant de la router, quelle que soit sa destination finale
 -- (main si elle vient de tuer sa cible, sinon défausse) -- permanent pour
@@ -662,7 +900,8 @@ function Game.finish_card(state, pending, ctx)
   if idx then
     local card = table.remove(state.hand, idx)
     if ctx and ctx.zero_cost then card.def = zero_cost_def(card.def) end
-    if ctx and ctx.card_def and def_has_cat(ctx.card_def, "amnesie") then
+    local forced_amnesie = ctx and ctx.hero and ctx.hero.force_amnesie
+    if (ctx and ctx.card_def and def_has_cat(ctx.card_def, "amnesie")) or forced_amnesie then
       -- "Disparait pour le reste du combat" (2026-08-28) : jamais en défausse,
       -- jamais repiochable avant le combat suivant -- voir Game.start_next_combat/
       -- start_boss_combat, seuls endroits qui repêchent `state.exhausted`.
@@ -743,6 +982,14 @@ function Game.tick_bleed(state)
     if h.hp > 0 and (h.saignements or 0) > 0 then
       local dmg = h.saignements
       h.hp = h.hp - dmg
+      -- "La Renaissante" (2026-08-29) : même garde-fou que Combat.deal_damage
+      -- (voir son commentaire) -- le saignement ne passe pas par cette
+      -- fonction, dupliqué ici volontairement plutôt qu'un détour par combat.lua.
+      if h.hp <= 0 and h.death_ward then
+        h.hp = 1
+        h.death_ward = false
+        Combat.log(state, h.name .. " aurait dû mourir du saignement, mais reste debout à 1 PV !", "power")
+      end
       Combat.log(state, h.name .. " saigne : " .. dmg .. " dégâts.", "foe")
       h.saignements = h.saignements - 1
     end
@@ -849,6 +1096,19 @@ function Game.decay_end_of_turn_statuses(state)
   for _, h in ipairs(state.heroes) do
     if (h.incapacite or 0) > 0 then h.incapacite = math.max(0, h.incapacite - 1) end
     if (h.vulnerabilite or 0) > 0 then h.vulnerabilite = math.max(0, h.vulnerabilite - 1) end
+    -- Inspiration (2026-08-29, Barde) : -1 automatique en fin de tour, EN PLUS
+    -- de la consommation à l'usage (consume_inspiration, combat.lua) --
+    -- "Dernier rappel" protège cette décroissance auto pour N tours
+    -- (h.inspiration_shielded_turns), sans jamais toucher la consommation à
+    -- l'usage. "Encore" (h.encore_extra_plays, carte "Bis") : perdu en fin de
+    -- tour s'il n'a servi à aucune carte jouée d'ici là (voir Game.resolve_pending,
+    -- seul autre endroit qui le consomme).
+    if (h.inspiration_shielded_turns or 0) > 0 then
+      h.inspiration_shielded_turns = h.inspiration_shielded_turns - 1
+    elseif (h.inspiration or 0) > 0 then
+      h.inspiration = h.inspiration - 1
+    end
+    h.encore_extra_plays = nil
   end
   for _, e in ipairs(state.enemies) do
     if (e.incapacite or 0) > 0 then e.incapacite = math.max(0, e.incapacite - 1) end

@@ -71,6 +71,33 @@ Glossary.terms = {
   -- Game.start_next_combat/start_boss_combat) -- cette entrée ne sert qu'à
   -- l'explication affichée, jamais une deuxième source de vérité.
   { key = "amnesie", icon = nil, has_icon = false, related = "", explain = "Après utilisation, la carte disparaît pour le reste du combat (elle revient au combat suivant)." },
+  -- Nécromancien/Barde (2026-08-29, 2 classes conçues avec agent_content --
+  -- voir memory/ -- codées et testées via busted, mais PAS encore ajoutées à
+  -- Heroes.defs/au roster actif : une vraie run reste à 4 héros tant qu'une
+  -- décision de sélection d'équipe n'est pas prise). "necrose" : dégâts
+  -- magiques nécrotiques, se comporte exactement comme "etincelle" (Vulnérabilité
+  -- s'applique, Puissance non -- réservée aux dégâts "physique", voir
+  -- Combat.damage_multiplier) -- seul le nom/la thématique diffèrent.
+  { key = "necrose", icon = nil, has_icon = false, related = "dégâts magique nécrotique", explain = "" },
+  -- Corruption (ressource propre au Nécromancien, DISTINCTE d'un statut de
+  -- combat classique comme Puissance -- voir hero.corruption dans game.lua) :
+  -- gagnée automatiquement à toute VRAIE perte de PV (Combat.deal_damage/
+  -- Game.tick_bleed), jamais posée directement par une carte. Repart à 0 à
+  -- chaque nouveau combat (contrairement à Mana/Discrétion, qui ont un bug
+  -- connu de non-reset -- voir reference_reset-ressource-par-combat.md côté
+  -- agent_content -- Corruption doit s'en affranchir dès le départ).
+  { key = "corruption", icon = nil, has_icon = false, related = "", explain = "Ressource propre au Nécromancien : +1 par PV perdu (dégâts subis ou PV sacrifiés par ses propres cartes), repart à 0 à chaque nouveau combat. Certaines cartes en dépensent jusqu'à un plafond pour amplifier leur effet." },
+  -- Inspiration (statut GÉNÉRIQUE, pas propre au Barde -- n'importe quel héros
+  -- peut le recevoir, voir hero.inspiration dans game.lua) : contrairement à
+  -- Puissance/Vulnérabilité (qui modifient un CALCUL), Inspiration ajoute un
+  -- montant FLAT au premier effet de dégâts/soin/bouclier que son porteur
+  -- déclenche en jouant une carte, quelle que soit sa classe -- c'est le coeur
+  -- de la synergie inter-classes du Barde (voir feedback_synergie-inter-classes.md).
+  { key = "inspiration", icon = nil, has_icon = false, related = "", explain = "+6 flat au premier effet de dégâts/soin/bouclier que le porteur déclenche en jouant une carte (quelle que soit sa classe). -1 charge à cette utilisation, ET -1 automatique à la fin de chaque tour (les deux peuvent se cumuler le même tour)." },
+  -- Encore (statut secondaire de la carte "Bis" du Barde -- hero.encore_extra_plays) :
+  -- généré par Bis, consommé par le PROCHAIN effet de carte joué par le
+  -- porteur (quelle que soit sa classe), ou perdu en fin de tour si inutilisé.
+  { key = "encore", icon = nil, has_icon = false, related = "", explain = "La prochaine carte jouée par le porteur ce tour se déclenche des fois supplémentaires. Perdu en fin de tour si aucune carte n'est jouée avant." },
 }
 
 -- Lowercase + strip everything but a-z. Le jeu de cartes source n'utilise que des
