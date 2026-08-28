@@ -49,8 +49,16 @@ local function living_heroes(ctx) return Combat.living_heroes(ctx.state) end
 
 Cards.list = {
   -- ---------- Guerrier ----------
+  -- Refonte (2026-08-28, demande explicite -- tableur fourni) : "Encaisser"/
+  -- "Coup mortel" remplacées par "Coup appuyé"/"Avalanche de coups" (le
+  -- Guerrier n'a donc plus de carte de bouclier "depart" propre -- seul le
+  -- générique Encaisser d'une autre classe... non, en fait plus AUCUNE, cette
+  -- case du kit devient un 2ᵉ coup offensif). Coup direct passe à coût 0
+  -- (confirmé par le tableur, pas une coquille). Riposte entièrement
+  -- retravaillée : la riposte est maintenant proportionnelle aux dégâts
+  -- annulés (moitié/totalité) plutôt qu'un montant fixe.
   {
-    code = "coup-direct-guerrier", name = "Coup direct", class_id = "guerrier", tier = "depart", cost = 1,
+    code = "coup-direct-guerrier", name = "Coup direct", class_id = "guerrier", tier = "depart", cost = 0,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
     desc = 'Inflige 4 "epee".',
     effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 4, "physique", ctx) end,
@@ -60,13 +68,23 @@ Cards.list = {
     },
   },
   {
-    code = "encaisser-guerrier", name = "Encaisser", class_id = "guerrier", tier = "depart", cost = 1,
-    cats = { "defense" }, dmg_type = nil, target = "ally",
-    desc = 'L\'allié gagne 4 "bouclier".',
-    effect = function(ctx) Combat.grant_defense(ctx.target, 4) end,
+    -- Remplace "Encaisser" (2026-08-28) : un 2ᵉ coup offensif, plus de
+    -- bouclier propre au Guerrier en "depart" -- "Vulnerabilite" (pas
+    -- "Vulnérable", le mot du tableur -- même clé de glossaire que partout
+    -- ailleurs dans le jeu, voir glossary.lua).
+    code = "coup-appuye", name = "Coup appuyé", class_id = "guerrier", tier = "depart", cost = 1,
+    cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
+    desc = 'Inflige 6 "epee" et "Vulnerabilite" 2 à un ennemi.',
+    effect = function(ctx)
+      Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "physique", ctx)
+      Combat.apply_status(ctx.target, "vulnerabilite", 2)
+    end,
     upgrade = {
-      desc = 'L\'allié gagne 6 "bouclier".',
-      effect = function(ctx) Combat.grant_defense(ctx.target, 6) end,
+      desc = 'Inflige 9 "epee" et "Vulnerabilite" 3 à un ennemi.',
+      effect = function(ctx)
+        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 9, "physique", ctx)
+        Combat.apply_status(ctx.target, "vulnerabilite", 3)
+      end,
     },
   },
   {
@@ -84,69 +102,91 @@ Cards.list = {
     },
   },
   {
+    -- Condition étendue au Bouclier OU à Vulnérabilité (2026-08-28, avant :
+    -- Bouclier seul).
     code = "coup-estoc", name = "Coup d'estoc", class_id = "guerrier", tier = "avance", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
-    desc = 'Inflige 4 "epee". Inflige 4 "epee" de plus si l\'ennemi a du "bouclier".',
+    desc = 'Inflige 4 "epee". Inflige 4 "epee" de plus si l\'ennemi a du "bouclier" ou "Vulnerabilite".',
     effect = function(ctx)
-      local bonus = (ctx.target.defense or 0) > 0 and 4 or 0
-      Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 4 + bonus, "physique", ctx)
+      local vulnerable = (ctx.target.defense or 0) > 0 or (ctx.target.vulnerabilite or 0) > 0
+      Combat.deal_damage(ctx.state, ctx.hero, ctx.target, vulnerable and 8 or 4, "physique", ctx)
     end,
     upgrade = {
-      desc = 'Inflige 6 "epee". Inflige 6 "epee" de plus si l\'ennemi a du "bouclier".',
+      desc = 'Inflige 6 "epee". Inflige 6 "epee" de plus si l\'ennemi a du "bouclier" ou "Vulnerabilite".',
       effect = function(ctx)
-        local bonus = (ctx.target.defense or 0) > 0 and 6 or 0
-        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6 + bonus, "physique", ctx)
+        local vulnerable = (ctx.target.defense or 0) > 0 or (ctx.target.vulnerabilite or 0) > 0
+        Combat.deal_damage(ctx.state, ctx.hero, ctx.target, vulnerable and 12 or 6, "physique", ctx)
       end,
     },
   },
   {
-    code = "coup-mortel", name = "Coup mortel", class_id = "guerrier", tier = "avance", cost = 1,
+    -- Remplace "Coup mortel" (2026-08-28) : garde son "revient en main si la
+    -- cible meurt", ajoute "et son coût devient 0" -- PERMANENT sur CETTE
+    -- copie de carte précise (voir Game.finish_card/ctx.zero_cost), jamais un
+    -- coût gratuit ponctuel pour ce seul lancer. Base/amélioré identiques
+    -- dans le tableur fourni (probable oubli, comme "Se cacher" avant) --
+    -- dégâts relevés 4->6 pour rester cohérent avec le reste du jeu, à
+    -- confirmer si 4 était réellement voulu.
+    code = "avalanche-coups", name = "Avalanche de coups", class_id = "guerrier", tier = "avance", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
-    desc = 'Inflige 4 "epee". Si cette attaque tue sa cible, Coup mortel revient dans la main du joueur.',
+    desc = 'Inflige 4 "epee" et son coût devient 0. Si cette attaque tue sa cible, Avalanche de coups revient dans la main du joueur.',
     effect = function(ctx)
+      ctx.zero_cost = true
       Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 4, "physique", ctx)
       if ctx.target.hp <= 0 then
         ctx.return_to_hand = true
-        Combat.log(ctx.state, ctx.hero.name .. " achève " .. ctx.target.name .. " — Coup mortel revient en main.", "power")
+        Combat.log(ctx.state, ctx.hero.name .. " achève " .. ctx.target.name .. " — Avalanche de coups revient en main.", "power")
       end
     end,
     upgrade = {
-      desc = 'Inflige 6 "epee". Si cette attaque tue sa cible, Coup mortel revient dans la main du joueur.',
+      desc = 'Inflige 6 "epee" et son coût devient 0. Si cette attaque tue sa cible, Avalanche de coups revient dans la main du joueur.',
       effect = function(ctx)
+        ctx.zero_cost = true
         Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "physique", ctx)
         if ctx.target.hp <= 0 then
           ctx.return_to_hand = true
-          Combat.log(ctx.state, ctx.hero.name .. " achève " .. ctx.target.name .. " — Coup mortel revient en main.", "power")
+          Combat.log(ctx.state, ctx.hero.name .. " achève " .. ctx.target.name .. " — Avalanche de coups revient en main.", "power")
         end
       end,
     },
   },
   {
+    -- Retravaillée (2026-08-28) : la riposte est désormais proportionnelle
+    -- aux dégâts annulés (moitié en base, totalité amélioré) plutôt qu'un
+    -- montant fixe (4/6 avant). `attacker.next_move.amount` = le montant déjà
+    -- télégraphié au joueur sur le cadre de l'ennemi -- seule source de
+    -- vérité sur "les dégâts" de l'attaque annulée, jamais recalculé
+    -- indépendamment. Ne se déclenche que contre une attaque de dégâts
+    -- (next_move.kind == "dmg") -- "la moitié/totalité DES DÉGÂTS" n'a pas de
+    -- sens contre un débuff (ex. Malédiction) qui n'inflige rien à annuler ;
+    -- Riposte ne fait alors rien, comme quand personne ne vise le Guerrier.
     code = "riposte", name = "Riposte", class_id = "guerrier", tier = "avance", cost = 3,
     cats = { "melee", "degats", "defense" }, dmg_type = "physique", target = "self",
-    desc = 'Si "cibleennemi", annule l\'attaque et inflige 4 "epee".',
+    desc = 'Si "cibleennemi", annule l\'attaque et inflige la moitié des dégâts en retour.',
     effect = function(ctx)
       local attacker = Combat.enemy_targeting(ctx.state, ctx.hero)
-      if not attacker then
-        Combat.log(ctx.state, "Riposte : " .. ctx.hero.name .. " n'est visé par personne, la carte ne fait rien.", "sys")
+      if not attacker or not attacker.next_move or attacker.next_move.kind ~= "dmg" then
+        Combat.log(ctx.state, "Riposte : " .. ctx.hero.name .. " n'est visé par aucune attaque de dégâts, la carte ne fait rien.", "sys")
         return
       end
+      local retaliation = attacker.next_move.amount * 0.5
       attacker.next_move = nil
       attacker.target_hero_id = nil
-      Combat.deal_damage(ctx.state, ctx.hero, attacker, 4, "physique", ctx)
+      Combat.deal_damage(ctx.state, ctx.hero, attacker, retaliation, "physique", ctx)
       Combat.log(ctx.state, "Riposte contre " .. attacker.name .. " !", "you")
     end,
     upgrade = {
-      desc = 'Si "cibleennemi", annule l\'attaque et inflige 6 "epee".',
+      desc = 'Si "cibleennemi", annule l\'attaque et inflige la totalité des dégâts en retour.',
       effect = function(ctx)
         local attacker = Combat.enemy_targeting(ctx.state, ctx.hero)
-        if not attacker then
-          Combat.log(ctx.state, "Riposte : " .. ctx.hero.name .. " n'est visé par personne, la carte ne fait rien.", "sys")
+        if not attacker or not attacker.next_move or attacker.next_move.kind ~= "dmg" then
+          Combat.log(ctx.state, "Riposte : " .. ctx.hero.name .. " n'est visé par aucune attaque de dégâts, la carte ne fait rien.", "sys")
           return
         end
+        local retaliation = attacker.next_move.amount
         attacker.next_move = nil
         attacker.target_hero_id = nil
-        Combat.deal_damage(ctx.state, ctx.hero, attacker, 6, "physique", ctx)
+        Combat.deal_damage(ctx.state, ctx.hero, attacker, retaliation, "physique", ctx)
         Combat.log(ctx.state, "Riposte contre " .. attacker.name .. " !", "you")
       end,
     },

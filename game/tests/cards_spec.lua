@@ -30,7 +30,7 @@ describe("Cards.upgraded_def", function()
 
   it("Rempart améliore le soi/allié de façon SYMÉTRIQUE (4/4 -> 6/6, corrigé 2026-08-24)", function()
     local up = Cards.upgraded_def(Cards.by_code("rempart"))
-    local state = { log = {} }
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
     local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0, class_id = "guerrier" }
     local ally = { id = "h2", name = "h2", hp = 20, max_hp = 20, defense = 0, class_id = "guerrier" }
     up.effect({ state = state, hero = hero, target = ally, card_def = up })
@@ -46,7 +46,7 @@ describe("Cards.upgraded_def", function()
     for _, cat in ipairs(base.cats) do if cat == "feu" then has_feu = true end end
     assert.is_true(has_feu)
 
-    local state = { log = {} }
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
     local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "mage", mana = 2 }
     local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
     base.effect({ state = state, hero = hero, target = target, card_def = base })
@@ -62,7 +62,7 @@ describe("Cards.upgraded_def", function()
 
   it("Assassinat non-Camouflé donne Discrétion/Puissance 2/2 en base, 3/3 amélioré (2026-08-24, plus de Camouflé direct)", function()
     local base = Cards.by_code("assassinat")
-    local state = { log = {} }
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
     local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "assassin", camoufle = 0, discretion = 0, puissance = 0 }
     local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
     base.effect({ state = state, hero = hero, target = target, card_def = base })
@@ -79,7 +79,7 @@ describe("Cards.upgraded_def", function()
 
   it("Assassinat Camouflé inflige les dégâts et NE retire plus Camouflé (2026-08-28, \"et perd Camouflé\" disparu du texte -- Furtif)", function()
     local base = Cards.by_code("assassinat")
-    local state = { log = {} }
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
     local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "assassin", camoufle = 1, discretion = 10, puissance = 0 }
     local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
     base.effect({ state = state, hero = hero, target = target, card_def = base })
@@ -89,7 +89,7 @@ describe("Cards.upgraded_def", function()
 
   it("En traître : sans Camouflé, ne fait STRICTEMENT rien -- dégâts/saignement/Discrétion tous conditionnels (2026-08-28, corrigé)", function()
     local base = Cards.by_code("en-traitre")
-    local state = { log = {} }
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
     local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, class_id = "assassin", camoufle = 0, discretion = 0 }
     local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0, saignements = 0 }
     base.effect({ state = state, hero = hero, target = target, card_def = base })
@@ -118,7 +118,7 @@ end)
 describe("Cartes Paladin (2026-08-28, refonte)", function()
   it("Provocateur donne le bouclier à la CIBLE mais la Provocation au LANCEUR", function()
     local base = Cards.by_code("provocateur")
-    local state = { log = {} }
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
     local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0, provocation = 0 }
     local ally = { id = "h2", name = "h2", hp = 20, max_hp = 20, defense = 0, provocation = 0 }
     base.effect({ state = state, hero = hero, target = ally, card_def = base })
@@ -130,7 +130,7 @@ describe("Cartes Paladin (2026-08-28, refonte)", function()
 
   it("Infranchissable amélioré programme 2 boucliers distincts (voir Game.schedule_shield)", function()
     local up = Cards.upgraded_def(Cards.by_code("infranchissable"))
-    local state = { log = {} }
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
     local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0, provocation = 0, scheduled_shields = {} }
     up.effect({ state = state, hero = hero, target = hero, card_def = up })
     assert.equal(15, hero.defense) -- gain immédiat
@@ -142,7 +142,7 @@ describe("Cartes Paladin (2026-08-28, refonte)", function()
 
   it("Raillerie redirige l'ennemi ciblé vers le Paladin (renommée depuis 'Provocation', même effet)", function()
     local base = Cards.by_code("raillerie")
-    local state = { log = {} }
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
     local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0 }
     local enemy = { id = "e1", name = "e1", hp = 20, max_hp = 20, next_move = { kind = "dmg" }, target_hero_id = "autre" }
     base.effect({ state = state, hero = hero, target = enemy, card_def = base })
@@ -157,5 +157,104 @@ describe("Cartes Paladin (2026-08-28, refonte)", function()
       for _, cat in ipairs(def.cats) do if cat == "amnesie" then has_amnesie = true end end
       assert.is_true(has_amnesie, code .. " devrait porter 'amnesie' dans cats")
     end
+  end)
+end)
+
+describe("Cartes Guerrier (2026-08-28, refonte)", function()
+  it("Coup direct coûte désormais 0", function()
+    assert.equal(0, Cards.by_code("coup-direct-guerrier").cost)
+  end)
+
+  it("Coup appuyé inflige des dégâts ET applique Vulnérabilité (remplace Encaisser)", function()
+    local base = Cards.by_code("coup-appuye")
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0, vulnerabilite = 0 }
+    base.effect({ state = state, hero = hero, target = target, card_def = base })
+    assert.equal(14, target.hp) -- 20 - 6
+    assert.equal(2, target.vulnerabilite)
+  end)
+
+  it("Coup d'estoc : le bonus se déclenche sur Bouclier OU Vulnérabilité (2026-08-28, avant : Bouclier seul)", function()
+    local base = Cards.by_code("coup-estoc")
+    local state = { log = {}, enemies = {} } -- Combat.deal_damage lit state.enemies (marquage Golem/Troll), même à vide
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20 }
+    local vulnerable_only = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0, vulnerabilite = 1 }
+    base.effect({ state = state, hero = hero, target = vulnerable_only, card_def = base })
+    assert.equal(12, vulnerable_only.hp) -- 20 - 8 (bonus déclenché par Vulnérabilité seule)
+  end)
+
+  it("Avalanche de coups rend son coût à 0 en JOUANT SEULEMENT CETTE INSTANCE (jamais le def partagé)", function()
+    local base = Cards.by_code("avalanche-coups")
+    local original_cost = base.cost
+    local state = { log = {}, enemies = {}, hand = {}, discard = {}, exhausted = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20 }
+    local target = { id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0 }
+    local ctx = { state = state, hero = hero, target = target, card_def = base }
+    base.effect(ctx)
+    assert.is_true(ctx.zero_cost)
+    assert.equal(16, target.hp) -- 20 - 4
+
+    local Game = require("src.rules.game")
+    local card = { uid = 1, def = base }
+    state.hand = { card }
+    Game.finish_card(state, { uid = 1 }, ctx)
+    assert.equal(0, state.discard[1].def.cost) -- cette instance précise est maintenant gratuite
+    assert.equal(original_cost, base.cost) -- le def partagé (Cards.list) n'a JAMAIS bougé
+    assert.equal("avalanche-coups", state.discard[1].def.code) -- Cards.by_code reste utilisable
+  end)
+
+  it("Avalanche de coups revient en main (pas en défausse) si l'attaque tue sa cible, ET reste à coût 0", function()
+    local base = Cards.by_code("avalanche-coups")
+    local Game = require("src.rules.game")
+    local state = { log = {}, enemies = {}, hand = {}, discard = {}, exhausted = {} }
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20 }
+    local target = { id = "e1", name = "e1", hp = 3, max_hp = 20, defense = 0 } -- meurt sous 4 dégâts
+    local ctx = { state = state, hero = hero, target = target, card_def = base }
+    base.effect(ctx)
+    assert.is_true(ctx.return_to_hand)
+    local card = { uid = 1, def = base }
+    state.hand = { card }
+    Game.finish_card(state, { uid = 1 }, ctx)
+    assert.equal(1, #state.hand)
+    assert.equal(0, #state.discard)
+    assert.equal(0, state.hand[1].def.cost)
+  end)
+
+  it("Riposte inflige la moitié (base) / la totalité (amélioré) des dégâts télégraphiés, pas un montant fixe", function()
+    local base = Cards.by_code("riposte")
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0 }
+    local attacker = {
+      id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0,
+      next_move = { kind = "dmg", amount = 10 }, target_hero_id = "h1",
+    }
+    -- `state.enemies` doit contenir le VRAI attaquant (pas juste être non-nil) :
+    -- Combat.enemy_targeting le cherche dedans par target_hero_id.
+    local state = { log = {}, enemies = { attacker } }
+    base.effect({ state = state, hero = hero, target = hero, card_def = base })
+    assert.equal(15, attacker.hp) -- 20 - (10 * 0.5)
+    assert.is_nil(attacker.next_move) -- l'attaque est bien annulée
+
+    local up = Cards.upgraded_def(base)
+    local attacker2 = {
+      id = "e2", name = "e2", hp = 20, max_hp = 20, defense = 0,
+      next_move = { kind = "dmg", amount = 10 }, target_hero_id = "h1",
+    }
+    local state2 = { log = {}, enemies = { attacker2 } }
+    up.effect({ state = state2, hero = hero, target = hero, card_def = up })
+    assert.equal(10, attacker2.hp) -- 20 - 10 (totalité)
+  end)
+
+  it("Riposte ne fait rien contre un débuff (pas de 'dégâts' à annuler) -- toujours 'cibleennemi', pas un type précis avant", function()
+    local base = Cards.by_code("riposte")
+    local hero = { id = "h1", name = "h1", hp = 20, max_hp = 20, defense = 0 }
+    local attacker = {
+      id = "e1", name = "e1", hp = 20, max_hp = 20, defense = 0,
+      next_move = { kind = "debuff", amount = 10 }, target_hero_id = "h1",
+    }
+    local state = { log = {}, enemies = { attacker } }
+    base.effect({ state = state, hero = hero, target = hero, card_def = base })
+    assert.equal(20, attacker.hp) -- rien ne se passe
+    assert.is_not_nil(attacker.next_move) -- l'attaque n'est PAS annulée
   end)
 end)

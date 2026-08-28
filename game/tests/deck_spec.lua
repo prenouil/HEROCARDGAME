@@ -22,7 +22,7 @@ describe("Deck.build_starting_deck", function()
     local counts = {}
     for _, c in ipairs(deck) do counts[c.def.code] = (counts[c.def.code] or 0) + 1 end
     assert.equal(1, counts["coup-direct-guerrier"])
-    assert.equal(1, counts["encaisser-guerrier"])
+    assert.equal(1, counts["coup-appuye"]) -- pas "encaisser-guerrier" (disparue 2026-08-28)
     assert.equal(1, counts["coup-taille"]) -- "depart" côté Guerrier depuis 2026-08-24, pas "coup-estoc"
     assert.equal(1, counts["provocateur"]) -- pas "coup-direct-paladin" (disparue 2026-08-28)
     assert.equal(1, counts["infranchissable"]) -- pas "encaisser-paladin" (disparue 2026-08-28)

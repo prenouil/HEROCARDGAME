@@ -633,9 +633,27 @@ function Game.tick_discretion_end_of_turn(state)
   end
 end
 
+--- Def clonée avec cost=0 (2026-08-28, carte "Avalanche de coups" -- "son
+-- coût devient 0") : JAMAIS `instance.def.cost = 0` en place -- toutes les
+-- instances non-améliorées d'une même carte partagent le même def (voir
+-- Cards.list/Cards.upgraded_def, même raison d'être que ce dernier), muter
+-- directement rendrait TOUTE carte du même code gratuite, y compris dans un
+-- futur run. Même idiome que Cards.upgraded_def : clone superficiel, un seul
+-- champ changé, `code` préservé (Cards.by_code continue de fonctionner).
+local function zero_cost_def(def)
+  local d = {}
+  for k, v in pairs(def) do d[k] = v end
+  d.cost = 0
+  return d
+end
+
 --- Équivalent finishCard : retire la carte de la main vers défausse/main/dessus
 -- du deck/zone "Amnésie" selon ce que l'effet a demandé (ctx.return_to_hand /
 -- return_to_deck_top / carte taguée "amnesie", voir cards.lua -- Clairvoyance).
+-- `ctx.zero_cost` (2026-08-28, "Avalanche de coups") : appliqué à CETTE
+-- instance précise avant de la router, quelle que soit sa destination finale
+-- (main si elle vient de tuer sa cible, sinon défausse) -- permanent pour
+-- cette copie de carte, jamais réinitialisé ailleurs.
 function Game.finish_card(state, pending, ctx)
   local idx
   for i, c in ipairs(state.hand) do
@@ -643,6 +661,7 @@ function Game.finish_card(state, pending, ctx)
   end
   if idx then
     local card = table.remove(state.hand, idx)
+    if ctx and ctx.zero_cost then card.def = zero_cost_def(card.def) end
     if ctx and ctx.card_def and def_has_cat(ctx.card_def, "amnesie") then
       -- "Disparait pour le reste du combat" (2026-08-28) : jamais en défausse,
       -- jamais repiochable avant le combat suivant -- voir Game.start_next_combat/
