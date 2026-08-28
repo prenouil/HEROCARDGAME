@@ -54,6 +54,8 @@ local HERO_PATH = {
   paladin = "characters/heroes/paladin.png",
   mage = "characters/heroes/mage.png",
   assassin = "characters/heroes/assassin.png",
+  necromancien = "characters/heroes/necromancien.png",
+  barde = "characters/heroes/barde.png",
 }
 
 -- Clé Lua des statuts (src/ui/icons.lua DRAW_BY_STATUS) -> chemin d'asset. "defense"

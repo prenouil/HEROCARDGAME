@@ -10,6 +10,14 @@ module.exports = [
     subject: 'a fantasy mage hero character, wizard robe, pointed hat, holding a staff, standing pose' },
   { id: 'assassin', grid: 'character', out: 'game/assets/characters/heroes/assassin.png',
     subject: 'a fantasy rogue assassin hero character, hooded cloak, gripping one dagger firmly in each hand, both daggers clearly held, standing pose' },
+  // Nécromancien/Barde (2026-08-29, 2 nouvelles classes) : tient un bâton
+  // surmonté d'un crâne plutôt qu'un crâne nu en main (distinct de l'ennemi
+  // "necromancien" existant plus bas, qui tient juste un crâne) -- lecture de
+  // classe immédiate malgré la thématique proche.
+  { id: 'necromancien-hero', grid: 'character', out: 'game/assets/characters/heroes/necromancien.png',
+    subject: 'a fantasy necromancer hero character, dark hooded robe with purple trim, holding a gnarled bone staff topped with a glowing skull, standing pose' },
+  { id: 'barde-hero', grid: 'character', out: 'game/assets/characters/heroes/barde.png',
+    subject: 'a fantasy bard hero character, feathered cap, colorful traveling cloak, holding a lute, standing pose' },
 
   // ---- Ennemis (character, 64x64) ----
   { id: 'gobelin', grid: 'character', out: 'game/assets/characters/enemies/gobelin.png',
