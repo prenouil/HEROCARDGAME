@@ -122,10 +122,19 @@ local function team_select_click(controller, x, y)
     if View.point_in(View.team_select_confirm_button, x, y) then controller:team_select_confirm(); return true end
   end
 
+  -- `team_select_hero_interactive` (2026-08-30, bug signalé) : ignore la case
+  -- laissée VIDE par un héros mis en avant/en transit -- draw_team_select
+  -- (view.lua) n'y dessine plus rien depuis son introduction, mais le rect
+  -- lui-même reste dans available_ids/selected_ids (positions stables pour
+  -- les autres), donc toujours cliquable sans ce filtre.
   local available_id = find_rect(View.team_select_available_rects(controller), x, y)
-  if available_id then controller:team_select_focus(available_id); return true end
+  if available_id and controller:team_select_hero_interactive(available_id) then
+    controller:team_select_focus(available_id); return true
+  end
   local party_id = find_rect(View.team_select_party_rects(controller), x, y)
-  if party_id then controller:team_select_focus(party_id); return true end
+  if party_id and controller:team_select_hero_interactive(party_id) then
+    controller:team_select_focus(party_id); return true
+  end
 
   if #ts.selected_ids == 4 and View.point_in(View.team_select_launch_button, x, y) then
     controller:team_select_launch()
@@ -339,8 +348,13 @@ local function team_select_hovering(controller, x, y)
     if View.point_in(View.team_select_cancel_button, x, y) then return true end
     if View.point_in(View.team_select_confirm_button, x, y) then return true end
   end
-  if find_rect(View.team_select_available_rects(controller), x, y) then return true end
-  if find_rect(View.team_select_party_rects(controller), x, y) then return true end
+  -- Même filtre que team_select_click (2026-08-30, bug signalé) : sinon le
+  -- curseur "main" s'affiche encore sur la case vide laissée par un héros
+  -- mis en avant/en transit.
+  local available_id = find_rect(View.team_select_available_rects(controller), x, y)
+  if available_id and controller:team_select_hero_interactive(available_id) then return true end
+  local party_id = find_rect(View.team_select_party_rects(controller), x, y)
+  if party_id and controller:team_select_hero_interactive(party_id) then return true end
   if #ts.selected_ids == 4 and View.point_in(View.team_select_launch_button, x, y) then return true end
   return false
 end
@@ -458,10 +472,17 @@ function Input.mousemoved(controller, x, y)
   if controller.screen == "team_select" then
     local ts = controller.team_select
     if ts then
+      -- Même filtre que team_select_click (2026-08-30, bug signalé) : sinon
+      -- l'infobulle/le son de survol se déclenchent encore sur la case vide
+      -- laissée par un héros mis en avant/en transit.
       local available_id = find_rect(View.team_select_available_rects(controller), x, y)
-      if available_id then controller:team_select_hover(available_id); return end
+      if available_id and controller:team_select_hero_interactive(available_id) then
+        controller:team_select_hover(available_id); return
+      end
       local party_id = find_rect(View.team_select_party_rects(controller), x, y)
-      if party_id then controller:team_select_hover(party_id); return end
+      if party_id and controller:team_select_hero_interactive(party_id) then
+        controller:team_select_hover(party_id); return
+      end
     end
     controller:set_hover(nil, nil)
     return

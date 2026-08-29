@@ -277,6 +277,23 @@ function Controller:enter_team_select(mode)
   }
 end
 
+--- Faux à considérer pour le survol/clic (2026-08-30, bug signalé -- "quand
+-- je choisis un aventurier, il vient correctement se placer à droite,
+-- pourtant la zone où il était dans la ligne en haut reste interactive") :
+-- draw_team_select (view.lua) sait déjà ignorer `id` à sa position de
+-- rangée pendant qu'il est mis en avant ou en transit (voir `moving_ids`/
+-- `ts.focused_id` dans son code) -- Input.lua doit appliquer EXACTEMENT le
+-- même filtre pour le survol/clic, sinon la case laissée vide reste quand
+-- même cliquable (elle correspond toujours à `id` dans available_ids/
+-- selected_ids, ces listes ne changent QUE sur une vraie validation).
+function Controller:team_select_hero_interactive(id)
+  local ts = self.team_select
+  if not ts then return true end
+  if ts.focused_id == id then return false end
+  for _, a in ipairs(ts.hero_anims) do if a.id == id then return false end end
+  return true
+end
+
 --- Survol d'un aventurier sur l'écran de choix d'équipe (2026-08-30, demande
 -- explicite -- "il n'y a aucun son dans cette fenêtre, il faut en ajouter à
 -- toutes les actions joueurs : survol, clic, déplacement...") : un seul

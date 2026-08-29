@@ -371,18 +371,60 @@ function View.team_select_party_rects(controller)
   return out
 end
 
--- Cartes du héros mis en avant (2026-08-29, puis 2026-08-30 -- "les cartes
--- doivent être plus bas" ; puis re-simplifié le même jour -- "il ne faut en
--- fait afficher que les 3 cartes de départ, à la place des cartes avancées
--- on montre 1 seule carte de dos avec leur nombre") : TOUJOURS exactement 4
--- items désormais (3 Départ + 1 dos, voir Controller:team_select_spawn_cards),
--- une seule ligne centrée suffit -- plus besoin de la grille 3x2 conçue pour
--- 6 cartes. Centrée sur TOUTE la largeur (pas seulement l'espace entre
--- boutons/projecteur) : à 4 cartes, ça tient déjà largement à l'écart des
--- deux (voir les marges vérifiées lors de ce changement).
+-- "Projecteur" (2026-08-29, "quand je sélectionne un aventurier, le
+-- déplacement est visible" ; déplacé à GAUCHE le 2026-08-30, demande
+-- explicite -- "je préfère que l'aventurier en cours de sélection soit
+-- placé sur la gauche plutôt que sur la droite") : emplacement fixe où le
+-- héros survolé/sélectionné SE DÉPLACE réellement (voir Controller:
+-- team_select_move_hero), plus grand que sa case d'origine pour bien
+-- marquer "c'est celui-ci qu'on regarde en ce moment". Reste ENTIÈREMENT
+-- sous la rangée du haut (qui s'arrête à TEAM_AVAILABLE_Y + TEAM_HERO_H =
+-- 186), quelle que soit la largeur de cette rangée.
+local TEAM_SPOTLIGHT_W, TEAM_SPOTLIGHT_H = 170, 190
+local TEAM_SPOTLIGHT_X = 40
+View.team_select_spotlight_rect = {
+  x = TEAM_SPOTLIGHT_X, y = 200, w = TEAM_SPOTLIGHT_W, h = TEAM_SPOTLIGHT_H,
+}
+
+-- Sous le projecteur désormais, pas à côté (2026-08-30, demande explicite --
+-- "les boutons Annuler doivent être descendus pour être en dessous de
+-- l'aventurier en cours de sélection"), et plus étroits qu'avant (110->90,
+-- 2ᵉ demande explicite du même message) -- centrés sous la colonne du
+-- projecteur.
+local TEAM_ACTION_BTN_W, TEAM_ACTION_BTN_H = 90, 40
+local TEAM_ACTION_BTN_X = TEAM_SPOTLIGHT_X + (TEAM_SPOTLIGHT_W - TEAM_ACTION_BTN_W) / 2
+View.team_select_cancel_button = {
+  x = TEAM_ACTION_BTN_X, y = View.team_select_spotlight_rect.y + TEAM_SPOTLIGHT_H + 10,
+  w = TEAM_ACTION_BTN_W, h = TEAM_ACTION_BTN_H, label = "Annuler",
+}
+View.team_select_confirm_button = {
+  x = TEAM_ACTION_BTN_X, y = View.team_select_cancel_button.y + TEAM_ACTION_BTN_H + 8,
+  w = TEAM_ACTION_BTN_W, h = TEAM_ACTION_BTN_H, label = "Valider",
+}
+
+-- Cartes du héros mis en avant (2026-08-29 -- "les cartes doivent être plus
+-- bas" ; simplifiées à 4 items le même jour -- "3 cartes de départ + 1 dos
+-- avec leur nombre" ; puis remises sur 2 rangées le 2026-08-30, demande
+-- explicite -- "le tas de cartes avancées doit se situer sur la deuxième
+-- ligne en dessous des cartes de départ") : jusqu'à 3 par rangée, centrées
+-- sur TOUTE la largeur -- avec le projecteur maintenant à gauche (x=40-210)
+-- et plus rien à droite, ce centrage reste largement à l'écart des deux
+-- côtés (vérifié -- rangée de 3 : x330-630 ; la 4ᵉ carte seule, rangée 2 :
+-- x434-526).
 local TEAM_CARD_Y = 210
+local TEAM_CARD_ROW_GAP = 16
+local TEAM_CARD_ROW1_MAX = 3
 function View.team_select_card_rects(count)
-  return centered_row(count, CARD_W, CARD_H, TEAM_CARD_Y)
+  local rects = {}
+  local row1_count = math.min(count, TEAM_CARD_ROW1_MAX)
+  local row1 = centered_row(row1_count, CARD_W, CARD_H, TEAM_CARD_Y)
+  for i = 1, row1_count do rects[i] = row1[i] end
+  if count > TEAM_CARD_ROW1_MAX then
+    local row2_count = count - TEAM_CARD_ROW1_MAX
+    local row2 = centered_row(row2_count, CARD_W, CARD_H, TEAM_CARD_Y + CARD_H + TEAM_CARD_ROW_GAP)
+    for i = 1, row2_count do rects[TEAM_CARD_ROW1_MAX + i] = row2[i] end
+  end
+  return rects
 end
 
 --- Rectangle hors-écran de même taille que `to`, positionné sur le bord
@@ -397,35 +439,16 @@ function View.team_select_offscreen_rect(to, side)
   return { x = to.x, y = H + margin, w = to.w, h = to.h }
 end
 
--- Plus étroits et plus à gauche (2026-08-30, demande explicite -- 150->110,
--- x=40->20) : moins d'empiètement visuel sur la grille de cartes qui
--- commence juste à côté.
-View.team_select_cancel_button = { x = 20, y = 210, w = 110, h = 44, label = "Annuler" }
-View.team_select_confirm_button = { x = 20, y = 266, w = 110, h = 44, label = "Valider" }
-
--- "Projecteur" (2026-08-30, demande explicite -- "quand je sélectionne un
--- aventurier, il se déplace sur le côté droit, le déplacement est visible") :
--- emplacement fixe où le héros survolé/sélectionné SE DÉPLACE réellement
--- (voir Controller:team_select_move_hero), plus grand que sa case d'origine
--- pour bien marquer "c'est celui-ci qu'on regarde en ce moment".
--- y=200, pas 130 (2026-08-30, bug signalé en revue -- avec 5-6 aventuriers
--- encore disponibles, la rangée du haut s'étire jusqu'à x~850 et chevauchait
--- verticalement le projecteur) : reste ENTIÈREMENT sous la rangée du haut
--- (qui s'arrête à TEAM_AVAILABLE_Y + TEAM_HERO_H = 186), quelle que soit sa
--- largeur -- jamais de dépendance à combien de héros y restent.
-local TEAM_SPOTLIGHT_W, TEAM_SPOTLIGHT_H = 170, 190
-View.team_select_spotlight_rect = {
-  x = W - TEAM_SPOTLIGHT_W - 40, y = 200, w = TEAM_SPOTLIGHT_W, h = TEAM_SPOTLIGHT_H,
-}
-
--- Ancré sur TEAM_BOTTOM_Y, comme la rangée "équipe" juste à gauche (2026-08-30,
+-- Ancré sur TEAM_BOTTOM_Y, comme la rangée "équipe" juste à gauche (2026-08-29,
 -- demande explicite -- "au même niveau que Partir à l'aventure") : les deux
--- partagent maintenant la même origine verticale plutôt que l'un dérivé de
--- l'autre -- voir le commentaire sur TEAM_BOTTOM_Y plus haut.
-local TEAM_LAUNCH_W, TEAM_LAUNCH_H = 260, 64
+-- partagent la même origine verticale. Plus carré, texte sur 2 lignes
+-- (2026-08-30, demande explicite -- 260x64 était très large/plat) --
+-- toujours ancré à droite, largement à l'écart de la rangée "équipe" (qui
+-- s'arrête à x656 pour 4 membres, voir TEAM_PARTY_LEFT).
+local TEAM_LAUNCH_W, TEAM_LAUNCH_H = 170, 110
 View.team_select_launch_button = {
   x = W - TEAM_LAUNCH_W - 30, y = TEAM_BOTTOM_Y, w = TEAM_LAUNCH_W, h = TEAM_LAUNCH_H,
-  label = "Partir à l'aventure",
+  label = "Partir à\nl'aventure",
 }
 
 -- "Deck" de l'écran de choix d'équipe (2026-08-30, demande explicite --
@@ -1853,10 +1876,22 @@ local function draw_card_flights(controller)
         local w, h = a.from.w * scale, a.from.h * scale
         if a.def then
           card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+          -- push/origin()/pop (2026-08-30, bug signalé -- "les cartes ne sont
+          -- pas entières, elles sont découpées et incomplètes") : le canvas
+          -- fait exactement CARD_W x CARD_H en pixels PHYSIQUES, mais
+          -- l'échelle globale (love.graphics.scale(SCALE,SCALE), voir
+          -- main.lua) restait active PENDANT le rendu dedans -- le contenu se
+          -- dessinait ~15% trop grand pour son propre canvas et se faisait
+          -- rogner sur les bords droit/bas. Neutralisée le temps du rendu
+          -- DANS le canvas ; restaurée avant de le ressortir (love.graphics.
+          -- draw juste en dessous), qui doit lui bien suivre l'échelle ambiante.
+          love.graphics.push()
+          love.graphics.origin()
           love.graphics.setCanvas(card_flight_canvas)
           love.graphics.clear(0, 0, 0, 0)
           draw_card_face(a.def, CARD_W, CARD_H, a.def.cost, a.def.desc, Theme.muted, false)
           love.graphics.setCanvas()
+          love.graphics.pop()
           love.graphics.setColor(1, 1, 1, alpha)
           love.graphics.draw(card_flight_canvas, cx - w / 2, cy - h / 2, 0, w / CARD_W, h / CARD_H)
         end
@@ -1876,10 +1911,14 @@ local function draw_card_flights(controller)
       local alpha = a.fade_in and math.min(1, p * 1.6) or (1 - p * 0.8)
       if a.def then
         card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+        -- Même correctif que ci-dessus (goto continue) -- voir son commentaire.
+        love.graphics.push()
+        love.graphics.origin()
         love.graphics.setCanvas(card_flight_canvas)
         love.graphics.clear(0, 0, 0, 0)
         draw_card_face(a.def, CARD_W, CARD_H, a.def.cost, a.def.desc, Theme.muted, false)
         love.graphics.setCanvas()
+        love.graphics.pop()
         love.graphics.setColor(1, 1, 1, alpha)
         love.graphics.draw(card_flight_canvas, x, y, 0, w / CARD_W, h / CARD_H)
       else
@@ -2234,12 +2273,20 @@ end
 -- carte de BASE en Theme.muted/non mise en avant ; la Forge à 4 cartes fait
 -- maintenant disparaître des cartes déjà "+"/mises en avant, donc le style
 -- doit pouvoir suivre) : mêmes défauts qu'avant si omis.
+-- push/origin()/pop autour du rendu DANS le canvas (2026-08-30, bug signalé --
+-- voir le commentaire équivalent sur draw_card_flights plus haut) : sans ça,
+-- l'échelle globale (love.graphics.scale(SCALE,SCALE), main.lua) reste active
+-- pendant ce rendu et le contenu déborde du canvas (taille physique fixe),
+-- se faisant rogner sur les bords droit/bas.
 local function draw_faded_card(def, x, y, alpha, desc_color, highlight)
   card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+  love.graphics.push()
+  love.graphics.origin()
   love.graphics.setCanvas(card_flight_canvas)
   love.graphics.clear(0, 0, 0, 0)
   draw_card_face(def, CARD_W, CARD_H, def.cost, def.desc, desc_color or Theme.muted, highlight or false)
   love.graphics.setCanvas()
+  love.graphics.pop()
   love.graphics.setColor(1, 1, 1, alpha)
   love.graphics.draw(card_flight_canvas, x, y)
   love.graphics.setColor(1, 1, 1, 1)
@@ -2273,13 +2320,17 @@ local function draw_card_back_face(w, h, class_id, count)
   text("cartes avancées\ndébloquées", 3, h / 2 + 2, w - 6, 9, Theme.muted, "center")
 end
 
---- Même détour par canvas que draw_faded_card ci-dessus (fondu uniforme).
+--- Même détour par canvas que draw_faded_card ci-dessus (fondu uniforme +
+-- push/origin()/pop, même correctif).
 local function draw_faded_card_back(class_id, count, x, y, alpha)
   card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+  love.graphics.push()
+  love.graphics.origin()
   love.graphics.setCanvas(card_flight_canvas)
   love.graphics.clear(0, 0, 0, 0)
   draw_card_back_face(CARD_W, CARD_H, class_id, count)
   love.graphics.setCanvas()
+  love.graphics.pop()
   love.graphics.setColor(1, 1, 1, alpha)
   love.graphics.draw(card_flight_canvas, x, y)
   love.graphics.setColor(1, 1, 1, 1)
@@ -2731,7 +2782,13 @@ local function draw_team_select(controller)
   set(ready and Theme.accent or Theme.muted); love.graphics.setLineWidth(3)
   love.graphics.rectangle("line", lb.x, lb.y, lb.w, lb.h, 10, 10)
   love.graphics.setLineWidth(1)
-  text(lb.label, lb.x, lb.y + lb.h / 2 - 9, lb.w, 18, ready and Theme.bg or Theme.muted, "center")
+  -- 2 lignes (2026-08-30, voir lb.label ci-dessus) : `text()` ne centre pas
+  -- verticalement un bloc multi-lignes tout seul (LÖVE ne fait qu'empiler
+  -- les lignes vers le bas depuis `y`) -- décalage de départ approximant le
+  -- milieu du bloc de 2 lignes à cette taille de police (16), pas la taille
+  -- de police elle-même (paramètre suivant, 16 -- confondre les 2 affichait
+  -- une police énorme avant ce correctif).
+  text(lb.label, lb.x, lb.y + lb.h / 2 - 16, lb.w, 16, ready and Theme.bg or Theme.muted, "center")
 end
 
 -- Bouton plein, contour doré, texte centré (2026-08-21, demande explicite --
