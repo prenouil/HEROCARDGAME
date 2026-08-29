@@ -65,6 +65,23 @@ end
 -- clic, même si aucune action n'en résulte), jamais retomber sur la logique
 -- "playing" en dessous.
 local function post_combat_click(controller, x, y)
+  if controller.screen == "campfire" then
+    local cf = controller.campfire
+    if cf and not cf.resolved then
+      local rects = View.campfire_hero_rects(controller)
+      for _, h in ipairs(controller.state.heroes) do
+        local r = rects[h.id]
+        if r and View.point_in(r, x, y) then controller:choose_campfire_hero(h.id); return true end
+      end
+    end
+    return true
+  end
+  if controller.screen == "refuge" then
+    if controller.refuge and View.point_in(View.refuge_continue_button, x, y) then
+      controller:confirm_refuge()
+    end
+    return true
+  end
   if controller.screen == "forge" then
     local f = controller.forge
     if f and #f.choices > 0 then
@@ -309,6 +326,16 @@ end
 -- mort/déjà béni ou une carte inexistante, même si post_combat_click les
 -- laisserait passer sans erreur (silencieusement no-op).
 local function post_combat_hovering(controller, x, y)
+  if controller.screen == "campfire" then
+    local cf = controller.campfire
+    if not cf or cf.resolved then return false end
+    local rects = View.campfire_hero_rects(controller)
+    for _, r in pairs(rects) do if View.point_in(r, x, y) then return true end end
+    return false
+  end
+  if controller.screen == "refuge" then
+    return controller.refuge ~= nil and View.point_in(View.refuge_continue_button, x, y)
+  end
   if controller.screen == "forge" then
     local f = controller.forge
     if not f then return false end
@@ -379,7 +406,7 @@ local function is_hovering_clickable_tap(controller, x, y)
     return false
   end
 
-  if controller.screen == "forge" or controller.screen == "temple" then return post_combat_hovering(controller, x, y) end
+  if controller.screen == "campfire" or controller.screen == "refuge" or controller.screen == "forge" or controller.screen == "temple" then return post_combat_hovering(controller, x, y) end
 
   -- Carte "sans cible" en attente de confirmation (2026-08-27) : n'importe où
   -- est cliquable (soit ça valide, soit ça échange/désélectionne, voir
@@ -427,7 +454,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
     return false
   end
 
-  if controller.screen == "forge" or controller.screen == "temple" then return post_combat_hovering(controller, x, y) end
+  if controller.screen == "campfire" or controller.screen == "refuge" or controller.screen == "forge" or controller.screen == "temple" then return post_combat_hovering(controller, x, y) end
 
   -- Carte "sans cible" en attente de confirmation (2026-08-27) : même garde
   -- qu'en mode tap ci-dessus -- n'importe où est cliquable.

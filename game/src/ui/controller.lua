@@ -75,20 +75,29 @@ local DRAFT_FLIP_DURATION = 0.5
 local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début du suivant
 local BOSS_VICTORY_HOLD_DURATION = 2.2 -- s -- temps où "Boss vaincu !" reste affiché avant le retour au menu
 
--- Écrans "La Forge"/"Le Temple" (2026-08-28, demande explicite -- remplacent
--- l'ancien écran "feuDeCamp" unique, voir Controller:enter_post_combat_sequence) :
--- entre le draft de fin de combat et le combat suivant, s'intercalent de façon
--- transparente (n'avancent jamais le budget de difficulté). Chacun apparaît de
--- façon INDÉPENDANTE et ALÉATOIRE (voir POST_COMBAT_FORGE_CHANCE/TEMPLE_CHANCE),
--- jamais plus d'une fois chacun pour un même combat gagné -- 0, 1 ou 2 écrans
--- avant le combat suivant. Petite pause après un choix pour laisser le temps à
+-- Écrans "camp" -- Feu de camp/La Forge/Le Temple (2026-08-30, refonte
+-- complète -- voir Controller:enter_post_combat_sequence) : entre le draft
+-- de fin de combat et le combat suivant, TOUJOURS exactement UN des 3
+-- s'intercale (jamais 0, jamais 2 -- n'avance jamais le budget de
+-- difficulté). Petite pause après un choix pour laisser le temps à
 -- l'animation/au son de se voir avant l'étape suivante.
 local POST_COMBAT_RESOLVE_PAUSE = 0.6
--- Placeholders à ajuster en playtest (2026-08-28) -- indépendantes l'une de
--- l'autre : les 4 issues ("ni l'un ni l'autre", "Forge seule", "Temple seul",
--- "les deux") sont donc toutes possibles, pas seulement les 3 citées explicitement.
-local POST_COMBAT_FORGE_CHANCE = 0.4
-local POST_COMBAT_TEMPLE_CHANCE = 0.4
+-- "Le joueur choisit parmi ses 4 aventuriers lequel va se faire soigner de
+-- 30% de ses PV max" (2026-08-30, demande explicite, feu de camp).
+local CAMPFIRE_HEAL_FRACTION = 0.30
+-- "Tous les persos vont regagner 30% de leurs PV" (2026-08-30, demande
+-- explicite, Le Refuge -- même fraction que le feu de camp, mais sans choix,
+-- toute l'équipe à la fois).
+local REFUGE_HEAL_FRACTION = 0.30
+-- Nombre de combats d'un run "bounded" avant le Boss (2026-08-30, demande
+-- explicite -- "après 9 combats et 1 dernier évènement obligatoirement le
+-- Refuge, on enchaîne sur le Boss" ; était 5, voir Controller:
+-- advance_to_next_combat/enter_post_combat_sequence). View.lua duplique
+-- cette valeur pour le compteur affiché en haut (voir son commentaire --
+-- même raison que la duplication SCALE/H déjà en place entre conf.lua et
+-- view.lua, ce module-là ne peut pas requérir controller.lua sans créer un
+-- cycle).
+local BOUNDED_COMBAT_COUNT = 9
 
 -- Choix "amélioration" à la Forge (2026-08-11, demande explicite -- adapté au
 -- 2026-08-28 pour 1 carte choisie parmi jusqu'à 4, plus 2 cartes systématiques) :
@@ -176,10 +185,11 @@ function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "menu" -- "menu" | "options" | "team_select" | "playing" | "draft" | "forge" | "temple" | "bossVictory" | "defeat"
+  self.screen = "menu" -- "menu" | "options" | "team_select" | "playing" | "draft" | "campfire" | "forge" | "temple" | "refuge" | "bossVictory" | "defeat"
   -- Mode de run choisi au menu (2026-08-21, demande explicite) : "infini"
-  -- (illimité, l'ancien comportement par défaut), "bounded" (5 combats puis
-  -- l'Homme Arbre, voir Controller:advance_to_next_combat/Game.start_boss_combat)
+  -- (illimité, l'ancien comportement par défaut), "bounded" (BOUNDED_COMBAT_COUNT
+  -- combats -- 9, 2026-08-30, était 5 -- puis l'Homme Arbre, voir
+  -- Controller:advance_to_next_combat/Game.start_boss_combat)
   -- ou "boss_test" (combat isolé contre le boss, voir
   -- Controller:start_boss_test -- une victoire ramène au menu plutôt que
   -- d'enchaîner un faux combat suivant). nil tant qu'aucun run n'a encore
@@ -197,11 +207,29 @@ function Controller.new()
   -- voir Controller:enter_team_select.
   self.team_select = nil
   self.draft_picks = nil
-  -- File des écrans "camp" restant à montrer après le combat qui vient d'être
-  -- gagné (2026-08-28) -- {"forge"}/{"temple"}/{"forge","temple"}/{} selon les
-  -- tirages de Controller:enter_post_combat_sequence ; consommée un élément à
-  -- la fois par Controller:advance_post_combat_queue.
+  -- Toujours vide désormais (2026-08-30, refonte -- voir
+  -- Controller:enter_post_combat_sequence) : un seul évènement "camp" est
+  -- choisi et lancé DIRECTEMENT après chaque combat gagné (jamais 0 ni 2),
+  -- plus besoin d'empiler plusieurs écrans à montrer à la suite -- gardée
+  -- telle quelle (Controller:advance_post_combat_queue continue d'exister,
+  -- toujours vide -> retombe directement sur advance_to_next_combat) plutôt
+  -- que de retirer ce point de sortie commun aux 3 écrans "camp".
   self.post_combat_queue = {}
+  -- Dernier TYPE d'évènement "camp" montré (2026-08-30, "campfire"|"forge"|
+  -- "temple"|nil) : mémorisé d'un combat à l'autre pour que
+  -- Controller:enter_post_combat_sequence ne puisse jamais retirer le même
+  -- deux fois de suite (demande explicite).
+  self.last_post_combat_event = nil
+  -- { resolved = bool|nil }, voir Controller:enter_campfire_screen -- écran
+  -- "Feu de camp" (2026-08-30, remis en place, refonte -- SEULE option : le
+  -- joueur choisit 1 des 4 aventuriers, soigné de 30% de ses PV max, aucun
+  -- autre choix contrairement à l'ancien feuDeCamp qui proposait aussi une
+  -- amélioration de carte (ce rôle est maintenant celui de la Forge, à part).
+  self.campfire = nil
+  -- { healed = {[hero_id] = amount, ...} }, voir Controller:enter_refuge_screen
+  -- -- écran "Le Refuge" (2026-08-30, nouvel évènement) : soigne TOUS les
+  -- aventuriers d'un coup, aucun choix (contrairement au feu de camp).
+  self.refuge = nil
   self.forge = nil -- { choices = {instance,...}, resolved = bool|nil }, voir enter_forge_screen
   self.forge_upgrade_anim = nil -- { chosen_index, base_def, t = elapsed }, voir choose_forge_card
   self.forge_upgrade_anim_duration = FORGE_UPGRADE_ANIM_DURATION -- lu par view.lua pour l'easing
@@ -601,6 +629,8 @@ end
 function Controller:clear_animation_state()
   self.draft_picks = nil
   self.post_combat_queue = {}
+  self.campfire = nil
+  self.refuge = nil
   self.forge = nil
   self.forge_upgrade_anim = nil
   self.temple = nil
@@ -636,6 +666,11 @@ function Controller:reset_run(mode, selected_ids)
   self.last_selected_ids = selected_ids
   self.screen = "playing"
   self:clear_animation_state()
+  -- Une NOUVELLE run ne doit rien hériter de l'historique "camp" d'une run
+  -- précédente (2026-08-30) -- contrairement à restart_combat/restart_turn
+  -- (mi-run, l'historique reste valable), jamais réinitialisé dans
+  -- clear_animation_state pour cette raison.
+  self.last_post_combat_event = nil
   Game.reset_run(self.state, nil, selected_ids)
   -- Game.start_turn (appelé par reset_run) ne peut plus infliger de dégâts à
   -- ce jour -- garde-fou conservé par précaution, voir advance_after_discard_sequenced.
@@ -658,6 +693,7 @@ function Controller:start_boss_test()
   self.screen = "playing"
   self.run_mode = "boss_test"
   self:clear_animation_state()
+  self.last_post_combat_event = nil
   Game.start_boss_test(self.state)
   if self.state.over then self:handle_combat_victory(); return end
   self:play_turn_start_sequence()
@@ -1427,35 +1463,159 @@ end
 
 -- ---------- forge / temple (post-combat) ----------
 
---- Tire, une seule fois par combat gagné, LEQUEL des 2 écrans "camp" apparaîtra
--- (0, 1 ou 2 -- jamais le même deux fois, voir POST_COMBAT_FORGE_CHANCE/
--- TEMPLE_CHANCE en tête de fichier) puis lance la file (voir
--- advance_post_combat_queue). `state.rng.post_combat` : flux dédié à CE
--- tirage-là seulement, jamais celui qui décide du CONTENU de la Forge/du
--- Temple (state.rng.forge/temple, consommés seulement si l'écran apparaît
--- vraiment) -- comme ça, ajouter/retirer un écran de la file ne décale jamais
--- les tirages de l'autre.
+--- Choisit ET lance l'UNIQUE évènement "camp" de ce combat gagné (2026-08-30,
+-- refonte complète -- demande explicite : "entre 2 combats, il y a désormais
+-- obligatoirement 1 seul évènement parmi le feu de camp, la forge et le
+-- temple, le choix est aléatoire mais ne peut arriver 2 fois à la suite").
+-- Remplace l'ancien système à 2 tirages de probabilité indépendants (0, 1 ou
+-- 2 écrans -- voir git log pour POST_COMBAT_FORGE_CHANCE/TEMPLE_CHANCE, un
+-- seul tirage à 3 issues désormais. `self.last_post_combat_event` exclut le
+-- type de la dernière fois ; le Temple est EN PLUS retiré des candidats s'il
+-- n'a rien à proposer (Temple.any_type_viable, pur -- aucun aventurier
+-- éligible à ni bénédiction ni malédiction) -- le feu de camp et la Forge
+-- restent, eux, TOUJOURS disponibles (soigner 30% de PV max, ou "Passer" si
+-- le deck est déjà entièrement amélioré). Si les 2 filtres combinés
+-- videraient la liste (le dernier évènement ÉTAIT déjà le seul des 2
+-- toujours-disponibles, Temple indisponible ce combat-ci), la règle "jamais
+-- 2 fois de suite" cède plutôt que de laisser passer un combat sans aucun
+-- évènement. `state.rng.post_combat` : flux dédié à CE tirage-là seulement,
+-- jamais celui qui décide du CONTENU de la Forge/du Temple (state.rng.forge/
+-- temple, consommés seulement une fois l'écran vraiment entré).
+-- `candidates` compte 4 types désormais (campfire/forge/temple/refuge) : au
+-- plus 1 est retiré pour "pas 2 fois de suite" et 1 pour "Temple
+-- indisponible", il en reste donc TOUJOURS au moins 2 -- le filet de
+-- sécurité de l'ancienne version (2 seuls types toujours-disponibles) n'a
+-- donc plus de raison d'être, retiré.
 function Controller:enter_post_combat_sequence()
+  -- "Après 9 combats et 1 dernier évènement OBLIGATOIREMENT le Refuge, on
+  -- enchaîne sur le Boss" (2026-08-30, demande explicite) : ce combat-ci
+  -- vient d'être bouclé (state.run.combat_index n'est pas encore incrémenté,
+  -- voir le commentaire sur advance_to_next_combat) -- si c'est le dernier
+  -- combat classique d'un run "bounded", Le Refuge remplace le tirage
+  -- normal SANS EXCEPTION (même si le dernier évènement était déjà Le
+  -- Refuge -- la garantie "reposé juste avant le Boss" prime sur "jamais 2
+  -- fois de suite").
+  if self.run_mode == "bounded" and self.state.run.combat_index >= BOUNDED_COMBAT_COUNT then
+    self.last_post_combat_event = "refuge"
+    self:enter_refuge_screen()
+    return
+  end
+
   local rng = self.state.rng.post_combat
-  local queue = {}
-  if rng:random() < POST_COMBAT_FORGE_CHANCE then queue[#queue + 1] = "forge" end
-  if rng:random() < POST_COMBAT_TEMPLE_CHANCE then queue[#queue + 1] = "temple" end
-  self.post_combat_queue = queue
-  self:advance_post_combat_queue()
+  local candidates = {}
+  for _, t in ipairs({ "campfire", "forge", "temple", "refuge" }) do
+    if t ~= self.last_post_combat_event then candidates[#candidates + 1] = t end
+  end
+  if not Temple.any_type_viable(self.state) then
+    local filtered = {}
+    for _, t in ipairs(candidates) do if t ~= "temple" then filtered[#filtered + 1] = t end end
+    candidates = filtered
+  end
+  local chosen = candidates[rng:random(#candidates)]
+  self.last_post_combat_event = chosen
+  if chosen == "campfire" then self:enter_campfire_screen()
+  elseif chosen == "forge" then self:enter_forge_screen()
+  elseif chosen == "temple" then self:enter_temple_screen()
+  else self:enter_refuge_screen() end
 end
 
---- Dépile le prochain écran "camp" à montrer (Forge, Temple, ou aucun -- passe
--- alors directement au combat suivant). Point de retour unique de
--- finish_forge/finish_temple, jamais d'aiguillage dupliqué ailleurs.
+--- Point de sortie commun aux 3 écrans "camp" (2026-08-30) : `post_combat_queue`
+-- reste toujours vide désormais (un seul évènement par combat, jamais
+-- empilé), donc ceci retombe TOUJOURS directement sur advance_to_next_combat --
+-- gardé comme point d'entrée unique plutôt que d'appeler advance_to_next_combat
+-- directement depuis chaque finish_forge/finish_temple/finish_campfire.
 function Controller:advance_post_combat_queue()
-  local next_screen = table.remove(self.post_combat_queue, 1)
-  if next_screen == "forge" then
-    self:enter_forge_screen()
-  elseif next_screen == "temple" then
-    self:enter_temple_screen()
-  else
-    self:advance_to_next_combat()
+  table.remove(self.post_combat_queue, 1)
+  self:advance_to_next_combat()
+end
+
+-- ---------- feu de camp (post-combat) ----------
+
+--- Entre sur l'écran "Feu de camp" (2026-08-30, remis en place, refonte --
+-- demande explicite : "pas d'options autre que le soin, le joueur choisit
+-- parmi ses 4 aventuriers lequel va se faire soigner de 30% de ses PV max").
+-- Aucun tirage aléatoire à faire ICI (contrairement à Forge/Temple) -- le
+-- montant de soin est déterministe (CAMPFIRE_HEAL_FRACTION), et les 4
+-- aventuriers de la run sont TOUJOURS tous choisissables, vivants ou non
+-- (un aventurier tombé à 0 PV entre 2 combats n'a sinon plus aucun moyen de
+-- revenir dans la partie -- voir Combat.grant_heal, qui ne bloque pas un
+-- soin depuis 0).
+function Controller:enter_campfire_screen()
+  self.screen = "campfire"
+  self.campfire = { resolved = false }
+end
+
+local function campfire_choosable(self)
+  local cf = self.campfire
+  return self.screen == "campfire" and cf ~= nil and not cf.resolved
+end
+
+--- Clique un aventurier : le soigne aussitôt de CAMPFIRE_HEAL_FRACTION x ses
+-- PV max (arrondi -- même convention que tout le reste des soins, voir
+-- Combat.round/grant_heal) puis referme l'écran -- pas de bouton "Confirmer"
+-- séparé, contrairement au Temple (ici un seul choix suffit à résoudre
+-- l'évènement, rien d'autre à combiner avec).
+function Controller:choose_campfire_hero(hero_id)
+  if not campfire_choosable(self) then return end
+  local hero = Combat.hero_by_id(self.state, hero_id)
+  if not hero then return end
+  self.campfire.resolved = true
+  -- Pas de flottant (2026-08-30) : Controller:spawn_floater se positionne via
+  -- View.unit_rect, calé sur la rangée de héros DU COMBAT (HERO_ROW_Y) --
+  -- pas la rangée propre à cet écran (View.campfire_hero_rects) -- même
+  -- absence de flottant que la confirmation du Temple, qui ne s'en sert pas
+  -- non plus pour la même raison.
+  local amount = Combat.grant_heal(hero, hero.max_hp * CAMPFIRE_HEAL_FRACTION)
+  Combat.log(self.state, hero.name .. " se repose au feu de camp (+" .. amount .. " PV).", "heal")
+  Sfx.play("heal")
+  self:finish_campfire()
+end
+
+function Controller:finish_campfire()
+  local self_ = self
+  self.seq:push(function() end, POST_COMBAT_RESOLVE_PAUSE)
+  self.seq:push(function()
+    self_.campfire = nil
+    self_:advance_post_combat_queue()
+  end)
+end
+
+-- ---------- le refuge (post-combat) ----------
+
+--- Entre sur l'écran "Le Refuge" (2026-08-30, nouvel évènement -- demande
+-- explicite : "pas de choix, tous les persos vont regagner 30% de leurs PV")
+-- -- soigne TOUS les aventuriers d'un coup, RIEN à choisir contrairement au
+-- feu de camp (1 seul aventurier). Le soin est appliqué IMMÉDIATEMENT à
+-- l'entrée sur l'écran (pas différé à un clic, puisqu'il n'y a justement
+-- aucun choix à faire) -- l'écran reste affiché le temps que le joueur
+-- clique "Continuer", juste pour qu'il ait le temps de voir le résultat
+-- avant d'enchaîner.
+function Controller:enter_refuge_screen()
+  self.screen = "refuge"
+  local healed = {}
+  for _, h in ipairs(self.state.heroes) do
+    local amount = Combat.grant_heal(h, h.max_hp * REFUGE_HEAL_FRACTION)
+    healed[h.id] = amount
+    if amount > 0 then
+      Combat.log(self.state, h.name .. " se repose au Refuge (+" .. amount .. " PV).", "heal")
+    end
   end
+  self.refuge = { healed = healed }
+  Sfx.play("heal")
+end
+
+--- "Continuer" (2026-08-30) : seule action possible sur cet écran, le soin a
+-- déjà eu lieu à l'entrée (voir enter_refuge_screen) -- referme l'écran et
+-- enchaîne (droit sur le Boss si c'est le Refuge obligatoire de fin de run
+-- borné, voir Controller:advance_to_next_combat).
+function Controller:confirm_refuge()
+  if self.screen ~= "refuge" or not self.refuge then return end
+  local self_ = self
+  self.seq:push(function() end, POST_COMBAT_RESOLVE_PAUSE)
+  self.seq:push(function()
+    self_.refuge = nil
+    self_:advance_post_combat_queue()
+  end)
 end
 
 --- Entre sur l'écran "La Forge" (2026-08-28, demande explicite) : jusqu'à
@@ -1613,11 +1773,15 @@ end
 -- Controller:handle_combat_victory/enter_boss_victory bien avant d'atteindre
 -- le draft ou le camp) -- cette fonction ne gère donc que la progression ENTRE
 -- deux combats non-boss d'un run normal, boss compris comme destination (pas
--- comme victoire). Run borné à 5 combats + 1 boss : le combat contre l'Homme
--- Arbre (Game.start_boss_combat) remplace le 6ᵉ combat classique --
--- `state.run.combat_index` porte encore le numéro du combat qui vient d'être
--- gagné (Game.start_next_combat/start_boss_combat, plus bas, sont ce qui
--- l'incrémente), donc >= 5 ici veut dire "le 5ᵉ combat vient d'être bouclé".
+-- comme victoire). Run borné à BOUNDED_COMBAT_COUNT combats + 1 boss : le
+-- combat contre l'Homme Arbre (Game.start_boss_combat) remplace le combat
+-- suivant classique -- `state.run.combat_index` porte encore le numéro du
+-- combat qui vient d'être gagné (Game.start_next_combat/start_boss_combat,
+-- plus bas, sont ce qui l'incrémente), donc >= BOUNDED_COMBAT_COUNT ici veut
+-- dire "le dernier combat classique vient d'être bouclé" -- combiné à
+-- enter_post_combat_sequence (qui force Le Refuge comme SEUL évènement de ce
+-- combat-ci), le joueur affronte donc toujours le Boss juste après s'être
+-- reposé au Refuge, jamais au sortir d'un autre évènement.
 -- `play_turn_start_sequence()` (2026-08-28, remplace un simple
 -- consume_drawn_animation) : nécessaire pour que le petit saut de chaque
 -- aventurier (voir play_hero_ready_hops) rejoue à l'entrée en combat, pas
@@ -1630,7 +1794,7 @@ function Controller:advance_to_next_combat()
   self.screen = "playing"
   self.state.over = false
   local before = self:snapshot_units()
-  if self.run_mode == "bounded" and self.state.run.combat_index >= 5 then
+  if self.run_mode == "bounded" and self.state.run.combat_index >= BOUNDED_COMBAT_COUNT then
     Game.start_boss_combat(self.state)
   else
     Game.start_next_combat(self.state)

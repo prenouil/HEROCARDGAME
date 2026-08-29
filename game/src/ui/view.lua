@@ -47,6 +47,11 @@ end
 local W, H = 960, 660
 View.W, View.H = W, H
 
+-- Dupliqué depuis controller.lua (2026-08-30, compteur "X/9 avant le Boss") :
+-- même raison que la duplication SCALE/H ci-dessus -- controller.lua requiert
+-- déjà view.lua, un require dans l'autre sens créerait un cycle.
+local BOUNDED_COMBAT_COUNT = 9
+
 -- +12 (2026-08-27, demande explicite -- portraits plus gros partout, voir
 -- HERO_PORTRAIT_SIZE plus bas) : la carte grandit un peu pour absorber le
 -- portrait agrandi sans tasser le reste (badges, nom en bas côté héros).
@@ -326,6 +331,38 @@ function View.temple_hero_rects(controller)
 end
 View.temple_confirm_button = {
   x = W / 2 - 100, y = TEMPLE_HERO_Y + TEMPLE_HERO_H + 20, w = 200, h = 44, label = "Confirmer",
+}
+
+-- Écran "Feu de camp" (2026-08-30, remis en place, refonte -- "pas d'options
+-- autre que le soin, le joueur choisit parmi ses 4 aventuriers lequel va se
+-- faire soigner de 30% de ses PV max") : une seule rangée de 4, cliquer
+-- résout directement (pas de bouton "Confirmer" séparé, contrairement au
+-- Temple qui combine 2 choix) -- mêmes dimensions que la rangée du Temple,
+-- juste plus haute à l'écran (rien au-dessus, pas de statues).
+local CAMPFIRE_HERO_W, CAMPFIRE_HERO_H = 150, 170
+local CAMPFIRE_HERO_Y = 240
+function View.campfire_hero_rects(controller)
+  local rects = centered_row(#controller.state.heroes, CAMPFIRE_HERO_W, CAMPFIRE_HERO_H, CAMPFIRE_HERO_Y)
+  local out = {}
+  for i, h in ipairs(controller.state.heroes) do out[h.id] = rects[i] end
+  return out
+end
+
+-- Écran "Le Refuge" (2026-08-30, nouvel évènement -- "pas de choix, tous les
+-- persos vont regagner 30% de leurs PV") : même rangée de 4 que le feu de
+-- camp, mais purement informative ici (le soin a déjà eu lieu à l'entrée sur
+-- l'écran, voir Controller:enter_refuge_screen) -- un seul bouton
+-- "Continuer" fait avancer, pas de clic sur un aventurier.
+local REFUGE_HERO_W, REFUGE_HERO_H = 150, 170
+local REFUGE_HERO_Y = 240
+function View.refuge_hero_rects(controller)
+  local rects = centered_row(#controller.state.heroes, REFUGE_HERO_W, REFUGE_HERO_H, REFUGE_HERO_Y)
+  local out = {}
+  for i, h in ipairs(controller.state.heroes) do out[h.id] = rects[i] end
+  return out
+end
+View.refuge_continue_button = {
+  x = W / 2 - 100, y = REFUGE_HERO_Y + REFUGE_HERO_H + 20, w = 200, h = 44, label = "Continuer",
 }
 
 -- Écran "Choisis ton équipe" (2026-08-29, avant chaque run -- 4 aventuriers
@@ -2424,6 +2461,70 @@ local function draw_forge(controller)
   end
 end
 
+--- Écran "Feu de camp" (2026-08-30, remis en place, refonte -- demande
+-- explicite : "pas d'options autre que le soin, le joueur choisit parmi ses
+-- 4 aventuriers lequel va se faire soigner de 30% de ses PV max") : une
+-- rangée de 4 cadres cliquables, chacun affiche le montant EXACT qu'il
+-- recevrait (déjà plafonné à max_hp, même calcul que Controller:
+-- choose_campfire_hero -- ne peuvent jamais diverger) -- cliquer résout
+-- directement, pas de bouton "Confirmer" séparé.
+local function draw_campfire(controller)
+  local cf = controller.campfire
+  set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
+  text("Feu de camp", 0, 60, W, 24, Theme.text)
+  text("Choisis l'aventurier à soigner (30% de ses PV max).", 0, 92, W, 12, Theme.muted)
+
+  local rects = View.campfire_hero_rects(controller)
+  for _, h in ipairs(controller.state.heroes) do
+    local r = rects[h.id]
+    panel(r.x, r.y, r.w, r.h, Theme.panel_light)
+    set(Theme.heal); love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
+    love.graphics.setLineWidth(1)
+    local portrait_size = 70
+    draw_class_icon(h.class_id, h.icon, h.label, r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size, Theme.text)
+    local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
+    name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+    text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 110, r.w, 11, Theme.muted, "center")
+    local healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
+    text("+" .. healed .. " PV", r.x, r.y + 126, r.w, 13, Theme.heal, "center")
+  end
+end
+
+--- Écran "Le Refuge" (2026-08-30, nouvel évènement -- demande explicite :
+-- "pas de choix, tous les persos vont regagner 30% de leurs PV") : le soin
+-- est déjà appliqué à l'entrée sur l'écran (voir Controller:
+-- enter_refuge_screen/self.refuge.healed) -- cet affichage montre donc le
+-- montant RÉELLEMENT reçu, pas une prévision (contrairement au feu de camp,
+-- où le choix n'est pas encore fait). Un seul bouton "Continuer", aucun
+-- aventurier cliquable.
+local function draw_refuge(controller)
+  local rf = controller.refuge
+  set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
+  text("Le Refuge", 0, 60, W, 24, Theme.text)
+  text("Toute l'équipe se repose (30% des PV max).", 0, 92, W, 12, Theme.muted)
+
+  local rects = View.refuge_hero_rects(controller)
+  for _, h in ipairs(controller.state.heroes) do
+    local r = rects[h.id]
+    panel(r.x, r.y, r.w, r.h, Theme.panel_light)
+    set(Theme.heal); love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
+    love.graphics.setLineWidth(1)
+    local portrait_size = 70
+    draw_class_icon(h.class_id, h.icon, h.label, r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size, Theme.text)
+    local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
+    name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+    text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 110, r.w, 11, Theme.muted, "center")
+    local healed = (rf and rf.healed[h.id]) or 0
+    text("+" .. healed .. " PV", r.x, r.y + 126, r.w, 13, Theme.heal, "center")
+  end
+
+  local b = View.refuge_continue_button
+  set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
+  set(Theme.bg); text(b.label, b.x, b.y + 14, b.w, 14, Theme.bg, "center")
+end
+
 --- Écran "Le Temple" (2026-08-29, refonte complète -- demande explicite,
 -- remplace la statue unique "pot difforme + fleur" par une statue PAR EFFET
 -- proposé -- voir Icons.draw_status("temple_blessing"/"temple_curse")) :
@@ -2850,7 +2951,19 @@ function View.draw(controller)
 
   -- Titre "Hero Card Game — Run Infini" retiré (2026-08-27, demande explicite) :
   -- redondant en plein combat, déjà affiché sur l'écran de menu (draw_menu).
-  text("Combat " .. state.run.combat_index .. " — Tour " .. state.turn, 0, 30, W, 11, Theme.muted)
+  -- Compteur "X/9 avant le Boss" (2026-08-30, demande explicite -- run
+  -- "bounded" uniquement -- "infini" n'a pas de Boss à annoncer, "boss_test"
+  -- est déjà EN plein combat de boss dès le départ) : une fois DANS le combat
+  -- de boss lui-même (state.run.is_boss), plus de "sur 9" à afficher.
+  local combat_title
+  if state.run.is_boss then
+    combat_title = "Combat contre le Boss — Tour " .. state.turn
+  elseif controller.run_mode == "bounded" then
+    combat_title = "Combat " .. state.run.combat_index .. "/" .. BOUNDED_COMBAT_COUNT .. " avant le Boss — Tour " .. state.turn
+  else
+    combat_title = "Combat " .. state.run.combat_index .. " — Tour " .. state.turn
+  end
+  text(combat_title, 0, 30, W, 11, Theme.muted)
 
   text("Ennemis", 20, 40, 200, 10, Theme.muted, "left")
   for _, e in ipairs(state.enemies) do draw_enemy(controller, e, View.enemy_rects(state)[e.id]) end
@@ -2963,6 +3076,10 @@ function View.draw(controller)
         love.graphics.pop()
       end
     end
+  elseif controller.screen == "campfire" and controller.campfire then
+    draw_campfire(controller)
+  elseif controller.screen == "refuge" and controller.refuge then
+    draw_refuge(controller)
   elseif controller.screen == "forge" and controller.forge then
     draw_forge(controller)
   elseif controller.screen == "temple" and controller.temple then

@@ -172,6 +172,16 @@ function Temple.roll_type(state, rng)
   return candidates[rng:random(#candidates)]
 end
 
+--- Vrai si AU MOINS UN type (bénédiction OU malédiction) a quelque chose à
+-- proposer (2026-08-30, écran "camp" -- Controller:enter_post_combat_sequence
+-- doit savoir SANS consommer `state.rng.temple` si le Temple peut faire
+-- partie des candidats de ce combat-ci, avant même de le choisir) : pure,
+-- même logique que Temple.roll_type mais sans tirage -- les deux ne peuvent
+-- jamais diverger puisqu'ils appellent le même type_is_viable local.
+function Temple.any_type_viable(state)
+  return type_is_viable(state, "blessing") or type_is_viable(state, "curse")
+end
+
 --- Tire jusqu'à Temple.CHOICE_COUNT effets DISTINCTS du type donné, sans
 -- remise -- même idiome que Forge.pick_choices : une liste plus courte si le
 -- type n'a pas assez d'entrées, jamais un filet de sécurité qui repasserait
