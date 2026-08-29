@@ -193,11 +193,14 @@ local PARTICLE_DURATION = 0.45 -- s -- petit burst de pixels à l'impact
 local PARTICLE_COUNT = 6
 
 -- Barre de PV "à 2 niveaux" (2026-08-30, demande explicite) : vitesse à
--- laquelle self.hp_trail rattrape unit.hp après une perte, en FRACTION du
--- max_hp de l'unité par seconde -- pas un nombre de PV/s fixe, pour qu'un
--- petit gobelin (peu de PV max) et le Boss (beaucoup) mettent tous deux un
--- temps comparable, proportionnellement, à afficher toute leur traînée.
-local HP_TRAIL_RATE = 0.6
+-- laquelle self.hp_trail rattrape unit.hp après une perte OU un gain, en
+-- FRACTION du max_hp de l'unité par seconde -- pas un nombre de PV/s fixe,
+-- pour qu'un petit gobelin (peu de PV max) et le Boss (beaucoup) mettent
+-- tous deux un temps comparable, proportionnellement, à afficher toute leur
+-- traînée. Ralentie (2026-08-30, deuxième retour explicite -- "la barre
+-- jaune descend trop vite") : 0.6 -> 0.25, la traînée met désormais ~4s à
+-- rattraper une perte totale au lieu de ~1.7s.
+local HP_TRAIL_RATE = 0.25
 
 -- Mort d'un ennemi (2026-08-30, demande explicite -- "quand un ennemi est
 -- vaincu ... il se fissure puis explose en particules qui vanish au bout de
@@ -220,6 +223,17 @@ local ENEMY_SHATTER_SIZE = 72
 -- doucement pour atteindre l'état actuel", + un son grave dédié) : durée du
 -- fondu, voir self.hero_death_fade/draw_hero (view.lua).
 local HERO_DEATH_FADE_DURATION = 1.2
+
+-- Transition d'entrée des écrans "camp" (2026-08-30, demande explicite --
+-- voir self.camp_entrance) : le titre descend pendant CAMP_ENTRANCE_TITLE_
+-- DURATION (même durée que la descente d'1 ennemi en combat, voir
+-- ENEMY_ENTRANCE_DURATION -- même "poids" de chute), le reste du contenu
+-- commence à apparaître en fondu à CAMP_ENTRANCE_FADE_DELAY (le titre a déjà
+-- bien entamé sa chute, pas besoin d'attendre qu'il soit posé pile pour
+-- lancer le fondu) sur CAMP_ENTRANCE_FADE_DURATION.
+local CAMP_ENTRANCE_TITLE_DURATION = 0.55
+local CAMP_ENTRANCE_FADE_DELAY = 0.30
+local CAMP_ENTRANCE_FADE_DURATION = 0.4
 local STATUS_POP_DURATION = 0.35 -- s -- pop d'échelle d'un badge de statut à son application
 local SHIELD_FX_DURATION = 1.0 -- s -- gros bouclier en fondu sur un gain de Défense
 -- "Amnésie" (2026-08-28, demande explicite) : durée du rétrécissement/fondu
@@ -350,6 +364,21 @@ function Controller.new()
   -- et draw_hero dans view.lua, seul lecteur, qui INTERPOLE ses alphas plutôt
   -- que de basculer instantanément sur "mort" comme avant ce correctif).
   self.hero_death_fade = {}
+  -- { t = elapsed } (2026-08-30, demande explicite -- transition d'entrée
+  -- des 4 écrans "camp", voir Controller:enter_post_combat_sequence, seul
+  -- écrivain) : titre qui descend depuis le haut de l'écran, puis le reste
+  -- du contenu qui apparaît en fondu -- voir CAMP_ENTRANCE_TITLE_DURATION/
+  -- CAMP_ENTRANCE_FADE_*, lues par draw_campfire/draw_forge/draw_temple/
+  -- draw_refuge (view.lua). nil tant qu'aucun écran "camp" n'a encore été
+  -- traversé (jamais lu avant leur toute première entrée).
+  self.camp_entrance = nil
+  -- Lues par view.lua pour l'easing (2026-08-30) : même convention que
+  -- self.victory_title_duration/self.forge_upgrade_anim_duration/
+  -- self.temple_choice_anim_duration -- jamais une constante dupliquée côté
+  -- vue, toujours relue ici.
+  self.camp_entrance_title_duration = CAMP_ENTRANCE_TITLE_DURATION
+  self.camp_entrance_fade_delay = CAMP_ENTRANCE_FADE_DELAY
+  self.camp_entrance_fade_duration = CAMP_ENTRANCE_FADE_DURATION
   self.floaters = {} -- liste de { x, y, text, kind = "damage"|"heal", t } -- lu par view.lua
   self.particles = {} -- liste de { x, y, vx, vy, t } -- petit burst à l'impact
   self.status_pop = {} -- [unit_id] = { [status_key] = elapsed } -- pop d'un badge à son application
@@ -1459,17 +1488,24 @@ function Controller:update(dt)
     p.t = p.t + dt
     if p.t >= (p.duration or self.particle_duration) then table.remove(self.particles, i) end
   end
-  -- Traînée de PV "à 2 niveaux" (2026-08-30, demande explicite -- voir
-  -- self.hp_trail, Controller.new, et hp_bar dans view.lua) : rattrape
-  -- unit.hp au fil du temps sur une PERTE (vitesse proportionnelle au
-  -- max_hp de l'unité, voir HP_TRAIL_RATE), remonte INSTANTANÉMENT sur un
-  -- gain (soin) -- jamais l'inverse. Héros ET ennemis, même boucle -- une
-  -- fois la traînée d'un ennemi déjà à 0 PV redescendue à son tour à 0,
-  -- déclenche sa séquence de mort (fissure -> explosion) ci-dessous, UNE
+  -- Traînée de PV "à 2 niveaux" (2026-08-30, demande explicite, ÉTENDUE le
+  -- même jour -- "le même système de double barre pour les soins, avec une
+  -- première barre verte qui monte instantanément, puis la barre normale
+  -- qui la rejoint doucement") : rattrape unit.hp au fil du temps dans LES
+  -- DEUX SENS désormais (vitesse proportionnelle au max_hp de l'unité, voir
+  -- HP_TRAIL_RATE) -- PLUS d'exception "remonte instantanément sur un
+  -- gain" : `u.hp` (déjà à sa vraie valeur, immédiate) sert de cible dans
+  -- les deux cas, `trail` le rejoint toujours progressivement, que ce soit
+  -- par le bas (perte) ou par le haut (gain). hp_bar (view.lua) choisit la
+  -- couleur d'accent (jaune si trail > hp, vert si trail < hp) selon lequel
+  -- des deux est actuellement le plus grand. Héros ET ennemis, même boucle
+  -- -- une fois la traînée d'un ennemi déjà à 0 PV redescendue à son tour à
+  -- 0, déclenche sa séquence de mort (fissure -> explosion) ci-dessous, UNE
   -- SEULE FOIS (self.enemy_death[e.id] sert de garde).
   local function advance_trail(u)
     local trail = self.hp_trail[u.id]
-    if trail == nil or trail < u.hp then trail = u.hp
+    if trail == nil then trail = u.hp
+    elseif trail < u.hp then trail = math.min(u.hp, trail + u.max_hp * HP_TRAIL_RATE * dt)
     elseif trail > u.hp then trail = math.max(u.hp, trail - u.max_hp * HP_TRAIL_RATE * dt) end
     self.hp_trail[u.id] = trail
     return trail
@@ -1569,6 +1605,7 @@ function Controller:update(dt)
   for _, f in pairs(self.draft_flip) do f.t = f.t + dt end
   if self.forge_upgrade_anim then self.forge_upgrade_anim.t = self.forge_upgrade_anim.t + dt end
   if self.temple_choice_anim then self.temple_choice_anim.t = self.temple_choice_anim.t + dt end
+  if self.camp_entrance then self.camp_entrance.t = self.camp_entrance.t + dt end
 end
 
 function Controller:set_hover(kind, target)
@@ -1881,6 +1918,15 @@ function Controller:enter_post_combat_sequence()
   -- Refuge -- la garantie "reposé juste avant le Boss" prime sur "jamais 2
   -- fois de suite"). SEUL chemin qui mène au Refuge -- voir le commentaire
   -- au-dessus de cette fonction.
+  -- Transition douce d'entrée (2026-08-30, demande explicite -- "une
+  -- transition douce entre le draft et l'évènement... d'abord le titre qui
+  -- descend doucement depuis le haut... puis les différents éléments
+  -- apparaissent en fade in") : posée ICI, seul point de passage commun aux
+  -- 4 écrans "camp" (Refuge forcé ci-dessous compris) -- voir
+  -- self.camp_entrance, lu par draw_campfire/draw_forge/draw_temple/
+  -- draw_refuge (view.lua).
+  self.camp_entrance = { t = 0 }
+
   if self.run_mode == "bounded" and self.state.run.combat_index >= BOUNDED_COMBAT_COUNT then
     self.last_post_combat_event = "refuge"
     self:enter_refuge_screen()

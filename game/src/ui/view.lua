@@ -720,27 +720,35 @@ local function draw_badge_row(items, x, y, w, size, color, pop_lookup, pop_durat
   end
 end
 
---- Barre de PV "à 2 niveaux" (2026-08-30, demande explicite -- "quand un
--- personnage perd de la vie, il faut ajouter un effet ... la barre rouge
--- perd la vie de suite, mais une barre jaune est encore présente et se vide
--- lentement pour atteindre la même valeur que la barre rouge, afin de
--- laisser le temps au joueur de se rendre compte de la perte de vie") :
--- `trail_pct` (fraction de PV, tenue par Controller:update dans
--- self.hp_trail -- voir son commentaire) reste au-dessus de `pct` un moment
--- après un coup encaissé, dessinée EN DESSOUS en jaune, pendant que le rouge
--- (la vraie valeur actuelle) grignote par-dessus au fil de sa propre
--- descente -- un simple `pct == trail_pct` (aucune perte récente, ou soin --
--- Controller:update fait remonter `trail_pct` immédiatement sur un gain, pas
--- de traînée à la hausse) retombe visuellement sur l'ancien rendu à 1 niveau.
+--- Barre de PV "à 2 niveaux", perte ET gain (2026-08-30, demande explicite,
+-- étendue le même jour aux soins -- voir Controller:update/advance_trail) :
+-- `trail_pct` (fraction de PV tenue par self.hp_trail) rejoint toujours
+-- `pct` (la vraie valeur ACTUELLE, immédiate) progressivement, dans les deux
+-- sens -- cette fonction se contente d'afficher le plus grand des deux en
+-- accent (EN DESSOUS), le plus petit par-dessus dans `color` (le rouge
+-- "normal") :
+-- - PERTE : `pct` (rouge, la vraie valeur) chute tout de suite, plus petit
+--   -- `trail_pct` reste au-dessus, encore à l'ancienne valeur, affiché en
+--   JAUNE en dessous -- "la barre rouge perd la vie de suite, la jaune se
+--   vide lentement pour la rejoindre".
+-- - GAIN : `pct` (la vraie valeur, déjà soignée) bondit tout de suite, plus
+--   grand -- affiché en VERT en dessous -- `trail_pct`, encore à l'ancienne
+--   valeur plus basse, reste au-dessus dans `color` (rouge) et grossit
+--   progressivement pour le rejoindre -- "une première barre verte qui
+--   monte instantanément, puis la barre normale qui la rejoint doucement".
+-- `pct == trail_pct` (aucun changement récent, traînée déjà rattrapée)
+-- retombe visuellement sur un simple rendu à 1 niveau.
 local function hp_bar(x, y, w, h, pct, trail_pct, color)
   set({ 0, 0, 0 }, 0.35)
   love.graphics.rectangle("fill", x, y, w, h, 4, 4)
-  if trail_pct and trail_pct > pct then
-    set(Theme.hp_trail)
-    love.graphics.rectangle("fill", x, y, w * math.max(0, math.min(1, trail_pct)), h, 4, 4)
+  local clamped_pct = math.max(0, math.min(1, pct))
+  local clamped_trail = trail_pct and math.max(0, math.min(1, trail_pct)) or clamped_pct
+  if clamped_trail ~= clamped_pct then
+    set(clamped_trail > clamped_pct and Theme.hp_trail or Theme.heal)
+    love.graphics.rectangle("fill", x, y, w * math.max(clamped_trail, clamped_pct), h, 4, 4)
   end
   set(color)
-  love.graphics.rectangle("fill", x, y, w * math.max(0, math.min(1, pct)), h, 4, 4)
+  love.graphics.rectangle("fill", x, y, w * math.min(clamped_trail, clamped_pct), h, 4, 4)
   set(Theme.black)
   love.graphics.setLineWidth(2)
   love.graphics.rectangle("line", x, y, w, h, 4, 4)
@@ -2175,10 +2183,18 @@ local function draw_card_flights(controller)
           -- draw juste en dessous), qui doit lui bien suivre l'échelle ambiante.
           love.graphics.push()
           love.graphics.origin()
+          -- Restaure le canvas PRÉCÉDENT plutôt qu'un `setCanvas()` sans
+          -- argument (2026-08-30, bug évité -- ce dernier vise toujours
+          -- l'écran, jamais "ce qui était actif avant" : casserait tout
+          -- rendu qui appellerait cette fonction depuis L'INTÉRIEUR d'un
+          -- autre canvas déjà actif, ex. la fenêtre "camp" qui fond en
+          -- entrée, voir draw_camp_entrance) -- même correctif appliqué à
+          -- tous les usages de card_flight_canvas dans ce fichier.
+          local prev_canvas = love.graphics.getCanvas()
           love.graphics.setCanvas(card_flight_canvas)
           love.graphics.clear(0, 0, 0, 0)
           draw_card_face(a.def, CARD_W, CARD_H, a.def.cost, a.def.desc, Theme.muted, false)
-          love.graphics.setCanvas()
+          love.graphics.setCanvas(prev_canvas)
           love.graphics.pop()
           love.graphics.setColor(1, 1, 1, alpha)
           love.graphics.draw(card_flight_canvas, cx - w / 2, cy - h / 2, 0, w / CARD_W, h / CARD_H)
@@ -2202,10 +2218,11 @@ local function draw_card_flights(controller)
         -- Même correctif que ci-dessus (goto continue) -- voir son commentaire.
         love.graphics.push()
         love.graphics.origin()
+        local prev_canvas = love.graphics.getCanvas()
         love.graphics.setCanvas(card_flight_canvas)
         love.graphics.clear(0, 0, 0, 0)
         draw_card_face(a.def, CARD_W, CARD_H, a.def.cost, a.def.desc, Theme.muted, false)
-        love.graphics.setCanvas()
+        love.graphics.setCanvas(prev_canvas)
         love.graphics.pop()
         love.graphics.setColor(1, 1, 1, alpha)
         love.graphics.draw(card_flight_canvas, x, y, 0, w / CARD_W, h / CARD_H)
@@ -2320,10 +2337,11 @@ function View.capture_enemy_shatter(template_id, size, grid)
   local canvas = love.graphics.newCanvas(size, size)
   love.graphics.push()
   love.graphics.origin()
+  local prev_canvas = love.graphics.getCanvas()
   love.graphics.setCanvas(canvas)
   love.graphics.clear(0, 0, 0, 0)
   Icons.draw_enemy(template_id, size / 2, size / 2, size / 2, Theme.text)
-  love.graphics.setCanvas()
+  love.graphics.setCanvas(prev_canvas)
   love.graphics.pop()
   local tile = size / grid
   local quads = {}
@@ -2621,10 +2639,11 @@ local function draw_faded_card(def, x, y, alpha, desc_color, highlight)
   card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
   love.graphics.push()
   love.graphics.origin()
+  local prev_canvas = love.graphics.getCanvas()
   love.graphics.setCanvas(card_flight_canvas)
   love.graphics.clear(0, 0, 0, 0)
   draw_card_face(def, CARD_W, CARD_H, def.cost, def.desc, desc_color or Theme.muted, highlight or false)
-  love.graphics.setCanvas()
+  love.graphics.setCanvas(prev_canvas)
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, alpha)
   love.graphics.draw(card_flight_canvas, x, y)
@@ -2665,10 +2684,11 @@ local function draw_faded_card_back(class_id, count, x, y, alpha)
   card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
   love.graphics.push()
   love.graphics.origin()
+  local prev_canvas = love.graphics.getCanvas()
   love.graphics.setCanvas(card_flight_canvas)
   love.graphics.clear(0, 0, 0, 0)
   draw_card_back_face(CARD_W, CARD_H, class_id, count)
-  love.graphics.setCanvas()
+  love.graphics.setCanvas(prev_canvas)
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, alpha)
   love.graphics.draw(card_flight_canvas, x, y)
@@ -2683,6 +2703,54 @@ end
 -- def tel quel dans ce cas plutôt que de le repasser par Cards.upgraded_def.
 local function forge_preview_def(def)
   return def.is_upgraded and def or Cards.upgraded_def(def)
+end
+
+--- Transition d'entrée commune aux 4 écrans "camp" (2026-08-30, demande
+-- explicite -- "une transition douce entre le draft et l'évènement... le
+-- titre qui descend doucement depuis le haut de l'écran jusqu'à sa place...
+-- puis les différents éléments apparaissent en fade in") : le TITRE descend
+-- (position seule, pas de fondu -- toujours pleinement visible, juste pas
+-- encore arrivé) pendant que TOUT LE RESTE (`draw_content`, une closure)
+-- reste invisible, puis apparaît en fondu une fois le titre bien entamé.
+-- `draw_content` est rendue dans un canvas plein écran réutilisé (même
+-- technique que draw_faded_card, à l'échelle de l'écran entier) pour
+-- pouvoir lui appliquer un SEUL fondu uniforme, plutôt que de faire porter
+-- un paramètre alpha à chaque fonction de dessin individuelle -- voir aussi
+-- le correctif "restaure le canvas précédent" appliqué à draw_faded_card/
+-- draw_card_flights/capture_enemy_shatter, indispensable puisque
+-- draw_content (l'écran Forge notamment) peut lui-même ouvrir un canvas
+-- imbriqué. `controller.camp_entrance` (voir Controller:
+-- enter_post_combat_sequence, seul écrivain) : nil seulement si cet écran a
+-- été atteint par un chemin qui l'aurait sauté (ne devrait pas arriver) --
+-- se comporte alors comme un fondu déjà terminé, jamais une erreur.
+local camp_entrance_canvas
+local function draw_camp_entrance(controller, title, title_y, draw_content)
+  local entrance = controller.camp_entrance
+  local title_duration = controller.camp_entrance_title_duration or 0.55
+  local title_t = entrance and entrance.t or title_duration
+  local ease = ease_out_back(title_t, title_duration)
+  local from_y = -40
+  text(title, 0, from_y + (title_y - from_y) * ease, W, 24, Theme.text)
+
+  local content_alpha = 1
+  if entrance then
+    local delay = controller.camp_entrance_fade_delay or 0
+    local duration = controller.camp_entrance_fade_duration or 0.4
+    content_alpha = math.max(0, math.min(1, (entrance.t - delay) / duration))
+  end
+
+  camp_entrance_canvas = camp_entrance_canvas or love.graphics.newCanvas(W, H)
+  love.graphics.push()
+  love.graphics.origin()
+  local prev_canvas = love.graphics.getCanvas()
+  love.graphics.setCanvas(camp_entrance_canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  draw_content()
+  love.graphics.setCanvas(prev_canvas)
+  love.graphics.pop()
+  love.graphics.setColor(1, 1, 1, content_alpha)
+  love.graphics.draw(camp_entrance_canvas)
+  love.graphics.setColor(1, 1, 1, 1)
 end
 
 --- Écran "La Forge" (2026-08-28, demande explicite -- remplace l'ancien
@@ -2713,8 +2781,7 @@ end
 local function draw_forge(controller)
   local f = controller.forge
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
-  text("La Forge", 0, 60, W, 24, Theme.text)
-
+  draw_camp_entrance(controller, "La Forge", 60, function()
   if #f.choices == 0 then
     text("Toutes vos cartes sont déjà améliorées.", 0, 92, W, 12, Theme.muted)
     local b = View.forge_skip_button
@@ -2790,6 +2857,7 @@ local function draw_forge(controller)
       love.graphics.pop()
     end
   end
+  end)
 end
 
 --- Écran "Feu de camp" (2026-08-30, remis en place, refonte -- demande
@@ -2802,7 +2870,7 @@ end
 local function draw_campfire(controller)
   local cf = controller.campfire
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
-  text("Feu de camp", 0, 60, W, 24, Theme.text)
+  draw_camp_entrance(controller, "Feu de camp", 60, function()
   text("Choisis l'aventurier à soigner (30% de ses PV max).", 0, 92, W, 12, Theme.muted)
 
   local rects = View.campfire_hero_rects(controller)
@@ -2821,10 +2889,18 @@ local function draw_campfire(controller)
     local portrait_size = 70
     draw_class_icon(h.class_id, h.icon, h.label, r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size, Theme.text)
     name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
-    text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 110, r.w, 11, Theme.muted, "center")
+    -- Barre de PV normale, comme en combat (2026-08-30, bug signalé --
+    -- "il faut ajouter les barres de vie normale") : remplace le simple
+    -- texte "X/Y PV" -- même hp_bar/traînée qu'en combat (voir
+    -- Controller:advance_trail), donc le soin (Combat.grant_heal, appelé au
+    -- clic -- voir Controller:choose_campfire_hero) se voit désormais monter
+    -- doucement ici aussi, gratuitement (même mécanisme partagé).
+    hp_bar(r.x + 8, r.y + 106, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
+    text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 106, r.w, 16, 10, Theme.text)
     local healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
-    text("+" .. healed .. " PV", r.x, r.y + 126, r.w, 13, Theme.heal, "center")
+    text("+" .. healed .. " PV", r.x, r.y + 128, r.w, 13, Theme.heal, "center")
   end
+  end)
 end
 
 --- Écran "Le Refuge" (2026-08-30, nouvel évènement -- demande explicite :
@@ -2839,7 +2915,7 @@ end
 local function draw_refuge(controller)
   local rf = controller.refuge
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
-  text("Le Refuge", 0, 60, W, 24, Theme.text)
+  draw_camp_entrance(controller, "Le Refuge", 60, function()
   text("Toute l'équipe va se reposer (30% des PV max).", 0, 92, W, 12, Theme.muted)
 
   local rects = View.refuge_hero_rects(controller)
@@ -2855,19 +2931,23 @@ local function draw_refuge(controller)
     local portrait_size = 70
     draw_class_icon(h.class_id, h.icon, h.label, r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size, Theme.text)
     name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
-    text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 110, r.w, 11, Theme.muted, "center")
+    -- Barre de PV normale, comme en combat (2026-08-30, même correctif que
+    -- draw_campfire ci-dessus) : voir son commentaire.
+    hp_bar(r.x + 8, r.y + 106, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
+    text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 106, r.w, 16, 10, Theme.text)
     local healed
     if rf.resolved then
       healed = rf.healed[h.id] or 0
     else
       healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
     end
-    text("+" .. healed .. " PV", r.x, r.y + 126, r.w, 13, Theme.heal, "center")
+    text("+" .. healed .. " PV", r.x, r.y + 128, r.w, 13, Theme.heal, "center")
   end
 
   local b = View.refuge_rest_button
   set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
   set(Theme.bg); text(b.label, b.x, b.y + 14, b.w, 14, Theme.bg, "center")
+  end)
 end
 
 --- Écran "Le Temple" (2026-08-29, refonte complète -- demande explicite,
@@ -2887,7 +2967,7 @@ local function draw_temple(controller)
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
   local type_label = t.type == "blessing" and "bénédiction" or "malédiction"
   local icon_key = t.type == "blessing" and "temple_blessing" or "temple_curse"
-  text("Le Temple", 0, 26, W, 20, Theme.text)
+  draw_camp_entrance(controller, "Le Temple", 26, function()
 
   local anim = controller.temple_choice_anim
   local effect_rects = View.temple_effect_rects(controller)
@@ -3018,6 +3098,7 @@ local function draw_temple(controller)
     love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
     text(b.label, b.x, b.y + 14, b.w, 14, can_confirm and Theme.bg or Theme.muted)
   end
+  end)
 end
 
 -- Durée du rebond d'agrandissement au survol (2026-08-30, demande explicite
@@ -3046,15 +3127,26 @@ local function draw_team_hero_slot(r, def, hover_t, focused, in_party)
   love.graphics.scale(scale, scale)
   love.graphics.translate(-cx, -cy)
 
+  local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
   panel(r.x, r.y, r.w, r.h, Theme.panel_light)
-  set(focused and Theme.accent or (hover_t and hover_t > 0 and Theme.text or Theme.muted))
+  -- Couleur personnelle systématique (2026-08-30, bug signalé -- "tous les
+  -- aventuriers doivent avoir leur contour de la bonne couleur") : avant,
+  -- Theme.accent (or, "mis en avant")/Theme.muted (gris, au repos) --
+  -- jamais la couleur de classe, contrairement aux autres écrans déjà
+  -- corrigés ce jour-là (campfire/refuge/temple). L'emphase "mis en avant"/
+  -- survolé reste marquée par l'ÉPAISSEUR du contour, pas sa couleur.
+  set(hover_t and hover_t > 0 and Theme.text or palette.border)
   love.graphics.setLineWidth(focused and 4 or 2)
   love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
   love.graphics.setLineWidth(1)
-  local portrait_size = 58
+  -- Portrait bien plus grand dans le projecteur (2026-08-30, demande
+  -- explicite) : la case elle-même y est déjà nettement plus grande
+  -- (TEAM_SPOTLIGHT_W/H, 170x190) que les cases des 2 rangées (TEAM_HERO_W/H,
+  -- 108x120) -- `focused` distingue déjà les deux cas, pas besoin d'un
+  -- paramètre supplémentaire.
+  local portrait_size = focused and 130 or 58
   draw_class_icon(def.class_id, def.icon, def.label,
     r.x + (r.w - portrait_size) / 2, r.y + 10, portrait_size, portrait_size, Theme.text)
-  local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
   name_badge(def.name, r.x + 6, r.y + r.h - 26, r.w - 12, 12, palette.border, Theme.bg, 2, 2)
   if in_party then
     set(Theme.heal); love.graphics.circle("fill", r.x + r.w - 12, r.y + 12, 7)
@@ -3498,10 +3590,11 @@ local function draw_deck_view(controller)
 
     love.graphics.push()
     love.graphics.origin()
+    local prev_canvas = love.graphics.getCanvas()
     love.graphics.setCanvas(card_flight_canvas)
     love.graphics.clear(0, 0, 0, 0)
     draw_card_face(entry.def, CARD_W, CARD_H, tostring(entry.def.cost or 0), entry.def.desc, Theme.muted, false, false, false, false)
-    love.graphics.setCanvas()
+    love.graphics.setCanvas(prev_canvas)
     love.graphics.pop()
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.draw(card_flight_canvas, cx, cy, 0, card_w / CARD_W, card_h / CARD_H)
