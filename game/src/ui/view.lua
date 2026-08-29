@@ -246,13 +246,19 @@ View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34,
 -- Forge/Temple) : un id sur chaque rect, lu par Input.mousepressed pour savoir
 -- quelle action déclencher, jamais une deuxième liste dupliquée côté input.lua.
 local MENU_BTN_W, MENU_BTN_H, MENU_BTN_GAP = 300, 48, 18
-local MENU_BTN_Y0 = 220
+-- 220 -> 250 (2026-08-30, bug signalé -- "descendre tous les boutons qui sont
+-- trop près du titre") : laisse un peu plus d'air sous la bannière des 6
+-- aventuriers (MENU_HERO_ROW_Y + MENU_HERO_R, voir draw_menu_flourish),
+-- ajoutée juste avant ce même écran.
+local MENU_BTN_Y0 = 250
 View.menu_buttons = {}
 do
+  -- Ordre demandé explicitement (2026-08-30) : Jouer un run -> Mode infini ->
+  -- Tester le boss -> Options -> Quitter (avant : boss en premier).
   local defs = {
-    { id = "boss", label = "Tester le boss" },
     { id = "run", label = "Jouer un run" },
     { id = "infini", label = "Mode infini" },
+    { id = "boss", label = "Tester le boss" },
     { id = "options", label = "Options" },
     { id = "quit", label = "Quitter" },
   }
@@ -951,8 +957,17 @@ local function draw_hero(controller, h, r)
   -- Discrétion (2026-08-24, ressource propre à l'Assassin, voir hero.discretion
   -- dans game.lua) : même traitement que MANA ci-dessus -- un seul des deux
   -- champs est jamais non-nil pour un héros donné, pas de collision possible.
+  -- "CAMOUFLÉ" en toutes lettres à la place de "DISCR 10" (2026-08-30, demande
+  -- explicite -- "L'état de Camouflage de l'Assassin est très important...
+  -- il faut indiqué en toute lettre 'CAMOUFLE' juste en dessous") : remplace
+  -- le compteur plutôt que de s'y ajouter, puisqu'à 10/10 le compteur lui-même
+  -- n'apporte plus rien (déjà au plafond) -- voir aussi le voile plus bas.
   if h.discretion ~= nil then
-    text("DISCR " .. tostring(h.discretion), 0, 81, r.w, 9, Theme.discretion)
+    if (h.camoufle or 0) > 0 then
+      text("CAMOUFLÉ", 0, 81, r.w, 9, Theme.discretion)
+    else
+      text("DISCR " .. tostring(h.discretion), 0, 81, r.w, 9, Theme.discretion)
+    end
   end
   -- Corruption (2026-08-29, ressource propre au Nécromancien, voir
   -- hero.corruption dans game.lua) : même traitement que MANA/DISCR
@@ -1013,6 +1028,17 @@ local function draw_hero(controller, h, r)
 
   draw_shield_fx(controller, h.id, r)
   draw_tooltip_hint(r.w, r.h)
+
+  -- Voile de Camouflage (2026-08-30, demande explicite -- "ajouter un effet
+  -- sur l'ensemble du cadre pour indiquer qu'il est camouflé, par exemple un
+  -- voile noir 50% alpha par dessus") : PAR-DESSUS tout ce qui vient d'être
+  -- dessiné (portrait, PV, badges, nom), pas juste un badge de plus au milieu
+  -- des autres -- c'est tout le cadre qui doit se lire "cet aventurier est
+  -- caché", cohérent avec "l'état de Camouflage... est très important".
+  if not dead and (h.camoufle or 0) > 0 then
+    set(Theme.black, 0.5)
+    love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
+  end
 
   love.graphics.pop()
   love.graphics.setColor(1, 1, 1, 1)
@@ -1756,7 +1782,16 @@ local STATUS_TOOLTIP_FIELDS = {
   { field = "encore_extra_plays", glossary_key = "encore", label = "Encore" },
 }
 
-local function active_status_lines(unit)
+-- `seen` (optionnel, 2026-08-30, demande explicite -- "Tous les mots clés
+-- présents dans l'info bulle doivent être expliqués au moins 1 fois DANS
+-- CETTE MÊME INFOBULLE") : table PARTAGÉE avec le reste de tooltip_lines
+-- (clé = g.key), déjà marquée par toute ligne de description libre affichée
+-- AVANT ce statut (voir add_described_line plus bas) -- si ce mot-clé est
+-- déjà expliqué ailleurs dans la MÊME infobulle, cette ligne garde son nom +
+-- sa valeur mais N'Y RÉPÈTE PAS l'explication (déjà lue juste au-dessus).
+-- Absent (autres appelants existants, ex. draw_hero pour un badge isolé hors
+-- infobulle) : comportement inchangé, explication toujours incluse.
+local function active_status_lines(unit, seen)
   local lines = {}
   for _, spec in ipairs(STATUS_TOOLTIP_FIELDS) do
     local value = unit[spec.field]
@@ -1765,7 +1800,10 @@ local function active_status_lines(unit)
       local g = Glossary.find_term(spec.glossary_key)
       local label = spec.label or (g and (g.label or g.icon)) or spec.field
       local explain = spec.explain or (g and g.explain ~= "" and g.explain) or ""
-      local line_text = label .. (spec.hide_value and "" or (" " .. value)) .. (explain ~= "" and (" — " .. explain) or "")
+      local already_explained = seen and g and seen[g.key]
+      if seen and g then seen[g.key] = true end
+      local line_text = label .. (spec.hide_value and "" or (" " .. value))
+        .. ((explain ~= "" and not already_explained) and (" — " .. explain) or "")
       -- Sprites.status (pas Sprites.keyword/le has_icon du glossaire, qui ne
       -- couvre que le texte de carte) -- ce sont les mêmes icônes déjà visibles
       -- sur les badges de statut de l'encart, pas de nouvel asset à générer.
@@ -1776,6 +1814,38 @@ local function active_status_lines(unit)
   return lines
 end
 
+--- Ligne d'explication pour UN terme du glossaire -- même format que le cas
+-- "card" de tooltip_lines ci-dessous (icône en préfixe si has_icon, label +
+-- related + explain) : une seule façon de présenter un mot-clé dans toute
+-- l'UI, jamais un texte ad hoc différent par écran.
+local function keyword_explanation_line(g)
+  local label = g.has_icon and ((g.label or g.key) .. " (" .. g.key .. ")") or g.key
+  local related = g.related ~= "" and (" — " .. g.related) or ""
+  local line_text = label .. related .. (g.explain ~= "" and (" : " .. g.explain) or "")
+  return g.has_icon and { text = line_text, icon = Sprites.keyword(g.key) } or line_text
+end
+
+--- Ajoute à `lines` la version affichable de `raw_text` (guillemets des
+-- mots-clés retirés, voir Glossary.render_card_text) précédée de `prefix`
+-- (optionnel, ex. "Le Puissant — "), PUIS l'explication de chaque mot-clé
+-- qu'elle cite entre guillemets mais qui n'a pas déjà été expliqué DANS CETTE
+-- INFOBULLE (2026-08-30, demande explicite -- voir son commentaire complet
+-- sur active_status_lines ci-dessus ; exemple concret signalé : la
+-- malédiction "L'Amnésique" mentionne "Amnésie" sans jamais dire ce que ça
+-- fait). `seen` : table PARTAGÉE par tout l'appel à tooltip_lines -- si un
+-- même mot-clé revient dans une autre ligne de la même infobulle (ex.
+-- "Puissance" à la fois dans la description d'une bénédiction ET comme statut
+-- actif), son explication ne s'affiche qu'une seule fois au total.
+local function add_described_line(lines, raw_text, seen, prefix)
+  lines[#lines + 1] = (prefix or "") .. Glossary.render_card_text(raw_text)
+  for _, g in ipairs(Glossary.keywords_present(raw_text)) do
+    if not seen[g.key] then
+      seen[g.key] = true
+      lines[#lines + 1] = keyword_explanation_line(g)
+    end
+  end
+end
+
 local function tooltip_lines(controller)
   local h = controller.hover
   if h.kind == "hero" then
@@ -1783,9 +1853,14 @@ local function tooltip_lines(controller)
     if not hero then return nil end
     -- Description de classe (2026-08-24, demande explicite) : en tête de
     -- l'infobulle, avant les statuts actifs -- voir Heroes.class_description.
+    -- `seen` (2026-08-30, demande explicite -- voir son commentaire complet
+    -- sur active_status_lines) : partagée par TOUTE cette infobulle, pour
+    -- qu'un mot-clé cité 2 fois (ex. classe + bénédiction, ou bénédiction +
+    -- statut actif) ne soit expliqué qu'une seule fois au total.
     local lines = {}
+    local seen = {}
     local desc = Heroes.class_description[hero.class_id]
-    if desc then lines[#lines + 1] = desc end
+    if desc then add_described_line(lines, desc, seen) end
     -- Bénédiction/malédiction du Temple (2026-08-28/29, demande explicite) :
     -- juste après la description de classe, avant les statuts de combat --
     -- ce sont des effets permanents du run, pas des statuts temporaires (voir
@@ -1795,19 +1870,20 @@ local function tooltip_lines(controller)
     -- badge sur le cadre, draw_hero, qui pointe ici).
     if hero.blessing then
       local blessing = Temple.by_id(hero.blessing)
-      if blessing then lines[#lines + 1] = blessing.name .. " — " .. blessing.desc end
+      if blessing then add_described_line(lines, blessing.desc, seen, blessing.name .. " — ") end
     end
     if hero.curse then
       local curse = Temple.by_id(hero.curse)
-      if curse then lines[#lines + 1] = curse.name .. " — " .. curse.desc end
+      if curse then add_described_line(lines, curse.desc, seen, curse.name .. " — ") end
     end
-    for _, l in ipairs(active_status_lines(hero)) do lines[#lines + 1] = l end
+    for _, l in ipairs(active_status_lines(hero, seen)) do lines[#lines + 1] = l end
     return hero.name, lines
   elseif h.kind == "enemy" then
     local e = Combat.enemy_by_id(controller.state, h.target)
     if not e then return nil end
     local template = Enemies.by_id(e.template_id)
     local lines = {}
+    local seen = {}
     -- Nom + niveau (2026-08-27, demande explicite -- retirés du cadre, voir
     -- draw_enemy) : désormais dans le TITRE de l'infobulle (retourné plus bas),
     -- plus dans une ligne "Niveau X" séparée en fin de liste.
@@ -1826,9 +1902,9 @@ local function tooltip_lines(controller)
       lines[#lines + 1] = "Sensible au feu : les dégâts de feu infligent +50%."
     end
     for _, m in ipairs(template.moves_info(e.level)) do
-      lines[#lines + 1] = m.name .. " — " .. m.text
+      add_described_line(lines, m.text, seen, m.name .. " — ")
     end
-    for _, l in ipairs(active_status_lines(e)) do lines[#lines + 1] = l end
+    for _, l in ipairs(active_status_lines(e, seen)) do lines[#lines + 1] = l end
     lines[#lines + 1] = "PV max " .. e.max_hp
     return e.name .. " Nv." .. e.level, lines
   elseif h.kind == "card" then
@@ -1836,14 +1912,7 @@ local function tooltip_lines(controller)
     local terms = Glossary.keywords_present(def.desc)
     if #terms == 0 then return def.name, { "Aucun mot-clé de glossaire sur cette carte." } end
     local lines = {}
-    for _, g in ipairs(terms) do
-      local label = g.has_icon and ((g.label or g.key) .. " (" .. g.key .. ")") or g.key
-      local related = g.related ~= "" and (" — " .. g.related) or ""
-      local line_text = label .. related .. (g.explain ~= "" and (" : " .. g.explain) or "")
-      -- table plutôt que string brute quand une icône existe : permet à draw_tooltip
-      -- de la dessiner en préfixe de la ligne (voir Sprites.keyword).
-      lines[#lines + 1] = g.has_icon and { text = line_text, icon = Sprites.keyword(g.key) } or line_text
-    end
+    for _, g in ipairs(terms) do lines[#lines + 1] = keyword_explanation_line(g) end
     return def.name .. " — mots-clés", lines
   elseif h.kind == "deck" then
     -- Le nombre de cartes est déjà marqué directement sur la pioche elle-même
@@ -1858,9 +1927,14 @@ local function tooltip_lines(controller)
   elseif h.kind == "temple_effect" then
     -- Écran "Le Temple" (2026-08-29, demande explicite -- "seul le titre
     -- apparait sous chaque statue... il faut donc ajouter le '?'
-    -- conventionnel") : le descriptif complet vit UNIQUEMENT ici.
+    -- conventionnel") : le descriptif complet vit UNIQUEMENT ici. Mots-clés
+    -- expliqués à la suite (2026-08-30, demande explicite, exemple donné --
+    -- "L'Amnésique stipule que les cartes gagnent Amnésie, mais rien
+    -- n'explique son fonctionnement à cet endroit") : voir add_described_line.
     local effect = h.target
-    return effect.name, { effect.desc }
+    local lines = {}
+    add_described_line(lines, effect.desc, {})
+    return effect.name, lines
   elseif h.kind == "team_hero" then
     -- Écran "Choisis ton équipe" (2026-08-29) : contrairement au cas "hero"
     -- ci-dessus, aucun héros réel n'existe encore dans controller.state à ce
@@ -1869,7 +1943,10 @@ local function tooltip_lines(controller)
     local def = Heroes.by_id(h.target)
     if not def then return nil end
     local desc = Heroes.class_description[def.class_id]
-    return def.name, desc and { desc } or {}
+    if not desc then return def.name, {} end
+    local lines = {}
+    add_described_line(lines, desc, {})
+    return def.name, lines
   end
   return nil
 end
@@ -2052,8 +2129,18 @@ local function draw_tooltip(controller)
   if not controller:hover_ready() then return end
   local title, lines = tooltip_lines(controller)
   if not title then return end
-  local mx, my = love.mouse.getPosition()
-  mx, my = mx / SCALE, my / SCALE
+  -- Position figée dès l'apparition (2026-08-30, demande explicite -- "elles
+  -- ne suivent plus la souris, elles restent toujours à la même place
+  -- jusqu'à disparition") : capturée une seule fois ici, à la toute première
+  -- frame où hover_ready() est vrai (Controller:set_hover les remet à nil
+  -- dès que kind/target change, donc une nouvelle cible recapture bien une
+  -- nouvelle position).
+  local hover = controller.hover
+  if not hover.frozen_x then
+    local raw_x, raw_y = love.mouse.getPosition()
+    hover.frozen_x, hover.frozen_y = raw_x / SCALE, raw_y / SCALE
+  end
+  local mx, my = hover.frozen_x, hover.frozen_y
   local w = 240
   local line_h = 14
 
@@ -2440,13 +2527,42 @@ local function draw_forge(controller)
         draw_faded_card(preview_def, ur.x, ur.y, alpha, Theme.text, true)
       end
     elseif anim then
-      -- La colonne CHOISIE (2026-08-30) : la comparaison n'a plus lieu d'être
-      -- une fois le choix fait -- seul le résultat final reste affiché, comme
-      -- avant ce changement (single card, pas de flèche/base à montrer).
+      -- La colonne CHOISIE (2026-08-30, demande explicite -- "la version non
+      -- améliorée de la carte choisie descend et vient fade sur
+      -- l'amélioration, comme une sorte de fusion, plus la carte améliorée
+      -- réagit avec un VFX") : l'améliorée reste affichée EN CONTINU à SA
+      -- position (`ur`, déjà celle de l'aperçu avant le choix -- aucun saut),
+      -- la base descend depuis SA position (`br`) en s'estompant, comme si
+      -- elle "tombait dedans" -- p=1 (fin d'anim) = totalement fondue, jamais
+      -- une disparition instantanée comme avant ce correctif.
+      local p = math.min(1, anim.t / (controller.forge_upgrade_anim_duration or 1))
+      local ease = 1 - (1 - p) ^ 2 -- easeOutQuad : la base ralentit en approchant, ne tombe pas d'un bloc
+      local base_y = br.y + (ur.y - br.y) * ease
+      local base_alpha = 1 - p
+
+      -- Pulsation + flash au moment de l'"impact" (2026-08-30) : réagit à
+      -- l'arrivée de la base plutôt qu'un simple fondu passif -- fenêtre sur
+      -- les 40% finaux de l'anim seulement, pour laisser l'oeil suivre la
+      -- descente d'abord.
+      local impact_p = math.max(0, (p - 0.6) / 0.4)
+      local impact_wave = math.sin(impact_p * math.pi) -- monte puis retombe, 0 aux 2 bouts
+      local card_scale = 1 + 0.12 * impact_wave
+
+      if impact_wave > 0 then
+        set(Theme.accent, impact_wave * 0.5)
+        love.graphics.rectangle("fill", ur.x - 6, ur.y - 6, CARD_W + 12, CARD_H + 12, 14, 14)
+      end
+
       love.graphics.push()
-      love.graphics.translate(ur.x, ur.y)
+      love.graphics.translate(ur.x + CARD_W / 2, ur.y + CARD_H / 2)
+      love.graphics.scale(card_scale, card_scale)
+      love.graphics.translate(-CARD_W / 2, -CARD_H / 2)
       draw_card_face(preview_def, CARD_W, CARD_H, preview_def.cost, preview_def.desc, Theme.text, true)
       love.graphics.pop()
+
+      if base_alpha > 0 then
+        draw_faded_card(instance.def, br.x, base_y, base_alpha, Theme.muted, false)
+      end
     else
       love.graphics.push()
       love.graphics.translate(br.x, br.y)
@@ -2753,7 +2869,10 @@ end
 -- d'épaisseur -- "ce deck grossit à chaque nouvel aventurier", demande
 -- explicite.
 local function draw_team_deck(rect, card_count)
-  local layers = math.min(2, math.max(0, math.floor(card_count / 6) - 1))
+  -- /3 pas /6 (2026-08-30, même correction que son appelant -- card_count
+  -- vaut désormais 3 par aventurier, pas 6) : garde la même progression
+  -- d'épaisseur (0/1/2/2 étages pour 1/2/3/4 aventuriers) qu'avant le fix.
+  local layers = math.min(2, math.max(0, math.floor(card_count / 3) - 1))
   for i = layers, 1, -1 do
     panel(rect.x + i * 3, rect.y - i * 3, rect.w, rect.h, Theme.panel)
   end
@@ -2869,7 +2988,13 @@ local function draw_team_select(controller)
     end
   end
 
-  draw_team_deck(View.team_select_deck_rect(#ts.selected_ids), #ts.selected_ids * 6)
+  -- 3 cartes "depart" par aventurier confirmé, pas 6 (2026-08-30, bug
+  -- signalé -- "le deck indique 24 cartes... or il n'y a en fait que les
+  -- cartes de départ, donc 12 cartes") : ce chiffre doit rester cohérent
+  -- avec Controller:team_select_spawn_cards, qui n'affiche/n'anime QUE les
+  -- cartes de tier "depart" (jamais les avancées, résumées par la carte de
+  -- dos) -- voir aussi depart_cards_and_advance_count, controller.lua.
+  draw_team_deck(View.team_select_deck_rect(#ts.selected_ids), #ts.selected_ids * 3)
 
   local lb = View.team_select_launch_button
   local ready = #ts.selected_ids == 4
@@ -2886,10 +3011,22 @@ local function draw_team_select(controller)
   -- 2 lignes (2026-08-30, voir lb.label ci-dessus) : `text()` ne centre pas
   -- verticalement un bloc multi-lignes tout seul (LÖVE ne fait qu'empiler
   -- les lignes vers le bas depuis `y`) -- décalage de départ approximant le
-  -- milieu du bloc de 2 lignes à cette taille de police (16), pas la taille
-  -- de police elle-même (paramètre suivant, 16 -- confondre les 2 affichait
-  -- une police énorme avant ce correctif).
-  text(lb.label, lb.x, lb.y + lb.h / 2 - 16, lb.w, 16, ready and Theme.bg or Theme.muted, "center")
+  -- milieu du bloc de 2 lignes à cette taille de police, pas la taille de
+  -- police elle-même (paramètre suivant -- confondre les 2 affichait une
+  -- police énorme avant le tout premier correctif). Taille 16 -> 24
+  -- (2026-08-30, demande explicite -- "doit être écrit beaucoup plus gros") :
+  -- décalage remis à l'échelle dans la même proportion (16 -> 24).
+  text(lb.label, lb.x, lb.y + lb.h / 2 - 24, lb.w, 24, ready and Theme.bg or Theme.muted, "center")
+
+  -- Infobulles (2026-08-30, bug signalé -- "il faut que les info bulles
+  -- marchent sur les aventuriers... pareil pour les cartes") : draw_tooltip
+  -- lit déjà controller.hover (mis à jour par Input.mousemoved, voir ses
+  -- branches "team_hero"/"card" pour cet écran) et tooltip_lines gère déjà
+  -- les 2 cas -- il ne manquait QUE cet appel, "team_select" étant un
+  -- retour anticipé de View.draw (voir son tout début), jamais atteint par
+  -- l'appel générique en fin de fonction qui dessine l'infobulle pour
+  -- "playing"/"forge"/"temple"/etc.
+  draw_tooltip(controller)
 end
 
 -- Bouton plein, contour doré, texte centré (2026-08-21, demande explicite --
@@ -2904,14 +3041,76 @@ local function draw_menu_style_button(b)
   text(b.label, b.x, b.y + b.h / 2 - 8, b.w, 16, Theme.text, "center")
 end
 
+-- Écran d'accueil stylé (2026-08-30, demande explicite -- "une image
+-- d'accueil, avec le titre actuel du jeu et quelques éléments graphiques
+-- stylés") : fond PROCÉDURAL (gratuit, cohérent avec Background.draw/le son
+-- chiptune du projet -- voir game/README.md) plutôt qu'une illustration
+-- générée par IA -- choix explicite fait face au coût réel d'une génération
+-- (même pipeline que les portraits de héros). Halo doré + diamants +
+-- bannière des 6 aventuriers, purement décoratifs (aucun n'est cliquable).
+local MENU_HERO_ROW_Y = 188
+local MENU_HERO_R = 22
+
+local function draw_menu_diamond(x, y, size, alpha)
+  set(Theme.accent, alpha)
+  love.graphics.polygon("fill", x, y - size, x + size, y, x, y + size, x - size, y)
+end
+
+local function draw_menu_flourish()
+  -- Halo doré derrière le titre : cercles concentriques à alpha décroissante --
+  -- LÖVE n'offre pas de flou/shader ici, cette accumulation de formes
+  -- semi-transparentes en simule un à moindre coût (même idée que les glows
+  -- déjà utilisés ailleurs, ex. la fusion du Temple).
+  local cx, cy = W / 2, 100
+  for i = 4, 1, -1 do
+    set(Theme.accent, 0.05 * i)
+    love.graphics.ellipse("fill", cx, cy, 60 + i * 40, 30 + i * 14)
+  end
+
+  -- Diamants encadrant "Rogue Adventure" + ligne de séparation, diamant central --
+  -- vocabulaire visuel déjà utilisé par le cadre doré des boutons/cartes
+  -- sélectionnées (Theme.accent), jamais une nouvelle teinte.
+  draw_menu_diamond(W / 2 - 100, 137, 5, 0.8)
+  draw_menu_diamond(W / 2 + 100, 137, 5, 0.8)
+  set(Theme.accent, 0.5); love.graphics.setLineWidth(1)
+  love.graphics.line(W / 2 - 170, 155, W / 2 - 14, 155)
+  love.graphics.line(W / 2 + 14, 155, W / 2 + 170, 155)
+  draw_menu_diamond(W / 2, 155, 6, 0.8)
+
+  -- Bannière des 6 aventuriers (2026-08-30) : silhouettes semi-transparentes,
+  -- teintées de leur couleur de classe -- pure ambiance "constitue ton
+  -- équipe", jamais interactif (contrairement à l'écran de choix d'équipe,
+  -- dont le layout n'est pas dupliqué ici).
+  local n = #Heroes.defs
+  local spacing = 70
+  local x0 = W / 2 - (n - 1) * spacing / 2
+  for i, def in ipairs(Heroes.defs) do
+    local x = x0 + (i - 1) * spacing
+    local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
+    set(palette.border, 0.25)
+    love.graphics.circle("fill", x, MENU_HERO_ROW_Y, MENU_HERO_R + 4)
+    local sprite = Sprites.hero(def.class_id)
+    if sprite then
+      love.graphics.setColor(1, 1, 1, 0.55)
+      Sprites.draw_centered(sprite, x, MENU_HERO_ROW_Y, MENU_HERO_R)
+    end
+  end
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.setLineWidth(1)
+end
+
 -- Menu principal (2026-08-21, demande explicite) : pas de fond dédié pour
 -- l'instant ("il y aura un background mais pas pour l'instant") -- même
 -- dégradé procédural par défaut que le combat (voir Background.draw,
 -- `enemies = nil` retombe sur BIOMES.defaut), pas un écran vide.
 local function draw_menu(controller)
   Background.draw(nil, W, H)
+  draw_menu_flourish()
   text("Hero Card Game", 0, 90, W, 30, Theme.text)
-  text("Run Infini", 0, 130, W, 14, Theme.muted)
+  -- "Run Infini" retiré (2026-08-30, demande explicite -- "n'a rien à faire
+  -- ici", à ne pas confondre avec le vrai mode de jeu "Mode infini" du menu
+  -- ci-dessous, sans rapport) : remplacé par "Rogue Adventure".
+  text("Rogue Adventure", 0, 130, W, 14, Theme.muted)
   for _, b in ipairs(View.menu_buttons) do draw_menu_style_button(b) end
 end
 
@@ -2966,7 +3165,26 @@ function View.draw(controller)
   text(combat_title, 0, 30, W, 11, Theme.muted)
 
   text("Ennemis", 20, 40, 200, 10, Theme.muted, "left")
-  for _, e in ipairs(state.enemies) do draw_enemy(controller, e, View.enemy_rects(state)[e.id]) end
+  -- Descente des ennemis à l'entrée en combat (2026-08-30, demande explicite --
+  -- voir Controller:play_enemy_entrance_sequence, seul endroit qui peuple
+  -- controller.enemy_entrance) : tant que son délai n'est pas écoulé, l'ennemi
+  -- n'est pas encore dessiné DU TOUT (encore hors-écran, rien à montrer) --
+  -- une fois le délai passé, le rect qu'on lui passe se contente d'avoir un y
+  -- interpolé depuis le haut de l'écran, jamais draw_enemy lui-même modifié :
+  -- x/w/h restent ceux de repos (View.enemy_rects), même rebond d'atterrissage
+  -- (ease_out_back) que la pioche de carte, cohérence visuelle voulue.
+  local enemy_rects_now = View.enemy_rects(state)
+  for _, e in ipairs(state.enemies) do
+    local r = enemy_rects_now[e.id]
+    local entrance = controller.enemy_entrance[e.id]
+    if not entrance then
+      draw_enemy(controller, e, r)
+    elseif entrance.elapsed >= entrance.delay then
+      local ease = ease_out_back(entrance.elapsed - entrance.delay, entrance.duration)
+      local from_y = -r.h - 40
+      draw_enemy(controller, e, { x = r.x, y = from_y + (r.y - from_y) * ease, w = r.w, h = r.h })
+    end
+  end
 
   text("Ta troupe", 20, HERO_ROW_Y - 14, 200, 10, Theme.muted, "left")
   for _, h in ipairs(state.heroes) do draw_hero(controller, h, View.hero_rects(state)[h.id]) end

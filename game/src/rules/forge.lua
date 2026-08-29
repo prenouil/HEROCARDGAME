@@ -19,12 +19,16 @@ Forge.CHOICE_COUNT = 4
 --- Toutes les instances de carte encore améliorables (deck + main + défausse --
 -- vides entre deux combats en pratique, balayés par précaution/testabilité) :
 -- exclut toute instance déjà "+" (Cards.upgraded_def) -- jamais une deuxième
--- amélioration.
-function Forge.upgradable_instances(state)
+-- amélioration. `exclude_uid` (optionnel, 2026-08-30, demande explicite --
+-- "parmi les cartes proposées, il ne peut pas y avoir la carte que l'on
+-- vient à l'instant de gagner au combat précédent") : exclut aussi CETTE
+-- instance précise (comparaison par uid, pas par def -- 2 exemplaires de la
+-- même carte ne doivent jamais s'exclure l'un l'autre).
+function Forge.upgradable_instances(state, exclude_uid)
   local out = {}
   local function scan(pile)
     for _, c in ipairs(pile) do
-      if not c.def.is_upgraded then out[#out + 1] = c end
+      if not c.def.is_upgraded and c.uid ~= exclude_uid then out[#out + 1] = c end
     end
   end
   scan(state.deck)
@@ -37,9 +41,11 @@ end
 -- -- une liste plus courte (jusqu'à vide) si le deck n'a pas assez de cartes
 -- améliorables ; jamais un filet de sécurité qui retomberait sur une carte déjà
 -- vue ou déjà améliorée (contrairement à l'ancien Draft.pick_cards, cet écran
--- n'a pas besoin de remplir coûte que coûte 4 cases).
-function Forge.pick_choices(state, rng)
-  local pool = Forge.upgradable_instances(state)
+-- n'a pas besoin de remplir coûte que coûte 4 cases). `exclude_uid` (optionnel) :
+-- voir Forge.upgradable_instances -- transmis tel quel, voir Controller:
+-- enter_forge_screen, seul appelant.
+function Forge.pick_choices(state, rng, exclude_uid)
+  local pool = Forge.upgradable_instances(state, exclude_uid)
   local n = math.min(Forge.CHOICE_COUNT, #pool)
   local chosen = {}
   for _ = 1, n do

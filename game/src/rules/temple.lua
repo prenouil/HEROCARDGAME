@@ -33,36 +33,43 @@ Temple.CHOICE_COUNT = 3
 
 -- `color` : couleur de la statue (voir draw_temple_statue, view.lua) -- purement
 -- visuelle, jamais lue par les règles.
+-- `desc` (2026-08-30, bug signalé -- "L'Amnésique stipule que les cartes
+-- gagnent Amnésie, mais rien n'explique son fonctionnement") : tout mot-clé
+-- du glossaire mentionné doit être entre guillemets (même convention que
+-- cards.lua, ex. '"Vulnérabilité" 3...') -- c'est CE marquage que
+-- tooltip_lines/add_described_line (view.lua) lit pour ajouter automatiquement
+-- son explication à la suite dans l'infobulle ; un mot laissé sans guillemets
+-- n'est jamais expliqué, même s'il désigne un vrai statut du jeu.
 Temple.effects = {
   -- ---------- Bénédictions ----------
   {
     id = "guerisseuse", type = "blessing", name = "La Guérisseuse", color = "vert",
-    desc = "Soin 5 à chaque début de combat.",
+    desc = '"Soin" 5 à chaque début de combat.',
     combat_start_heal = 5,
   },
   {
     id = "illusionniste", type = "blessing", name = "L'Illusionniste", color = "bleu",
-    desc = "Esquive 1 au début de chaque combat.",
+    desc = '"Esquive" 1 au début de chaque combat.',
     combat_start_status = { esquive = 1 },
   },
   {
     id = "puissant", type = "blessing", name = "Le Puissant", color = "rouge",
-    desc = "Puissance 3 au début de chaque combat.",
+    desc = '"Puissance" 3 au début de chaque combat.',
     combat_start_status = { puissance = 3 },
   },
   {
     id = "renaissante", type = "blessing", name = "La Renaissante", color = "blanc",
-    desc = "À la place de mourir, reste vivant à 1 PV, 1 seule fois.",
+    desc = 'À la place de mourir, reste vivant à 1 "PV", 1 seule fois.',
     death_ward = true,
   },
   {
     id = "archiviste", type = "blessing", name = "L'Archiviste", color = "violet",
-    desc = "Pioche une carte en plus à chaque tour.",
+    desc = '"Pioche" une carte en plus à chaque tour.',
     extra_draw = 1,
   },
   {
     id = "reserviste", type = "blessing", name = "Le Réserviste", color = "noir",
-    desc = "L'énergie non dépensée reste pour le tour suivant, 1 fois par combat.",
+    desc = 'L\'"énergie" non dépensée reste pour le tour suivant, 1 fois par combat.',
     reserviste = true,
   },
   {
@@ -79,12 +86,12 @@ Temple.effects = {
   -- ---------- Malédictions ----------
   {
     id = "maudit", type = "curse", name = "Le Maudit", color = "vert",
-    desc = "Perd 2 PV à chaque début de combat.",
+    desc = 'Perd 2 "PV" à chaque début de combat.',
     combat_start_damage = 2,
   },
   {
     id = "corrompu", type = "curse", name = "Le Corrompu", color = "bleu",
-    desc = "Les cartes de cet aventurier coûtent 1 énergie de plus.",
+    desc = 'Les cartes de cet aventurier coûtent 1 "énergie" de plus.',
     card_cost_delta = 1,
   },
   {
@@ -99,22 +106,22 @@ Temple.effects = {
   },
   {
     id = "vulnerable", type = "curse", name = "Le Vulnérable", color = "violet",
-    desc = "Vulnérable 3 au début de chaque combat.",
+    desc = '"Vulnérabilité" 3 au début de chaque combat.',
     combat_start_status = { vulnerabilite = 3 },
   },
   {
     id = "faible", type = "curse", name = "Le Faible", color = "noir",
-    desc = "Incapacité 3 au début de chaque combat.",
+    desc = '"Incapacité" 3 au début de chaque combat.',
     combat_start_status = { incapacite = 3 },
   },
   {
     id = "blesse", type = "curse", name = "Le Blessé", color = "orange",
-    desc = "Perd 1 PV à chaque attaque faisant des dégâts.",
+    desc = 'Perd 1 "PV" à chaque attaque faisant des dégâts.',
     self_damage_on_hit = 1,
   },
   {
     id = "amnesique", type = "curse", name = "L'Amnésique", color = "gris",
-    desc = 'Les cartes de cet aventurier gagnent "Amnesie".',
+    desc = 'Les cartes de cet aventurier gagnent "Amnésie".',
     force_amnesie = true,
   },
 }

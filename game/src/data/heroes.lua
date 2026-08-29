@@ -86,21 +86,26 @@ Heroes.class_name = {
 -- (LÖVE respecte les "\n" dans Font:getWrap/love.graphics.printf en plus du
 -- retour automatique) -- une seule entrée de tableau `lines` par description,
 -- pas une par ligne visuelle.
+-- Mots-clés du glossaire entre guillemets (2026-08-30, même convention que
+-- Temple.effects/cards.lua, voir leurs commentaires respectifs) : c'est LA
+-- PREMIÈRE ligne lue de toute infobulle d'aventurier (voir tooltip_lines,
+-- view.lua), donc la plus rentable à corriger pour "tous les mots-clés
+-- doivent être expliqués au moins 1 fois".
 Heroes.class_description = {
   guerrier = "Un combattant qui sait faire des dégâts",
   paladin = "Un défenseur qui aime protéger ses alliés",
-  mage = "A besoin de Mana pour lancer de puissants sorts",
-  assassin = "Gagne de la Discrétion en laissant ses alliés agir :\n"
+  mage = 'A besoin de "Mana" pour lancer de puissants sorts',
+  assassin = 'Gagne de la "Discrétion" en laissant ses alliés agir :\n'
     .. "- +1 Discrétion quand un autre allié agit\n"
     .. "- +5 s'il passe son tour sans agir.\n"
-    .. "Devient Camouflé avec 10 de Discrétion\n"
+    .. 'Devient "Camouflé" avec 10 de Discrétion\n'
     .. "Discrétion revient à 0 après avoir agi",
-  necromancien = "Dépense ses propres PV pour amasser de la Corruption, puis la libère dans des rituels :\n"
+  necromancien = 'Dépense ses propres "PV" pour amasser de la "Corruption", puis la libère dans des rituels :\n'
     .. "- +1 Corruption par PV perdu (dégâts subis ou PV sacrifiés)\n"
     .. "- Repart à 0 Corruption à chaque nouveau combat\n"
     .. "- Certaines cartes en dépensent jusqu'à un plafond pour amplifier leur effet",
-  barde = "Insuffle de l'Inspiration à ses alliés pour amplifier leur prochaine carte, quelle que soit leur classe :\n"
-    .. "- Inspiration : +6 flat au premier effet de dégâts/soin/bouclier du porteur\n"
+  barde = 'Insuffle de l\'"Inspiration" à ses alliés pour amplifier leur prochaine carte, quelle que soit leur classe :\n'
+    .. '- Inspiration : +6 flat au premier effet de dégâts/"soin"/"bouclier" du porteur\n'
     .. "- -1 charge à l'utilisation, -1 automatique en fin de tour\n"
     .. "- Repart à 0 à chaque nouveau combat",
 }

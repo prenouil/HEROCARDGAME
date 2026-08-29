@@ -110,7 +110,7 @@ Enemies.templates = {
     moves_info = function(level)
       return {
         { icon = "\u{1F528}", name = "Coup de Massue", text = range_text(8, level) .. " dégâts (fréquent)" },
-        { icon = "\u{1F49A}", name = "Régénération", text = "+" .. range_text(15, level) .. ' PV (rare) — annulée si le Troll a subi des dégâts "feu" pendant la phase joueur de ce tour' },
+        { icon = "\u{1F49A}", name = "Régénération", text = "+" .. range_text(15, level) .. ' "PV" (rare) — annulée si le Troll a subi des dégâts "feu" pendant la phase joueur de ce tour' },
       }
     end,
   },
@@ -126,8 +126,8 @@ Enemies.templates = {
     end,
     moves_info = function(level)
       return {
-        { icon = "\u{1F528}", name = "Coup de Gourdin", text = range_text(8, level) .. " dégâts hors défense / " .. range_text(3, level) .. " en défense (+ bouclier), un tour sur deux chacun — attaque toujours" },
-        { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(1, level) .. " défense en permanence" },
+        { icon = "\u{1F528}", name = "Coup de Gourdin", text = range_text(8, level) .. ' dégâts hors défense / ' .. range_text(3, level) .. ' en défense (+ "bouclier"), un tour sur deux chacun — attaque toujours' },
+        { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(1, level) .. ' "bouclier" en permanence' },
       }
     end,
   },
@@ -137,7 +137,7 @@ Enemies.templates = {
       return { kind = "dmg", name = "Morsure", icon = "\u{1F43E}", dmg_type = "melee", amount = roll_scaled(9, e.level, rng) }
     end,
     moves_info = function(level)
-      return { { icon = "\u{1F43E}", name = "Morsure", text = range_text(9, level) .. " dégâts (toujours) — peu de PV" } }
+      return { { icon = "\u{1F43E}", name = "Morsure", text = range_text(9, level) .. ' dégâts (toujours) — peu de "PV"' } }
     end,
   },
   {
@@ -146,7 +146,7 @@ Enemies.templates = {
       return { kind = "dmg", name = "Piqûre", icon = "\u{2620}\u{FE0F}", dmg_type = "melee", amount = roll_scaled(2, e.level, rng), brut = true, bleed = roll_scaled(3, e.level, rng) }
     end,
     moves_info = function(level)
-      return { { icon = "\u{2620}\u{FE0F}", name = "Piqûre", text = range_text(2, level) .. " dégâts brut + Saignement " .. range_text(3, level) .. " (toujours)" } }
+      return { { icon = "\u{2620}\u{FE0F}", name = "Piqûre", text = range_text(2, level) .. ' dégâts "brut" + "Saignement" ' .. range_text(3, level) .. " (toujours)" } }
     end,
   },
   {
@@ -166,7 +166,7 @@ Enemies.templates = {
     end,
     moves_info = function(level)
       return {
-        { icon = "\u{1F52E}", name = "Malédiction", text = "Vulnérabilité " .. range_text(3, level) .. ", pas de dégât direct (fréquent)" },
+        { icon = "\u{1F52E}", name = "Malédiction", text = '"Vulnérabilité" ' .. range_text(3, level) .. ", pas de dégât direct (fréquent)" },
         { icon = "\u{1F480}", name = "Toucher Nécrotique", text = range_text(3, level) .. " dégâts (rare)" },
       }
     end,
@@ -179,7 +179,7 @@ Enemies.templates = {
     moves_info = function(level)
       return {
         { icon = "\u{1FAA8}", name = "Poing de Pierre", text = range_text(7, level) .. " dégâts, seulement s'il subit des dégâts pendant la phase joueur ; sinon ne fait rien" },
-        { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(3, level) .. " défense en permanence — très gros PV" },
+        { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(3, level) .. ' "bouclier" en permanence — très gros "PV"' },
       }
     end,
   },
@@ -189,7 +189,7 @@ Enemies.templates = {
       return { kind = "dmg", name = "Coup Sournois", icon = "\u{1F52A}", dmg_type = "melee", amount = roll_scaled(6, e.level, rng) }
     end,
     moves_info = function(level)
-      return { { icon = "\u{1F52A}", name = "Coup Sournois", text = range_text(6, level) .. " dégâts, cible toujours le héros au moins de PV (toujours)" } }
+      return { { icon = "\u{1F52A}", name = "Coup Sournois", text = range_text(6, level) .. ' dégâts, cible toujours le héros au moins de "PV" (toujours)' } }
     end,
   },
   {
@@ -207,7 +207,7 @@ Enemies.templates = {
     end,
     moves_info = function(level)
       return {
-        { icon = "\u{1FA84}", name = "Chant Rituel", text = "Soigne un allié blessé de " .. range_text(5, level) .. " PV s'il y en a un" },
+        { icon = "\u{1FA84}", name = "Chant Rituel", text = "Soigne un allié blessé de " .. range_text(5, level) .. ' "PV" s\'il y en a un' },
         { icon = "\u{2734}\u{FE0F}", name = "Chant Rituel (repli)", text = "Sinon, attaque pour " .. range_text(3, level) .. " dégâts" },
       }
     end,

@@ -499,6 +499,28 @@ function Input.mousemoved(controller, x, y)
   if controller.screen == "team_select" then
     local ts = controller.team_select
     if ts then
+      -- Cartes affichées au centre (2026-08-30, bug signalé -- "pareil pour
+      -- les cartes") : seulement les 3 Départ, SETTLED (pas la carte de dos
+      -- "Avancées", qui n'a rien à détailler côté glossaire -- ni les cartes
+      -- encore en plein vol, dont la position réelle diverge de leur rect de
+      -- repos tant qu'elles n'ont pas fini d'arriver, voir Controller:update).
+      for _, a in ipairs(ts.card_anims) do
+        if not a.is_back and a.mode == "in" and a.elapsed >= a.duration and View.point_in(a.to, x, y) then
+          controller:set_hover("card", a.def)
+          return
+        end
+      end
+
+      -- Projecteur (2026-08-30, bug signalé -- "les info bulles [doivent]
+      -- marcher sur les aventuriers") : le héros mis en avant n'était détecté
+      -- par AUCUN des 2 rects ci-dessous une fois déplacé là (ils pointent
+      -- toujours vers sa case d'ORIGINE, exclue exprès -- voir
+      -- team_select_hero_interactive) -- ni bond au survol, ni infobulle,
+      -- tant qu'il y restait.
+      if ts.focused_id and View.point_in(View.team_select_spotlight_rect, x, y) then
+        controller:team_select_hover(ts.focused_id); return
+      end
+
       -- Même filtre que team_select_click (2026-08-30, bug signalé) : sinon
       -- l'infobulle/le son de survol se déclenchent encore sur la case vide
       -- laissée par un héros mis en avant/en transit.

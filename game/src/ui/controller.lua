@@ -44,6 +44,22 @@ local FLIGHT_DURATION = 0.38 -- s, calque sur FLIGHT_MS (380ms) du prototype -- 
 local TURN_ENERGY_ANIM_DURATION = 0.9 -- s -- le gros chiffre d'énergie qui se pose sur sa pastille (accentué 2026-08-21, voir ENERGY_TURN_ANIM_START_SCALE côté view.lua)
 local DRAW_FLIGHT_STAGGER = 0.11 -- s entre deux cartes piochées en DÉBUT DE TOUR -- plus lent que l'ancien DRAW_STAGGER
 local DRAW_FLIGHT_DURATION = 0.5 -- s -- vol de pioche, plus lent que FLIGHT_DURATION, avec petit rebond d'arrivée (voir ease_out_back côté view.lua)
+-- Pioche ISOLÉE d'1 seule carte (2026-08-30, bug signalé -- "on ne voit pas
+-- l'animation d'arrivée de la carte, elle se téléporte dans la main", ex.
+-- Barde "Improvisation") : ease_out_back (view.lua) atteint déjà ~90% de la
+-- trajectoire au bout de 30-40% de sa durée -- pour un lot de plusieurs
+-- cartes échelonnées (début de tour), l'oeil reste occupé par les cartes
+-- suivantes qui arrivent encore, donc l'atterrissage rapide de chacune passe
+-- inaperçu ; pour UNE SEULE carte isolée (effet de carte en cours de tour,
+-- pas de voisine pour faire diversion), ce même atterrissage rapide se lit
+-- comme un simple "pop" plutôt qu'un vol -- voir Controller:animate_draw,
+-- seul point qui choisit entre les deux constantes.
+local DRAW_FLIGHT_SINGLE_DURATION = 0.85 -- s -- vol plus long, MÊME courbe (ease_out_back), pour rester bien visible tout seul
+-- Descente des ennemis à l'entrée en combat (2026-08-30, demande explicite --
+-- voir Controller:play_enemy_entrance_sequence).
+local ENEMY_ENTRANCE_DURATION = 0.55 -- s -- chute d'1 ennemi depuis le haut de l'écran jusqu'à sa position
+local ENEMY_ENTRANCE_STAGGER = 0.18 -- s entre 2 ennemis qui descendent -- "un décalage... pour qu'ils n'arrivent pas de façon totalement synchronisée"
+local ENEMY_ENTRANCE_BOSS_LEAD = 0.55 -- s d'avance du boss sur son 1er sbire -- "c'est lui qui arrive en premier, puis les sbires ensuite"
 local HERO_READY_STAGGER = 0.15 -- s entre le saut "prêt" de chaque aventurier vivant, gauche à droite
 local END_TURN_DISCARD_STAGGER = 0.09 -- s entre deux cartes défaussées en FIN DE TOUR -- plus lent que l'ancien DISCARD_STAGGER
 local END_TURN_DISCARD_FLIGHT_DURATION = 0.48 -- s -- vol de défausse de fin de tour, plus lent que FLIGHT_DURATION
@@ -85,6 +101,11 @@ local POST_COMBAT_RESOLVE_PAUSE = 0.6
 -- "Le joueur choisit parmi ses 4 aventuriers lequel va se faire soigner de
 -- 30% de ses PV max" (2026-08-30, demande explicite, feu de camp).
 local CAMPFIRE_HEAL_FRACTION = 0.30
+-- "Pour que l'évènement du feu de camp arrive, il faut qu'au moins 1
+-- aventurier ait moins de 70% de ses PV max. Sinon, on prend un autre
+-- évènement. Cette règle ne concerne pas le refuge." (2026-08-30, demande
+-- explicite) : voir campfire_viable, seul lecteur.
+local CAMPFIRE_VIABLE_HP_FRACTION = 0.70
 -- "Tous les persos vont regagner 30% de leurs PV" (2026-08-30, demande
 -- explicite, Le Refuge -- même fraction que le feu de camp, mais sans choix,
 -- toute l'équipe à la fois).
@@ -220,6 +241,15 @@ function Controller.new()
   -- Controller:enter_post_combat_sequence ne puisse jamais retirer le même
   -- deux fois de suite (demande explicite).
   self.last_post_combat_event = nil
+  -- uid de la carte tout juste gagnée au draft (2026-08-30, demande explicite --
+  -- "parmi les cartes proposées [à la Forge], il ne peut pas y avoir la carte
+  -- que l'on vient à l'instant de gagner au combat précédent") : posé par
+  -- Controller:choose_draft_card, lu par Controller:enter_forge_screen. Jamais
+  -- explicitement remis à nil ailleurs -- un draft précède TOUJOURS le tirage
+  -- de l'évènement "camp" du même combat (voir enter_post_combat_sequence),
+  -- donc ce champ représente toujours "la dernière carte gagnée", que
+  -- l'évènement tiré soit la Forge ou autre chose.
+  self.last_drafted_uid = nil
   -- { resolved = bool|nil }, voir Controller:enter_campfire_screen -- écran
   -- "Feu de camp" (2026-08-30, remis en place, refonte -- SEULE option : le
   -- joueur choisit 1 des 4 aventuriers, soigné de 30% de ses PV max, aucun
@@ -246,6 +276,11 @@ function Controller.new()
   self.draft_flip_duration = DRAFT_FLIP_DURATION -- lu par view.lua pour l'easing
   self.anim = {} -- [unit_id] = { kind = "pulse-up"|"pulse-down"|"shake", t = elapsed }
   self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, def } -- voir View.draw
+  -- [enemy_id] = { elapsed, delay, duration } (2026-08-30, descente des
+  -- ennemis à l'entrée en combat) : voir Controller:play_enemy_entrance_sequence,
+  -- lu par draw_enemy (view.lua) pour substituer un y hors-écran + fondu à la
+  -- position de repos tant que `elapsed < delay + duration`.
+  self.enemy_entrance = {}
   self.floaters = {} -- liste de { x, y, text, kind = "damage"|"heal", t } -- lu par view.lua
   self.particles = {} -- liste de { x, y, vx, vy, t } -- petit burst à l'impact
   self.status_pop = {} -- [unit_id] = { [status_key] = elapsed } -- pop d'un badge à son application
@@ -271,7 +306,13 @@ function Controller.new()
   -- espacés, pas un seul son joué pour tout le paquet) : liste de
   -- { delay = secondes restantes, name }, décrémentée dans Controller:update.
   self.pending_sfx = {}
-  self.hover = { target = nil, kind = nil, t = 0 } -- kind: "hero"|"enemy"|"card"
+  -- frozen_x/frozen_y (2026-08-30, demande explicite -- "l'infobulle ne suit
+  -- plus la souris, elle reste à la même place jusqu'à disparition") : nil
+  -- tant que l'infobulle n'est pas VISIBLE, capturés une seule fois par
+  -- draw_tooltip (view.lua) dès la première frame où hover_ready() devient
+  -- vrai -- voir Controller:set_hover, qui les remet à nil dès que kind/target
+  -- change (nouvelle cible = nouvelle position à capturer).
+  self.hover = { target = nil, kind = nil, t = 0, frozen_x = nil, frozen_y = nil } -- kind: "hero"|"enemy"|"card"
   -- Mode d'entrée alterné (2026-08-09, spike) : "tap" = séquence à 3 clics
   -- (existant) ; "arrow" = sélection au survol + flèche dynamique façon Slay
   -- the Spire -- devenu le défaut (2026-08-09, retour positif du porteur de
@@ -283,6 +324,13 @@ function Controller.new()
   -- n'est appelé qu'au clic sur "Jouer un run"/"Mode infini", voir Input.mousepressed --
   -- en passant désormais par l'écran de choix d'équipe (2026-08-29), voir
   -- Controller:enter_team_select.
+  -- Jingle d'accueil (2026-08-30, demande explicite -- "un petit jingle
+  -- d'accueil" au lancement du jeu) : Controller.new() n'est appelé QU'UNE
+  -- SEULE FOIS par love.load (main.lua), jamais en retournant au menu depuis
+  -- une run -- point d'accroche naturel pour "au lancement", contrairement à
+  -- self.screen = "menu" (ligne plus haut), réutilisé par Controller:reset_run
+  -- entre deux runs et qui rejouerait donc le jingle à chaque partie.
+  Sfx.play("jingle")
   return self
 end
 
@@ -324,14 +372,18 @@ end
 
 --- Survol d'un aventurier sur l'écran de choix d'équipe (2026-08-30, demande
 -- explicite -- "il n'y a aucun son dans cette fenêtre, il faut en ajouter à
--- toutes les actions joueurs : survol, clic, déplacement...") : un seul
--- "flush" au moment où le survol COMMENCE sur ce héros précis, jamais répété
--- tant qu'on reste dessus -- Controller:set_hover ignore déjà un appel
--- répété avec la même cible (voir son commentaire), donc comparer AVANT de
+-- toutes les actions joueurs : survol, clic, déplacement...") : un seul son
+-- au moment où le survol COMMENCE sur ce héros précis, jamais répété tant
+-- qu'on reste dessus -- Controller:set_hover ignore déjà un appel répété
+-- avec la même cible (voir son commentaire), donc comparer AVANT de
 -- l'appeler est le seul moyen de détecter "ça vient de changer" ici.
+-- "hover" pas "flush" (2026-08-30, bug signalé -- "trop agressif... beaucoup
+-- plus étouffé, plus neutre, plus discret") : voir son commentaire dans
+-- sfx.lua -- "flush" reste réservé aux vrais déplacements (carte/loot),
+-- jamais à un simple survol.
 function Controller:team_select_hover(id)
   if not (self.hover.kind == "team_hero" and self.hover.target == id) then
-    Sfx.play("flush")
+    Sfx.play("hover")
   end
   self:set_hover("team_hero", id)
 end
@@ -641,6 +693,7 @@ function Controller:clear_animation_state()
   self.seq:clear()
   self.anim = {}
   self.card_anims = {}
+  self.enemy_entrance = {}
   self.floaters = {}
   self.particles = {}
   self.status_pop = {}
@@ -671,10 +724,22 @@ function Controller:reset_run(mode, selected_ids)
   -- (mi-run, l'historique reste valable), jamais réinitialisé dans
   -- clear_animation_state pour cette raison.
   self.last_post_combat_event = nil
+  -- Jingle de lancement de run (2026-08-30, demande explicite -- "un autre
+  -- petit jingle, un peu plus grave, plus solennel") : joué ici, pas dans
+  -- Controller.new (réservé à l'accueil de l'application) -- se déclenche
+  -- donc à CHAQUE run (premier lancement, "Rejouer" après une défaite, etc.),
+  -- jamais pour "Tester le boss" (Controller:start_boss_test, qui ne passe
+  -- pas par cette fonction).
+  Sfx.play("run_start")
   Game.reset_run(self.state, nil, selected_ids)
   -- Game.start_turn (appelé par reset_run) ne peut plus infliger de dégâts à
   -- ce jour -- garde-fou conservé par précaution, voir advance_after_discard_sequenced.
   if self.state.over then self:handle_combat_victory(); return end
+  -- Descente des ennemis (2026-08-30) AVANT la parade des aventuriers,
+  -- demande explicite -- voir play_enemy_entrance_sequence, qui renvoie sa
+  -- durée totale pour que ce beat "vide" fasse simplement patienter le
+  -- séquenceur jusqu'à ce que le dernier ennemi soit posé.
+  self.seq:push(function() end, self:play_enemy_entrance_sequence())
   -- Séquence de début de tour rejouée dès le tout premier tour de la partie
   -- (2026-08-21, demande explicite -- "l'animation pour l'énergie doit aussi
   -- se faire au début de la partie") : même mise en scène que chaque tour
@@ -696,6 +761,7 @@ function Controller:start_boss_test()
   self.last_post_combat_event = nil
   Game.start_boss_test(self.state)
   if self.state.over then self:handle_combat_victory(); return end
+  self.seq:push(function() end, self:play_enemy_entrance_sequence())
   self:play_turn_start_sequence()
 end
 
@@ -760,6 +826,9 @@ end
 -- consume_drawn_animation, qui doit faire réapparaître la carte en main.
 function Controller:animate_draw(drawn_uids)
   if not drawn_uids or #drawn_uids == 0 then return 0 end
+  -- Durée plus longue pour 1 carte isolée seulement (voir DRAW_FLIGHT_SINGLE_DURATION) --
+  -- un lot de plusieurs cartes échelonnées garde EXACTEMENT son comportement d'avant.
+  local duration = #drawn_uids == 1 and DRAW_FLIGHT_SINGLE_DURATION or DRAW_FLIGHT_DURATION
   local hand_rects = View.hand_rects(self.state)
   local origin = View.deck_pile_rect
   for i, uid in ipairs(drawn_uids) do
@@ -770,7 +839,7 @@ function Controller:animate_draw(drawn_uids)
       local delay = (i - 1) * DRAW_FLIGHT_STAGGER
       self.card_anims[#self.card_anims + 1] = {
         from = origin, to = dest, elapsed = 0, delay = delay,
-        duration = DRAW_FLIGHT_DURATION, fade_in = true, def = def, uid = uid,
+        duration = duration, fade_in = true, def = def, uid = uid,
       }
       self.pending_draw_uids[uid] = nil
       -- 1 "flup" PAR carte, espacé du même délai que son vol (2026-08-21,
@@ -779,7 +848,7 @@ function Controller:animate_draw(drawn_uids)
       self:schedule_sfx("flup", delay)
     end
   end
-  return (#drawn_uids - 1) * DRAW_FLIGHT_STAGGER + DRAW_FLIGHT_DURATION
+  return (#drawn_uids - 1) * DRAW_FLIGHT_STAGGER + duration
 end
 
 --- Quelques cartes anonymes qui volent de la défausse vers la pioche
@@ -1052,6 +1121,48 @@ end
 -- plutôt que précalculé à l'avance sur un simple compte de cartes (qui
 -- ignorerait un éventuel remélange et ferait sauter les aventuriers trop tôt,
 -- par-dessus la fin de la pioche).
+--- Descente des ennemis depuis le haut de l'écran à l'entrée en combat
+-- (2026-08-30, demande explicite -- "avant la parade des aventuriers [...]
+-- les monstres ne soient pas encore présents mais descendent petit à petit
+-- depuis en dehors de l'écran en haut [...] avec un son caractéristique pour
+-- chaque ennemi [...] un décalage entre les monstres [...] pour le boss,
+-- c'est lui qui arrive en premier, puis les sbires ensuite, de façon
+-- décalée"). Peuple `self.enemy_entrance` -- seulement lu par draw_enemy
+-- (view.lua) pour substituer un y hors-écran + fondu à la position de repos
+-- tant que l'entrée n'est pas finie -- et programme 1 son PAR ennemi via
+-- schedule_sfx (jamais un seul son pour tout le lot, même idiome que
+-- Controller:animate_draw). Boss (state.run.is_boss) : le boss (tout ce qui
+-- n'est pas "pousse", même convention que Encounter.boss_encounter/
+-- enemies.lua pour distinguer boss et sbires) descend seul en premier, ses
+-- sbires décalés seulement APRÈS lui (ENEMY_ENTRANCE_BOSS_LEAD) -- combat
+-- normal : simple échelonnement gauche à droite dans l'ordre de state.enemies
+-- (celui déjà utilisé par View.enemy_rects), aucune notion de priorité.
+-- Renvoie la durée totale, même contrat que consume_drawn_animation/
+-- animate_draw -- l'appelant (reset_run/start_boss_test/advance_to_next_combat)
+-- attend cette durée avant d'enchaîner sur play_turn_start_sequence, pour que
+-- la "parade des aventuriers" ne démarre qu'une fois tous les ennemis posés.
+function Controller:play_enemy_entrance_sequence()
+  self.enemy_entrance = {}
+  local enemies = self.state.enemies
+  if #enemies == 0 then return 0 end
+  local is_boss = self.state.run.is_boss
+  local minion_index = 0
+  local max_delay = 0
+  for _, e in ipairs(enemies) do
+    local delay
+    if is_boss and e.template_id ~= "pousse" then
+      delay = 0
+    else
+      delay = (is_boss and ENEMY_ENTRANCE_BOSS_LEAD or 0) + minion_index * ENEMY_ENTRANCE_STAGGER
+      minion_index = minion_index + 1
+    end
+    self.enemy_entrance[e.id] = { elapsed = 0, delay = delay, duration = ENEMY_ENTRANCE_DURATION }
+    self:schedule_sfx("enemy_land_" .. (e.template_id or "default"), delay)
+    max_delay = math.max(max_delay, delay)
+  end
+  return max_delay + ENEMY_ENTRANCE_DURATION
+end
+
 function Controller:play_turn_start_sequence()
   local self_ = self
   -- Marquer `pending_draw_uids` DÈS CE BEAT, pas seulement à l'intérieur de
@@ -1156,6 +1267,14 @@ function Controller:update(dt)
     a.elapsed = a.elapsed + dt
     if a.elapsed >= a.delay + a.duration then table.remove(self.card_anims, i) end
   end
+  -- Descente des ennemis (2026-08-30) : même idiome que card_anims ci-dessus --
+  -- une fois l'entrée finie, l'ennemi est exactement à sa position de repos,
+  -- draw_enemy (view.lua) reprend la main sans discontinuité, donc l'entrée
+  -- peut être supprimée dès que finie.
+  for id, a in pairs(self.enemy_entrance) do
+    a.elapsed = a.elapsed + dt
+    if a.elapsed >= a.delay + a.duration then self.enemy_entrance[id] = nil end
+  end
   -- Écran "Choisis ton équipe" (2026-08-29) : "in" ne se supprime JAMAIS tout
   -- seul (elapsed clampé à duration par le rendu -- voir draw_team_select --
   -- fige la carte à sa position cible, c'est l'état "posée" -- pas de 2ᵉ
@@ -1232,6 +1351,7 @@ function Controller:set_hover(kind, target)
   self.hover.kind = kind
   self.hover.target = target
   self.hover.t = 0
+  self.hover.frozen_x, self.hover.frozen_y = nil, nil
 end
 
 -- Teste `kind`, pas `target` (bug signalé 2026-08-21) : la pioche/défausse
@@ -1454,7 +1574,11 @@ end
 function Controller:choose_draft_card(index)
   if self.screen ~= "draft" or not self.draft_picks or not self:draft_card_ready(index) then return end
   local def = self.draft_picks[index]
-  self.state.deck[#self.state.deck + 1] = { uid = Game.next_uid(self.state), def = def }
+  local uid = Game.next_uid(self.state)
+  self.state.deck[#self.state.deck + 1] = { uid = uid, def = def }
+  -- Mémorisé pour Controller:enter_forge_screen (2026-08-30, voir son
+  -- commentaire) -- avant le log, sans effet sur celui-ci.
+  self.last_drafted_uid = uid
   Combat.log(self.state, def.name .. " ajoutée au deck.", "sys")
   self.draft_picks = nil
   self.card_anims = {}
@@ -1469,23 +1593,42 @@ end
 -- temple, le choix est aléatoire mais ne peut arriver 2 fois à la suite").
 -- Remplace l'ancien système à 2 tirages de probabilité indépendants (0, 1 ou
 -- 2 écrans -- voir git log pour POST_COMBAT_FORGE_CHANCE/TEMPLE_CHANCE, un
--- seul tirage à 3 issues désormais. `self.last_post_combat_event` exclut le
--- type de la dernière fois ; le Temple est EN PLUS retiré des candidats s'il
--- n'a rien à proposer (Temple.any_type_viable, pur -- aucun aventurier
--- éligible à ni bénédiction ni malédiction) -- le feu de camp et la Forge
--- restent, eux, TOUJOURS disponibles (soigner 30% de PV max, ou "Passer" si
--- le deck est déjà entièrement amélioré). Si les 2 filtres combinés
--- videraient la liste (le dernier évènement ÉTAIT déjà le seul des 2
--- toujours-disponibles, Temple indisponible ce combat-ci), la règle "jamais
--- 2 fois de suite" cède plutôt que de laisser passer un combat sans aucun
--- évènement. `state.rng.post_combat` : flux dédié à CE tirage-là seulement,
--- jamais celui qui décide du CONTENU de la Forge/du Temple (state.rng.forge/
--- temple, consommés seulement une fois l'écran vraiment entré).
--- `candidates` compte 4 types désormais (campfire/forge/temple/refuge) : au
--- plus 1 est retiré pour "pas 2 fois de suite" et 1 pour "Temple
--- indisponible", il en reste donc TOUJOURS au moins 2 -- le filet de
--- sécurité de l'ancienne version (2 seuls types toujours-disponibles) n'a
--- donc plus de raison d'être, retiré.
+-- seul tirage à 3 issues désormais.
+-- Le Refuge n'est JAMAIS un candidat de CE tirage (2026-08-30, bug signalé --
+-- "je viens d'avoir l'évènement Le Refuge alors que je ne suis pas au
+-- dernier combat avant le boss" : une première version l'avait ajouté comme
+-- 4ᵉ candidat normal, ce qui le laissait sortir n'importe quand par pur
+-- hasard -- FAUX, voir la demande d'origine, "après 9 combats ET 1 dernier
+-- évènement OBLIGATOIREMENT le Refuge" : le mot "obligatoirement" désigne le
+-- SEUL chemin qui y mène, la branche forcée juste en dessous, jamais le
+-- tirage aléatoire normal) : les 3 candidats normaux restent campfire/forge/
+-- temple, comme demandé littéralement.
+-- `self.last_post_combat_event` exclut le type de la dernière fois ; le
+-- Temple est EN PLUS retiré s'il n'a rien à proposer (Temple.any_type_viable,
+-- pur -- aucun aventurier éligible à ni bénédiction ni malédiction) ; le feu
+-- de camp est retiré si AUCUN aventurier n'est sous CAMPFIRE_VIABLE_HP_FRACTION
+-- (2026-08-30, demande explicite -- "pour que l'évènement du feu de camp
+-- arrive, il faut qu'au moins 1 aventurier ait moins de 70% de ses PV max...
+-- cette règle ne concerne pas le refuge", voir campfire_viable) -- la Forge,
+-- elle, reste TOUJOURS disponible (elle propose "Passer" si le deck est déjà
+-- entièrement amélioré). Les 2 filtres de viabilité s'appliquent AVANT
+-- l'exclusion "pas 2 fois de suite" (2026-08-30, correctif -- l'ordre inverse
+-- pouvait vider la liste : ex. dernier évènement = Forge, Temple ET feu de
+-- camp tous deux indisponibles ce combat-ci = candidats vides, la Forge étant
+-- le seul type immunisé contre les 2 filtres de viabilité MAIS déjà exclu par
+-- "pas 2 fois de suite") -- dans ce cas, "pas 2 fois de suite" cède plutôt que
+-- de planter/retomber sur un mauvais défaut (c'est exactement ainsi que le
+-- Refuge s'est glissé par erreur avant ce correctif, voir plus haut).
+-- `state.rng.post_combat` : flux dédié à CE tirage-là seulement, jamais celui
+-- qui décide du CONTENU de la Forge/du Temple (state.rng.forge/temple,
+-- consommés seulement une fois l'écran vraiment entré).
+local function campfire_viable(state)
+  for _, h in ipairs(state.heroes) do
+    if h.hp < h.max_hp * CAMPFIRE_VIABLE_HP_FRACTION then return true end
+  end
+  return false
+end
+
 function Controller:enter_post_combat_sequence()
   -- "Après 9 combats et 1 dernier évènement OBLIGATOIREMENT le Refuge, on
   -- enchaîne sur le Boss" (2026-08-30, demande explicite) : ce combat-ci
@@ -1494,7 +1637,8 @@ function Controller:enter_post_combat_sequence()
   -- combat classique d'un run "bounded", Le Refuge remplace le tirage
   -- normal SANS EXCEPTION (même si le dernier évènement était déjà Le
   -- Refuge -- la garantie "reposé juste avant le Boss" prime sur "jamais 2
-  -- fois de suite").
+  -- fois de suite"). SEUL chemin qui mène au Refuge -- voir le commentaire
+  -- au-dessus de cette fonction.
   if self.run_mode == "bounded" and self.state.run.combat_index >= BOUNDED_COMBAT_COUNT then
     self.last_post_combat_event = "refuge"
     self:enter_refuge_screen()
@@ -1502,21 +1646,27 @@ function Controller:enter_post_combat_sequence()
   end
 
   local rng = self.state.rng.post_combat
+  local viable = {}
+  for _, t in ipairs({ "campfire", "forge", "temple" }) do
+    local ok = true
+    if t == "campfire" then ok = campfire_viable(self.state)
+    elseif t == "temple" then ok = Temple.any_type_viable(self.state) end
+    if ok then viable[#viable + 1] = t end
+  end
   local candidates = {}
-  for _, t in ipairs({ "campfire", "forge", "temple", "refuge" }) do
+  for _, t in ipairs(viable) do
     if t ~= self.last_post_combat_event then candidates[#candidates + 1] = t end
   end
-  if not Temple.any_type_viable(self.state) then
-    local filtered = {}
-    for _, t in ipairs(candidates) do if t ~= "temple" then filtered[#filtered + 1] = t end end
-    candidates = filtered
-  end
+  -- Jamais vide (2026-08-30, voir le commentaire au-dessus) : `viable`
+  -- contient toujours au moins "forge", immunisé contre les 2 filtres de
+  -- viabilité -- si "pas 2 fois de suite" retirait justement ce dernier
+  -- survivant, on retombe sur `viable` tel quel plutôt que de planter.
+  if #candidates == 0 then candidates = viable end
   local chosen = candidates[rng:random(#candidates)]
   self.last_post_combat_event = chosen
   if chosen == "campfire" then self:enter_campfire_screen()
   elseif chosen == "forge" then self:enter_forge_screen()
-  elseif chosen == "temple" then self:enter_temple_screen()
-  else self:enter_refuge_screen() end
+  else self:enter_temple_screen() end
 end
 
 --- Point de sortie commun aux 3 écrans "camp" (2026-08-30) : `post_combat_queue`
@@ -1624,7 +1774,9 @@ end
 -- seule fois, via state.rng.forge, même principe que Draft.pick_cards.
 function Controller:enter_forge_screen()
   self.screen = "forge"
-  self.forge = { choices = Forge.pick_choices(self.state, self.state.rng.forge) }
+  -- self.last_drafted_uid (2026-08-30, voir son commentaire, Controller.new) :
+  -- exclut la carte tout juste gagnée au draft précédent des choix proposés.
+  self.forge = { choices = Forge.pick_choices(self.state, self.state.rng.forge, self.last_drafted_uid) }
 end
 
 --- Vrai tant que le choix n'est pas encore fait -- garde contre un double-clic
@@ -1801,6 +1953,7 @@ function Controller:advance_to_next_combat()
   end
   self:react_to_diff(before, { skip_shield_sfx = true })
   if self.state.over then self_:handle_combat_victory(); return end
+  self.seq:push(function() end, self:play_enemy_entrance_sequence())
   self:play_turn_start_sequence()
 end
 

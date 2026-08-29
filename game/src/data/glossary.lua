@@ -99,12 +99,34 @@ Glossary.terms = {
   { key = "encore", icon = nil, has_icon = false, related = "", explain = "La prochaine carte jouée par le porteur ce tour se déclenche des fois supplémentaires. Perdu en fin de tour si aucune carte n'est jouée avant." },
 }
 
--- Lowercase + strip everything but a-z. Le jeu de cartes source n'utilise que des
--- mots-clés déjà non-accentués entre guillemets (ex. "epee", pas "épée"), donc une
--- normalisation ASCII simple reproduit fidèlement le comportement de l'original
--- (qui passait par un NFD Unicode plus général, inutile ici).
+-- Repli ASCII des lettres accentuées françaises (2026-08-30, bug signalé --
+-- "L'Amnésique stipule que les cartes gagnent Amnésie, mais rien n'explique
+-- son fonctionnement", voir tooltip_lines/append_missing_keyword_explanations
+-- dans view.lua) : un texte libre (description de bénédiction/malédiction du
+-- Temple, description de classe...) doit pouvoir citer un mot-clé "Vulnérabilité"
+-- ou "Discrétion" ENTRE GUILLEMETS avec ses accents normaux, pour un affichage
+-- naturel une fois passé par Glossary.render_card_text -- sans repli, un simple
+-- gsub("[^a-z]","") supprimait les OCTETS UTF-8 des lettres accentuées au lieu
+-- de les convertir (ex. "Vulnérabilité" -> "vulnrabilit", jamais égal à la clé
+-- "vulnerabilite") : ce mot-clé pourtant bien écrit entre guillemets n'était
+-- alors JAMAIS reconnu par Glossary.keywords_present. Table bornée aux lettres
+-- réellement utilisées dans ce jeu (pas un vrai NFD Unicode général, inutile
+-- ici) ; :lower() en tête ne convertit QUE l'ASCII (É/È/... restent tels quels,
+-- byte-based) -- d'où les entrées majuscules explicites ci-dessous.
+local ACCENT_FOLD = {
+  ["à"] = "a", ["â"] = "a", ["ä"] = "a", ["À"] = "a", ["Â"] = "a", ["Ä"] = "a",
+  ["é"] = "e", ["è"] = "e", ["ê"] = "e", ["ë"] = "e",
+  ["É"] = "e", ["È"] = "e", ["Ê"] = "e", ["Ë"] = "e",
+  ["î"] = "i", ["ï"] = "i", ["Î"] = "i", ["Ï"] = "i",
+  ["ô"] = "o", ["ö"] = "o", ["Ô"] = "o", ["Ö"] = "o",
+  ["ù"] = "u", ["û"] = "u", ["ü"] = "u", ["Ù"] = "u", ["Û"] = "u", ["Ü"] = "u",
+  ["ç"] = "c", ["Ç"] = "c",
+}
 local function normalize_kw(w)
   w = w:lower()
+  for accented, plain in pairs(ACCENT_FOLD) do
+    w = w:gsub(accented, plain)
+  end
   w = w:gsub("[^a-z]", "")
   return w
 end

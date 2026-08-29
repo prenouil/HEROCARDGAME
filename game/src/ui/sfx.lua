@@ -25,7 +25,7 @@ local function note(freq, duration, wave, curve, volume, duty)
 end
 
 -- Fréquences (tempérament égal, La4 = 440Hz) pour les fanfares.
-local G3, C4, E4, G4, C5 = 196.00, 261.63, 329.63, 392.00, 523.25
+local C3, G3, C4, E4, G4, C5 = 130.81, 196.00, 261.63, 329.63, 392.00, 523.25
 
 local BUILDERS = {}
 
@@ -90,6 +90,20 @@ BUILDERS.flup = function()
   end, 0.65)
 end
 
+-- "hover" -- survol d'un aventurier à l'écran de choix d'équipe (2026-08-30,
+-- bug signalé -- "le son choisi pour le survol d'un aventurier est trop
+-- agressif, il faut en choisir un beaucoup plus étouffé, plus neutre, plus
+-- discret") : DISTINCT de "flush" (glissando carré aigu -> grave, pensé pour
+-- un déplacement de carte -- bien trop tranchant pour un survol qui peut se
+-- déclencher à chaque passage de souris) -- triangle grave, volume très bas,
+-- très court : un clic sourd et neutre, jamais un signal marquant. Voir
+-- Controller:team_select_hover, seul appelant.
+BUILDERS.hover = function()
+  return Chiptune.render(0.06, function(t)
+    return Chiptune.triangle(220, t) * Chiptune.decay(t, 0.06, 2.5)
+  end, 0.18)
+end
+
 -- "hop" -- un aventurier prêt à jouer en début de tour (2026-08-21, demande
 -- explicite) : blip carré très court, aigu, énergique -- un par héros, au
 -- rythme du saut échelonné (voir Controller:play_hero_ready_hops).
@@ -127,6 +141,40 @@ BUILDERS.upgrade = function()
   })
 end
 
+-- "jingle" -- accueil au lancement du jeu (2026-08-30, demande explicite --
+-- "un petit jingle d'accueil") : arpège carré vif jusqu'à une note tenue,
+-- puis un scintillement triangle aigu à l'octave -- DISTINCT de "victory"
+-- ci-dessous (notes bien plus courtes, attaque plus vive : un clin d'oeil de
+-- bienvenue, pas une célébration de fin de combat). Joué une seule fois, à
+-- l'ouverture de l'application -- voir Controller.new, seul appelant.
+BUILDERS.jingle = function()
+  return Chiptune.concat({
+    note(C4, 0.08, "square", 1.6, 0.45, 0.4),
+    note(E4, 0.08, "square", 1.6, 0.45, 0.4),
+    note(G4, 0.08, "square", 1.6, 0.45, 0.4),
+    note(C5, 0.22, "square", 1.0, 0.5, 0.4),
+    note(C5 * 2, 0.28, "triangle", 1.2, 0.35), -- scintillement final à l'octave (C6)
+  })
+end
+
+-- "run_start" -- lancement d'une nouvelle run (2026-08-30, demande explicite --
+-- "un autre petit jingle, un peu plus grave, plus solennel") : DISTINCT de
+-- "jingle" ci-dessus (accueil, aigu et vif) -- ici un impact grave (bruit +
+-- carré bas, comme un coup de gong/tambour) suivi de 2 notes triangle
+-- GRAVES et tenues, tempo bien plus lent : un début de quête qui s'annonce,
+-- pas un logo qui scintille. Joué au lancement d'une run réelle -- voir
+-- Controller:reset_run, seul appelant ("Tester le boss" reste un raccourci
+-- technique, jamais concerné).
+BUILDERS.run_start = function()
+  return Chiptune.concat({
+    Chiptune.render(0.22, function(t)
+      return (Chiptune.noise() * 0.5 + Chiptune.square(70, t, 0.5) * 0.5) * Chiptune.decay(t, 0.22, 1.6)
+    end, 0.55),
+    note(C3, 0.35, "triangle", 0.9, 0.5),
+    note(G3, 0.55, "triangle", 0.7, 0.55),
+  })
+end
+
 -- Fanfare de victoire : arpège carré montant + note tenue.
 BUILDERS.victory = function()
   return Chiptune.concat({
@@ -156,6 +204,80 @@ BUILDERS.ash = function()
     return Chiptune.noise() * Chiptune.decay(t, 0.28, 2.2)
   end, 0.5)
 end
+
+-- ---------- Entrée en combat -- descente des ennemis (2026-08-30) ----------
+-- "Un son caractéristique pour chaque ennemi" (demande explicite) : un
+-- atterrissage synthétique DISTINCT par gabarit d'ennemi (léger/lourd/
+-- discret/magique), pas une seule et même chute générique -- voir
+-- Controller:play_enemy_entrance_sequence, seul appelant (clé
+-- "enemy_land_" .. e.template_id, silencieux via Sfx.play si un futur
+-- template n'a pas encore son entrée ici).
+
+--- Atterrissage "physique" générique (gobelins, troll, golem...) : bruit +
+-- tonalité carrée grave, percussif -- même famille que "plarf" (hit_physical)
+-- mais SANS attaque immédiate au tout début (pas une morsure), pour ne
+-- jamais se confondre avec un coup encaissé. `freq`/`duration` fixent le
+-- gabarit (aigu-court = léger, grave-long = lourd) ; `noise_mix` la part de
+-- bruit (sol/impact) contre la tonalité (corps qui résonne).
+local function thud(freq, duration, noise_mix, curve, volume)
+  return function()
+    return Chiptune.render(duration, function(t)
+      return (Chiptune.noise() * noise_mix + Chiptune.square(freq, t, 0.5) * (1 - noise_mix)) * Chiptune.decay(t, duration, curve)
+    end, volume)
+  end
+end
+
+BUILDERS.enemy_land_gobelin = thud(170, 0.18, 0.5, 1.6, 0.5)
+BUILDERS.enemy_land_gobelourd = thud(100, 0.28, 0.55, 1.3, 0.55)
+BUILDERS.enemy_land_troll = thud(45, 0.5, 0.6, 0.8, 0.65)
+BUILDERS.enemy_land_golem = thud(35, 0.55, 0.65, 0.7, 0.68)
+BUILDERS.enemy_land_loup = thud(230, 0.14, 0.35, 2.0, 0.45)
+BUILDERS.enemy_land_bandit = thud(300, 0.10, 0.25, 2.4, 0.4)
+BUILDERS.enemy_land_pousse = thud(550, 0.08, 0.25, 2.6, 0.28)
+-- Homme Arbre (boss) : le plus grave, le plus long, le plus fort -- doit se
+-- reconnaître à l'oreille avant même de voir le sprite descendre.
+BUILDERS["enemy_land_homme-arbre"] = thud(26, 0.75, 0.6, 0.55, 0.75)
+
+--- 3 courts claquements d'os secs, espacés de silence -- pas un "thud" du
+-- tout (2026-08-30) : un squelette n'a rien de charnu pour faire résonner un
+-- impact, juste un cliquetis à l'arrivée.
+BUILDERS.enemy_land_squelette = function()
+  local function clack(vol) return Chiptune.render(0.045, function(t) return Chiptune.noise() * Chiptune.decay(t, 0.045, 3) end, vol) end
+  local function gap(dur) return Chiptune.render(dur, function() return 0 end, 0) end
+  return Chiptune.concat({ clack(0.4), gap(0.03), clack(0.35), gap(0.03), clack(0.3) })
+end
+
+--- Skitter rapide de 4 blips aigus -- pas un atterrissage unique (2026-08-30) :
+-- une araignée arrive en courant sur ses pattes, jamais en tombant lourdement.
+BUILDERS.enemy_land_araignee = function()
+  local function tick(freq, vol) return Chiptune.render(0.03, function(t) return Chiptune.square(freq, t, 0.3) * Chiptune.decay(t, 0.03, 3) end, vol) end
+  local function gap(dur) return Chiptune.render(dur, function() return 0 end, 0) end
+  return Chiptune.concat({ tick(900, 0.3), gap(0.02), tick(1100, 0.28), gap(0.02), tick(950, 0.26), gap(0.02), tick(1200, 0.24) })
+end
+
+--- Tonalité descendante inquiétante, pas percussive -- une apparition
+-- magique, pas une chute (2026-08-30).
+BUILDERS.enemy_land_necromancien = function()
+  return Chiptune.render(0.5, function(t)
+    local freq = 380 - 220 * math.min(1, t / 0.5)
+    return (Chiptune.triangle(freq, t) * 0.7 + Chiptune.noise() * 0.25) * Chiptune.decay(t, 0.5, 1)
+  end, 0.45)
+end
+
+--- Tremolo ASCENDANT (2026-08-30, distinct du Nécromancien -- direction et
+-- rythme opposés pour ne jamais les confondre à l'oreille) : incantation
+-- tribale plutôt qu'apparition sépulcrale.
+BUILDERS.enemy_land_chaman = function()
+  return Chiptune.render(0.45, function(t)
+    local freq = 260 + 30 * math.sin(t * 26) + 140 * math.min(1, t / 0.45)
+    return Chiptune.triangle(freq, t) * Chiptune.decay(t, 0.45, 0.9)
+  end, 0.45)
+end
+
+-- Filet de sécurité (2026-08-30) : gabarit neutre si un futur template
+-- d'ennemi n'a pas encore sa propre entrée ci-dessus -- Sfx.play resterait de
+-- toute façon silencieux sans erreur, mais autant avoir un son plutôt que rien.
+BUILDERS.enemy_land_default = thud(140, 0.2, 0.5, 1.6, 0.5)
 
 local cache = {}
 
