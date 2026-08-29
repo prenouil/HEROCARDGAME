@@ -248,12 +248,15 @@ local function mousepressed_tap(controller, x, y, button)
   if View.point_in(View.restart_turn_button, x, y) then controller:restart_turn(); return end
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
   -- "Voir le deck" (2026-08-30, demande explicite) : 3 déclencheurs pour la
-  -- même fenêtre -- la pioche, la défausse, et le bouton dédié juste en
-  -- dessous (voir Controller:open_deck_view/View.deck_view_button).
-  if View.point_in(View.deck_pile_rect, x, y) or View.point_in(View.discard_pile_rect, x, y)
-    or View.point_in(View.deck_view_button, x, y) then
-    controller:open_deck_view(); return
-  end
+  -- même fenêtre, mais PAS le même contenu (2026-08-30, 2ᵉ demande explicite --
+  -- "quand on clique sur Pioche, on ne voit que les cartes actuellement dans
+  -- la pioche, et quand on clique sur la défausse, on ne voit que les cartes
+  -- actuellement dans la défausse") -- la pioche/la défausse filtrent sur
+  -- elles-mêmes, le bouton dédié seul garde "toutes les cartes" (voir
+  -- Controller:open_deck_view/View.deck_view_button).
+  if View.point_in(View.deck_pile_rect, x, y) then controller:open_deck_view("deck"); return end
+  if View.point_in(View.discard_pile_rect, x, y) then controller:open_deck_view("discard"); return end
+  if View.point_in(View.deck_view_button, x, y) then controller:open_deck_view(); return end
 
   local pending = state.pending
   -- Sélectionner une carte l'assigne directement à son propriétaire
@@ -330,10 +333,9 @@ local function mousepressed_arrow(controller, x, y, button)
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
   -- "Voir le deck" (2026-08-30, demande explicite) : voir le commentaire
   -- détaillé dans mousepressed_tap.
-  if View.point_in(View.deck_pile_rect, x, y) or View.point_in(View.discard_pile_rect, x, y)
-    or View.point_in(View.deck_view_button, x, y) then
-    controller:open_deck_view(); return
-  end
+  if View.point_in(View.deck_pile_rect, x, y) then controller:open_deck_view("deck"); return end
+  if View.point_in(View.discard_pile_rect, x, y) then controller:open_deck_view("discard"); return end
+  if View.point_in(View.deck_view_button, x, y) then controller:open_deck_view(); return end
 
   local pending = state.pending
 
@@ -694,6 +696,14 @@ function Input.mousemoved(controller, x, y)
   end
 
   controller:set_hover(nil, nil)
+end
+
+--- Molette (2026-08-30, demande explicite -- défilement de la fenêtre "voir
+-- le deck") : seule utilisatrice pour l'instant -- ne fait rien tant que la
+-- fenêtre n'est pas ouverte (voir Controller:scroll_deck_view, qui garde
+-- déjà ce même garde-fou, doublé ici pour ne pas dépenser un appel pour rien).
+function Input.wheelmoved(controller, dx, dy)
+  if controller.deck_view_open then controller:scroll_deck_view(dy) end
 end
 
 return Input

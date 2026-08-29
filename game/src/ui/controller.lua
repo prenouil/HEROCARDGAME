@@ -273,6 +273,22 @@ function Controller.new()
   -- s'y refermer, voir Controller:open_deck_view/close_deck_view et
   -- View.deck_view_cards (calcule la liste à afficher selon l'écran courant).
   self.deck_view_open = false
+  -- "deck"|"discard"|"all"|nil (2026-08-30, demande explicite -- "quand on
+  -- clique sur Pioche, on ne voit que les cartes actuellement dans la
+  -- pioche, et quand on clique sur la défausse, on ne voit que les cartes
+  -- actuellement dans la défausse") : quel sous-ensemble lister -- voir
+  -- Controller:open_deck_view (seul écrivain) et View.deck_view_cards, qui
+  -- traite nil comme "all" (bouton dédié/deck de l'écran de choix d'équipe).
+  self.deck_view_source = nil
+  -- Défilement de la fenêtre (2026-08-30, demande explicite -- "prévoir un
+  -- ascenseur s'il y a trop de cartes") : en pixels, remis à 0 à CHAQUE
+  -- ouverture (voir Controller:open_deck_view) -- jamais conservé d'une
+  -- ouverture à l'autre, ni entre 2 sources différentes (rouvrir sur "Pioche"
+  -- après avoir défilé dans "Toutes les cartes" ne doit pas hériter de ce
+  -- défilement). Borné à [0, max_scroll] par View.deck_view_layout, jamais
+  -- ici (la mise en page qui détermine max_scroll vit côté vue, pas côté
+  -- contrôleur -- voir Controller:scroll_deck_view).
+  self.deck_view_scroll = 0
   self.run_mode = nil
   -- Dernière équipe lancée avec succès (2026-08-29, écran de choix
   -- d'équipe) : liste de 4 ids -- reconduite par "Rejouer" après une défaite
@@ -439,12 +455,31 @@ end
 -- plus que basculer le booléen : le CONTENU (quelles cartes lister) est
 -- recalculé à chaque frame par View.deck_view_cards à partir de l'écran
 -- courant, jamais figé ici au moment de l'ouverture.
-function Controller:open_deck_view()
+-- `source` (optionnel, 2026-08-30, demande explicite -- voir son commentaire
+-- sur self.deck_view_source) : "deck"|"discard"|nil ("all", le bouton dédié/
+-- le deck de l'écran de choix d'équipe). Défilement toujours remis à 0 --
+-- une réouverture (même sur la même source) recommence en haut de la liste.
+function Controller:open_deck_view(source)
   self.deck_view_open = true
+  self.deck_view_source = source
+  self.deck_view_scroll = 0
 end
 
 function Controller:close_deck_view()
   self.deck_view_open = false
+end
+
+--- Molette pendant que la fenêtre est ouverte (2026-08-30, voir
+-- Input.wheelmoved, seul appelant) : `dy` positif = molette vers le haut
+-- (convention LÖVE) -- fait défiler le contenu vers le HAUT (réduit le
+-- scroll), comme la plupart des applications. Bornes relues depuis
+-- View.deck_view_layout à chaque appel plutôt que dupliquées ici -- une
+-- seule formule de mise en page, jamais 2 qui pourraient diverger.
+local DECK_VIEW_SCROLL_STEP = 40
+function Controller:scroll_deck_view(dy)
+  if not self.deck_view_open then return end
+  local max_scroll = View.deck_view_layout(self).max_scroll
+  self.deck_view_scroll = math.max(0, math.min(max_scroll, self.deck_view_scroll - dy * DECK_VIEW_SCROLL_STEP))
 end
 
 -- ---------- écran "Choisis ton équipe" ----------
@@ -673,6 +708,15 @@ end
 function Controller:team_select_focus(id)
   local ts = self.team_select
   if not ts or ts.focused_id == id then return end
+  -- Efface le survol (2026-08-30, bug signalé -- "il garde son liseré blanc
+  -- tant que je ne bouge pas la souris") : `self.hover` ne se recalcule que
+  -- sur un vrai mousemoved (voir Input.mousemoved) -- sans ce reset, le héros
+  -- qui vient de partir vers le projecteur garde le `hover.target` qu'il
+  -- avait juste avant le clic (rien n'a annulé le survol, la souris n'a pas
+  -- bougé) et draw_team_hero_slot (view.lua) continue donc de le peindre en
+  -- blanc "survolé" à sa NOUVELLE position, même si la souris ne s'y trouve
+  -- plus du tout.
+  self:set_hover(nil, nil)
   Sfx.play("hop")
   local had_focus = ts.focused_id ~= nil
   self:team_select_fly_out_current()
@@ -694,6 +738,10 @@ end
 function Controller:team_select_cancel()
   local ts = self.team_select
   if not ts or not ts.focused_id then return end
+  -- Même correctif que team_select_focus (2026-08-30, voir son commentaire) --
+  -- le héros qui repart vers sa rangée d'origine ne doit pas hériter du
+  -- survol qu'il avait dans le projecteur.
+  self:set_hover(nil, nil)
   -- Pas de "flup" générique ici (2026-08-30, retiré -- team_select_fly_out_current
   -- en joue désormais un PAR carte, décalé, ça suffit largement, un de plus
   -- ferait doublon/surcharge).
@@ -718,6 +766,10 @@ end
 function Controller:team_select_confirm()
   local ts = self.team_select
   if not ts or not ts.focused_id then return end
+  -- Même correctif que team_select_focus (2026-08-30, voir son commentaire) --
+  -- le héros validé/retiré ne doit pas hériter du survol qu'il avait dans le
+  -- projecteur une fois reparti dans une rangée.
+  self:set_hover(nil, nil)
   local id = ts.focused_id
   local index_in_selected
   for i, sid in ipairs(ts.selected_ids) do if sid == id then index_in_selected = i break end end

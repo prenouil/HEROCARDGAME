@@ -43,6 +43,14 @@ function love.mousemoved(x, y)
   Input.mousemoved(controller, x / SCALE, y / SCALE)
 end
 
+-- Molette (2026-08-30, demande explicite -- défilement de la fenêtre "voir
+-- le deck") : dx/dy pas convertis par SCALE, contrairement aux positions --
+-- Input.wheelmoved n'en a pas besoin, ce sont de simples crans de molette,
+-- pas des coordonnées écran.
+function love.wheelmoved(dx, dy)
+  Input.wheelmoved(controller, dx, dy)
+end
+
 function love.keypressed(key)
   if key == "escape" then love.event.quit() end
 end

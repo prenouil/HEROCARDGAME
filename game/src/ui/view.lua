@@ -210,9 +210,11 @@ View.discard_pile_rect = { x = W - 20 - PILE_W, y = HAND_Y, w = PILE_W, h = PILE
 -- casé dans l'espace resté libre entre le bas de la pioche (519) et la
 -- rangée "Recommencer..."/"victoire instantanée" (BOTTOM_ROW_Y, 592) --
 -- jamais chevauché, voir draw_deck_view/View.deck_view_cards pour le contenu.
+-- Moins large, plus haut, sur 2 lignes (2026-08-30, demande explicite) :
+-- 96x20 -> 64x40, texte "Voir le\ndeck" plutôt qu'une seule ligne large.
 View.deck_view_button = {
   x = View.deck_pile_rect.x, y = View.deck_pile_rect.y + View.deck_pile_rect.h + 5,
-  w = 96, h = 20, label = "Voir le deck",
+  w = 64, h = 40, label = "Voir le\ndeck",
 }
 
 -- Fenêtre "voir le deck" elle-même (2026-08-30) : grand panneau centré,
@@ -439,12 +441,33 @@ local TEAM_AVAILABLE_Y = 66
 local TEAM_BOTTOM_Y = 520
 local TEAM_PARTY_LEFT = 170
 
+-- Emplacements FIXES, un par héros du roster complet (2026-08-30, bug signalé
+-- -- "quand un aventurier est sélectionné, les autres se recalent vers le
+-- centre, je préfère que chacun reste à sa place") : `centered_row` recalculée
+-- sur `#ts.available_ids` (qui RÉTRÉCIT à chaque validation, un id en sortant)
+-- redistribuait TOUS les héros restants sur une rangée plus étroite -- ici, la
+-- rangée est calculée UNE FOIS sur `#Heroes.defs` (toujours 6, ne bouge
+-- jamais), chaque héros reçoit la case correspondant à SA position dans le
+-- roster complet, qu'il soit actuellement disponible ou déjà dans l'équipe --
+-- un id qui sort de `ts.available_ids` libère silencieusement sa case (plus
+-- personne n'y est dessiné), sans jamais faire bouger les autres.
+local TEAM_ALL_SLOTS_RECTS
+local function team_select_all_slots()
+  TEAM_ALL_SLOTS_RECTS = TEAM_ALL_SLOTS_RECTS
+    or centered_row(#Heroes.defs, TEAM_HERO_W, TEAM_HERO_H, TEAM_AVAILABLE_Y, TEAM_HERO_GAP)
+  return TEAM_ALL_SLOTS_RECTS
+end
+
 function View.team_select_available_rects(controller)
   local ts = controller.team_select
   if not ts then return {} end
-  local rects = centered_row(#ts.available_ids, TEAM_HERO_W, TEAM_HERO_H, TEAM_AVAILABLE_Y, TEAM_HERO_GAP)
+  local slots = team_select_all_slots()
+  local still_available = {}
+  for _, id in ipairs(ts.available_ids) do still_available[id] = true end
   local out = {}
-  for i, id in ipairs(ts.available_ids) do out[id] = rects[i] end
+  for i, def in ipairs(Heroes.defs) do
+    if still_available[def.id] then out[def.id] = slots[i] end
+  end
   return out
 end
 
@@ -743,12 +766,21 @@ local function hp_bar(x, y, w, h, pct, trail_pct, color)
   love.graphics.rectangle("fill", x, y, w, h, 4, 4)
   local clamped_pct = math.max(0, math.min(1, pct))
   local clamped_trail = trail_pct and math.max(0, math.min(1, trail_pct)) or clamped_pct
-  if clamped_trail ~= clamped_pct then
+  local wide, narrow = math.max(clamped_trail, clamped_pct), math.min(clamped_trail, clamped_pct)
+  -- Garde `> 0` sur les 2 rectangles (2026-08-30, bug signalé -- "il reste
+  -- du rouge sur le bord de la barre de vie" -- un héros mort, à 0 PV) :
+  -- love.graphics.rectangle("fill", ..., 0, h, 4, 4) (largeur nulle) laisse
+  -- quand même un liseré visible à cause du rayon d'arrondi fixe (4px), qui
+  -- ne se réduit pas avec la largeur -- jamais dessiné en dessous de 1px,
+  -- plutôt qu'un rectangle dégénéré.
+  if wide > narrow and wide * w > 1 then
     set(clamped_trail > clamped_pct and Theme.hp_trail or Theme.heal)
-    love.graphics.rectangle("fill", x, y, w * math.max(clamped_trail, clamped_pct), h, 4, 4)
+    love.graphics.rectangle("fill", x, y, w * wide, h, 4, 4)
   end
-  set(color)
-  love.graphics.rectangle("fill", x, y, w * math.min(clamped_trail, clamped_pct), h, 4, 4)
+  if narrow * w > 1 then
+    set(color)
+    love.graphics.rectangle("fill", x, y, w * narrow, h, 4, 4)
+  end
   set(Theme.black)
   love.graphics.setLineWidth(2)
   love.graphics.rectangle("line", x, y, w, h, 4, 4)
@@ -1447,20 +1479,10 @@ local function draw_enemy(controller, e, r)
     text(parts.title, 0, 4, r.w, 14, Theme.accent)
   end
 
-  -- Cible télégraphiée (2026-08-24, demande explicite) : tout en bas du
-  -- cadre, même traitement que le nom de l'aventurier-propriétaire sur les
-  -- cartes (voir draw_card_face) -- fond noir translucide pour rester lisible
-  -- même par-dessus les badges de statut juste au-dessus. Couleur de classe de
-  -- LA CIBLE (2026-08-24, demande explicite -- avant, rouge fixe Theme.hp),
-  -- gardée distincte de la flèche (redevenue rouge fixe, voir
-  -- draw_enemy_target_arrows -- risque de confusion avec une action
-  -- d'aventurier signalé explicitement).
-  if parts and parts.target then
-    local target_palette = Theme.card_class[parts.target_class] or Theme.card_class.generic
-    set(Theme.black, 0.55)
-    love.graphics.rectangle("fill", 0, r.h - 12, r.w, 12)
-    text(parts.target, 0, r.h - 11, r.w, 10, target_palette.border)
-  end
+  -- Étiquette de cible retirée (2026-08-30, demande explicite -- "il n'est
+  -- plus nécessaire d'indiquer la cible d'un ennemi à l'aide de l'étiquette
+  -- comportant son nom, la flèche est suffisante") : voir
+  -- draw_enemy_target_arrows, seul indicateur de cible restant.
 
   draw_enemy_crack(r, crack_p)
   draw_shield_fx(controller, e.id, r)
@@ -1771,7 +1793,7 @@ local function draw_hand(controller)
     panel(db.x, db.y, db.w, db.h, Theme.panel_light)
     set(Theme.muted); love.graphics.setLineWidth(1)
     love.graphics.rectangle("line", db.x, db.y, db.w, db.h, 6, 6)
-    text(db.label, db.x, db.y + 4, db.w, 11, Theme.text, "center")
+    text(db.label, db.x, db.y + 8, db.w, 11, Theme.text, "center")
   end
 
   -- Mode "flèche" (2026-08-09) : la carte sélectionnée reste posée en avant
@@ -2575,8 +2597,15 @@ local function draw_enemy_target_arrows(controller)
     for j, item in ipairs(list) do if item.enemy.id == e.id then idx = j end end
     local arrival_offset = (idx - (#list + 1) / 2) * ARRIVAL_SPACING
     local bow_bias = (i - (#targeting + 1) / 2) * BOW_BIAS_STEP
+    -- Départ aux PIEDS de l'ennemi (2026-08-30, demande explicite -- "un
+    -- essai, il est possible que je change d'avis" -- plutôt que le bas du
+    -- CADRE, `er.y + er.h`, bien plus bas que le personnage lui-même une
+    -- fois la barre de PV/les badges/le télégraphe comptés) : même y que le
+    -- bas du portrait (voir draw_enemy_icon dans draw_enemy, y=20 taille 62
+    -- -> bas à 82), à resynchroniser à la main si ces chiffres bougent, pas
+    -- de constante partagée pour un simple point de départ visuel.
     draw_arrow(
-      er.x + er.w / 2, er.y + er.h, hr.x + hr.w / 2 + arrival_offset, hr.y,
+      er.x + er.w / 2, er.y + 82, hr.x + hr.w / 2 + arrival_offset, hr.y,
       Theme.hp, math.pi / 2, true, bow_bias
     )
   end
@@ -3468,14 +3497,17 @@ local function draw_boss_victory(controller)
 end
 
 --- Liste agrégée des cartes à afficher dans la fenêtre "voir le deck"
--- (2026-08-30, demande explicite) : combine deck + main + défausse (tout ce
--- que le joueur possède actuellement, la main/la défausse y compris -- ce ne
--- sont jamais des cartes "perdues", juste temporairement ailleurs que dans le
--- deck lui-même) -- SAUF sur l'écran de choix d'équipe, où rien de tout cela
--- n'existe encore : reconstitue alors la liste directement depuis les héros
--- déjà confirmés (ts.selected_ids), 3 cartes "départ" par classe -- exactement
--- ce que Deck.build_starting_deck posera au lancement (voir
--- Deck.starting_cards_for_class, même source).
+-- (2026-08-30, demande explicite) : `controller.deck_view_source` (voir
+-- Controller:open_deck_view) distingue désormais 3 contenus -- "deck" (la
+-- pioche SEULE, cliquer la pioche), "discard" (la défausse SEULE, cliquer la
+-- défausse), ou "all"/nil (deck + main + défausse -- tout ce que le joueur
+-- possède actuellement, bouton dédié) -- jamais le même contenu peu importe
+-- l'entrée, contrairement à avant. SAUF sur l'écran de choix d'équipe, où
+-- rien de tout cela n'existe encore : reconstitue alors la liste directement
+-- depuis les héros déjà confirmés (ts.selected_ids), 3 cartes "départ" par
+-- classe -- exactement ce que Deck.build_starting_deck posera au lancement
+-- (voir Deck.starting_cards_for_class, même source) -- ignore `deck_view_source`
+-- dans ce cas (aucune pioche/défausse réelle n'existe encore).
 -- PAS de regroupement par doublon (2026-08-30, demande explicite -- "pour
 -- l'instant, il n'y a pas beaucoup de cartes dans un deck, je préfère ne pas
 -- regrouper et lister toutes les cartes même identiques") : une entrée par
@@ -3494,10 +3526,17 @@ function View.deck_view_cards(controller)
     end
   else
     local state = controller.state
+    local source = controller.deck_view_source or "all"
     if state then
-      for _, c in ipairs(state.deck) do defs[#defs + 1] = c.def end
-      for _, c in ipairs(state.hand) do defs[#defs + 1] = c.def end
-      for _, c in ipairs(state.discard) do defs[#defs + 1] = c.def end
+      if source == "deck" then
+        for _, c in ipairs(state.deck) do defs[#defs + 1] = c.def end
+      elseif source == "discard" then
+        for _, c in ipairs(state.discard) do defs[#defs + 1] = c.def end
+      else
+        for _, c in ipairs(state.deck) do defs[#defs + 1] = c.def end
+        for _, c in ipairs(state.hand) do defs[#defs + 1] = c.def end
+        for _, c in ipairs(state.discard) do defs[#defs + 1] = c.def end
+      end
     end
   end
   table.sort(defs, function(a, b)
@@ -3510,19 +3549,72 @@ function View.deck_view_cards(controller)
   return out
 end
 
+local function deck_view_title(controller)
+  local cards = View.deck_view_cards(controller)
+  local source = controller.deck_view_source or "all"
+  local label
+  if controller.screen ~= "team_select" and source == "deck" then label = "Pioche"
+  elseif controller.screen ~= "team_select" and source == "discard" then label = "Défausse"
+  else label = "Toutes les cartes" end
+  return label .. " (" .. #cards .. ")"
+end
+
+-- Taille de carte FIXE, colonnes adaptées à la largeur, DÉFILEMENT vertical
+-- si le contenu déborde en hauteur (2026-08-30, demande explicite -- "prévoir
+-- un ascenseur s'il y a trop de cartes") : remplace le rapetissement sans fin
+-- d'avant (les cartes restaient lisibles mais pouvaient devenir minuscules à
+-- beaucoup de cartes) -- ici, la carte garde TOUJOURS sa taille de référence,
+-- seul le nombre de lignes visibles change, le reste se découvre en
+-- défilant (molette, voir Controller:scroll_deck_view/Input.wheelmoved).
+-- Pure calcul, sans rien dessiner -- appelée à la fois par draw_deck_view
+-- (rendu) et Controller:scroll_deck_view (bornes de défilement), pour ne
+-- jamais avoir 2 formules de mise en page qui pourraient diverger.
+local DECK_VIEW_GAP = 10
+local DECK_VIEW_LABEL_H = 14
+local DECK_VIEW_CARD_W = 78
+local DECK_VIEW_SCROLLBAR_W = 10
+function View.deck_view_layout(controller)
+  local cards = View.deck_view_cards(controller)
+  local p = View.deck_view_panel_rect
+  local area_x, area_y = p.x + 20, p.y + 56
+  local area_w, area_h = p.w - 40, p.h - 76
+
+  local aspect = CARD_H / CARD_W
+  local card_w = DECK_VIEW_CARD_W
+  local card_h = card_w * aspect
+  local cell_w, cell_h = card_w + DECK_VIEW_GAP, card_h + DECK_VIEW_LABEL_H + DECK_VIEW_GAP
+
+  local function compute(usable_w)
+    local cols = math.max(1, math.floor(usable_w / cell_w))
+    local rows = #cards > 0 and math.ceil(#cards / cols) or 0
+    return cols, rows, rows * cell_h
+  end
+
+  local cols, rows, content_h = compute(area_w)
+  local max_scroll = math.max(0, content_h - area_h)
+  -- Une fois qu'on sait qu'un ascenseur sera affiché, sa largeur est retirée
+  -- de la zone utile aux cartes -- recalcule cols/rows avec cette largeur
+  -- réduite (jamais de chevauchement carte/ascenseur).
+  if max_scroll > 0 then
+    cols, rows, content_h = compute(area_w - DECK_VIEW_SCROLLBAR_W - 6)
+    max_scroll = math.max(0, content_h - area_h)
+  end
+
+  local grid_w = cols * cell_w
+  local ox = area_x + (area_w - (max_scroll > 0 and DECK_VIEW_SCROLLBAR_W + 6 or 0) - grid_w) / 2
+
+  return {
+    cards = cards, cols = cols, rows = rows, card_w = card_w, card_h = card_h,
+    cell_w = cell_w, cell_h = cell_h, area_x = area_x, area_y = area_y,
+    area_w = area_w, area_h = area_h, ox = ox, content_h = content_h, max_scroll = max_scroll,
+  }
+end
+
 --- Fenêtre "voir le deck" (2026-08-30, demande explicite -- accessible depuis
 -- la pioche, la défausse, le deck de l'écran de choix d'équipe, et un bouton
 -- dédié, voir Controller:open_deck_view/View.deck_view_button ci-dessus) :
 -- panneau fixe (View.deck_view_panel_rect) par-dessus l'écran courant, grille
--- de cartes recalculée à chaque frame (View.deck_view_cards). Taille de
--- cellule adaptative -- plutôt qu'un défilement (aucune brique de scroll
--- n'existe ailleurs dans ce projet) : le nombre de colonnes vise un quasi-
--- carré proportionné à la zone disponible, puis chaque carte est rapetissée
--- au besoin pour que la grille entière tienne toujours dans le panneau, quel
--- que soit le nombre de cartes réellement possédées.
-local DECK_VIEW_GAP = 10
-local DECK_VIEW_LABEL_H = 14
-local DECK_VIEW_MAX_CARD_W, DECK_VIEW_MAX_CARD_H = 78, 116
+-- de cartes recalculée à chaque frame (View.deck_view_cards/deck_view_layout).
 local function draw_deck_view(controller)
   if not controller.deck_view_open then return end
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
@@ -3533,8 +3625,7 @@ local function draw_deck_view(controller)
   love.graphics.rectangle("line", p.x, p.y, p.w, p.h, 10, 10)
   love.graphics.setLineWidth(1)
 
-  local cards = View.deck_view_cards(controller)
-  text("Toutes les cartes (" .. #cards .. ")", p.x + 20, p.y + 16, p.w - 130, 18, Theme.text, "left")
+  text(deck_view_title(controller), p.x + 20, p.y + 16, p.w - 130, 18, Theme.text, "left")
 
   local cb = View.deck_view_close_button
   set(Theme.panel_light); love.graphics.rectangle("fill", cb.x, cb.y, cb.w, cb.h, 8, 8)
@@ -3543,51 +3634,40 @@ local function draw_deck_view(controller)
   love.graphics.setLineWidth(1)
   text(cb.label, cb.x, cb.y + 6, cb.w, 14, Theme.text, "center")
 
-  local area_x, area_y = p.x + 20, p.y + 56
-  local area_w, area_h = p.w - 40, p.h - 76
-
+  local layout = View.deck_view_layout(controller)
+  local cards = layout.cards
   if #cards == 0 then
-    text("Aucune carte pour l'instant.", area_x, area_y + area_h / 2 - 10, area_w, 14, Theme.muted)
+    text("Aucune carte pour l'instant.", layout.area_x, layout.area_y + layout.area_h / 2 - 10, layout.area_w, 14, Theme.muted)
     return
   end
 
-  -- Colonnes visant un quasi-carré proportionné à la zone (2026-08-30) :
-  -- point de départ raisonnable avant le rapetissement forcé ci-dessous.
-  local cols = math.max(1, math.min(#cards, math.ceil(math.sqrt(#cards * area_w / area_h))))
-  local rows = math.ceil(#cards / cols)
+  local scroll = math.max(0, math.min(layout.max_scroll, controller.deck_view_scroll or 0))
+  local oy = layout.area_y - scroll
 
-  -- Proportions VERROUILLÉES sur CARD_W/CARD_H (2026-08-30, bug signalé --
-  -- "le texte déborde du cadre de la carte") : `card_w`/`card_h` fixés
-  -- indépendamment l'un de l'autre (largeur bornée par la colonne, hauteur
-  -- par la ligne) déformait le ratio d'une vraie carte -- draw_card_face
-  -- positionne tout son contenu (nom, description, pastilles...) en pixels
-  -- ABSOLUS calés sur 92x138, jamais recalculés selon `w`/`h` reçus, donc un
-  -- format plus large/plat que l'original faisait déborder le texte au lieu
-  -- de simplement le montrer en plus petit. Un seul facteur d'échelle
-  -- (`card_w / CARD_W`), retenu comme le plus restrictif des deux budgets
-  -- (colonne ET ligne), rend TOUJOURS un rectangle proportionné à une vraie
-  -- carte -- voir le rendu par canvas ci-dessous (même technique que
-  -- draw_faded_card/draw_card_flights : dessiné une fois en pleine résolution
-  -- native, puis affiché à l'échelle -- le texte rapetisse AVEC la carte au
-  -- lieu de déborder).
-  local aspect = CARD_H / CARD_W
-  local avail_w = area_w / cols - DECK_VIEW_GAP
-  local avail_h = area_h / rows - DECK_VIEW_GAP - DECK_VIEW_LABEL_H
-  local card_w = math.max(20, math.min(DECK_VIEW_MAX_CARD_W, avail_w, avail_h / aspect))
-  local card_h = card_w * aspect
-
-  local cell_w, cell_h = card_w + DECK_VIEW_GAP, card_h + DECK_VIEW_LABEL_H + DECK_VIEW_GAP
-  local grid_w, grid_h = cols * cell_w, rows * cell_h
-  local ox = area_x + (area_w - grid_w) / 2
-  local oy = area_y + (area_h - grid_h) / 2
+  -- Défilement (2026-08-30) : recadre le rendu à la zone de contenu (bornes
+  -- en pixels ÉCRAN, voir SCALE -- love.graphics.setScissor ignore les
+  -- transformations ambiantes, contrairement à tout le reste de ce fichier)
+  -- -- sans ça, les cartes qui débordent en haut/bas de `area_h` resteraient
+  -- visibles par-dessus le titre/le bouton "Fermer".
+  -- Le rect est désactivé PENDANT le rendu de chaque carte dans le canvas
+  -- réutilisé ci-dessous, PUIS réactivé pour la recomposer à l'écran
+  -- (2026-08-30, bug signalé -- "les cartes s'affichent minuscules, dans le
+  -- coin") : le scissor est un état GLOBAL, pas affecté par push/origin/
+  -- setCanvas -- resté actif pendant `draw_card_face` dans le petit canvas
+  -- 92x138, ses coordonnées écran (pensées pour la zone de la fenêtre,
+  -- ailleurs à l'écran) rognaient presque tout le contenu du canvas lui-même.
+  local scissor_x, scissor_y = layout.area_x * SCALE, layout.area_y * SCALE
+  local scissor_w, scissor_h = layout.area_w * SCALE, layout.area_h * SCALE
+  love.graphics.setScissor(scissor_x, scissor_y, scissor_w, scissor_h)
 
   card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
   for i, entry in ipairs(cards) do
-    local col = (i - 1) % cols
-    local row = math.floor((i - 1) / cols)
-    local cx = ox + col * cell_w
-    local cy = oy + row * cell_h
+    local col = (i - 1) % layout.cols
+    local row = math.floor((i - 1) / layout.cols)
+    local cx = layout.ox + col * layout.cell_w
+    local cy = oy + row * layout.cell_h
 
+    love.graphics.setScissor()
     love.graphics.push()
     love.graphics.origin()
     local prev_canvas = love.graphics.getCanvas()
@@ -3596,10 +3676,26 @@ local function draw_deck_view(controller)
     draw_card_face(entry.def, CARD_W, CARD_H, tostring(entry.def.cost or 0), entry.def.desc, Theme.muted, false, false, false, false)
     love.graphics.setCanvas(prev_canvas)
     love.graphics.pop()
+    love.graphics.setScissor(scissor_x, scissor_y, scissor_w, scissor_h)
     love.graphics.setColor(1, 1, 1, 1)
-    love.graphics.draw(card_flight_canvas, cx, cy, 0, card_w / CARD_W, card_h / CARD_H)
+    love.graphics.draw(card_flight_canvas, cx, cy, 0, layout.card_w / CARD_W, layout.card_h / CARD_H)
   end
   love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.setScissor()
+
+  -- Ascenseur (2026-08-30, demande explicite -- "prévoir un ascenseur s'il y
+  -- a trop de cartes") : simple indicateur (molette pour défiler, voir
+  -- Input.wheelmoved) -- track + curseur proportionné à la part visible du
+  -- contenu total, jamais affiché quand tout tient déjà à l'écran.
+  if layout.max_scroll > 0 then
+    local track_x = layout.area_x + layout.area_w - DECK_VIEW_SCROLLBAR_W
+    set(Theme.panel_light)
+    love.graphics.rectangle("fill", track_x, layout.area_y, DECK_VIEW_SCROLLBAR_W, layout.area_h, 4, 4)
+    local thumb_h = math.max(24, layout.area_h * layout.area_h / layout.content_h)
+    local thumb_y = layout.area_y + (layout.area_h - thumb_h) * (scroll / layout.max_scroll)
+    set(Theme.accent)
+    love.graphics.rectangle("fill", track_x, thumb_y, DECK_VIEW_SCROLLBAR_W, thumb_h, 4, 4)
+  end
 end
 
 function View.draw(controller)
@@ -3607,6 +3703,29 @@ function View.draw(controller)
   if controller.screen == "options" then draw_options(controller); return end
   if controller.screen == "bossVictory" then draw_boss_victory(controller); return end
   if controller.screen == "team_select" then draw_team_select(controller); draw_deck_view(controller); return end
+
+  -- Écrans "camp" (2026-08-30, bug signalé -- "pendant le draft on voit
+  -- encore les restes du combat, c'est une bonne chose. Par contre, quand on
+  -- passe sur un évènement, c'est un changement de contexte, il ne faut
+  -- montrer que l'évènement") : dispatchés à PART, comme team_select
+  -- ci-dessus -- AUCUN élément de la scène de combat (ennemis, troupe, main,
+  -- boutons du bas, particules/flottants résiduels) n'est dessiné en
+  -- dessous, contrairement au draft (voir plus bas, qui continue de tomber
+  -- dans le flux normal ci-dessous -- délibérément inchangé, "c'est une
+  -- bonne chose"). Le décor d'ambiance (Background.draw) reste affiché --
+  -- ce n'est pas "un reste du combat", juste la toile de fond du donjon.
+  if controller.screen == "campfire" or controller.screen == "forge"
+    or controller.screen == "temple" or controller.screen == "refuge" then
+    Background.draw(controller.state.enemies, W, H)
+    if controller.screen == "campfire" and controller.campfire then draw_campfire(controller)
+    elseif controller.screen == "forge" and controller.forge then draw_forge(controller)
+    elseif controller.screen == "temple" and controller.temple then draw_temple(controller)
+    elseif controller.screen == "refuge" and controller.refuge then draw_refuge(controller)
+    end
+    draw_deck_view(controller)
+    love.graphics.setColor(1, 1, 1, 1)
+    return
+  end
 
   local state = controller.state
   Background.draw(state.enemies, W, H)
@@ -3768,21 +3887,15 @@ function View.draw(controller)
       love.graphics.setLineWidth(1)
       text(sb.label, sb.x, sb.y + 14, sb.w, 14, Theme.text, "center")
     end
-  elseif controller.screen == "campfire" and controller.campfire then
-    draw_campfire(controller)
-  elseif controller.screen == "refuge" and controller.refuge then
-    draw_refuge(controller)
-  elseif controller.screen == "forge" and controller.forge then
-    draw_forge(controller)
-  elseif controller.screen == "temple" and controller.temple then
-    draw_temple(controller)
   end
+  -- campfire/refuge/forge/temple : dispatchés à part, tout en haut de cette
+  -- fonction (return anticipé) -- jamais atteints ici.
 
   draw_targeting_arrow(controller)
   draw_card_flights(controller)
   draw_particles(controller)
   draw_floaters(controller)
-  if controller.screen == "playing" or controller.screen == "draft" or controller.screen == "forge" or controller.screen == "temple" then
+  if controller.screen == "playing" or controller.screen == "draft" then
     draw_tooltip(controller)
   end
 
