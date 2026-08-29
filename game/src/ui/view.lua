@@ -371,34 +371,18 @@ function View.team_select_party_rects(controller)
   return out
 end
 
--- Cartes du héros mis en avant (2026-08-29, puis 2026-08-30 -- "2 rangées de
--- 3 cartes" ET "les cartes doivent être plus bas", demandes explicites) :
--- TOUTES les siennes (Départ + Avancé, 6 au total, toujours exactement 3+3 --
--- voir l'en-tête de src/data/cards.lua), en grille 3 colonnes x 2 rangées
--- entre les boutons Annuler/Valider (gauche) et le projecteur (droite) --
--- positions CIBLES seulement ; leur origine (un bord aléatoire, hors-écran)
--- est calculée au vol par Controller:team_select_spawn_cards, jamais ici.
--- y=210, pas 140 (2026-08-30, "plus bas" + bug signalé -- à 140 la 2ᵉ rangée
--- descendait jusqu'à y=432, empiétant sur la rangée "équipe" juste en
--- dessous) : la grille tient maintenant ENTIÈREMENT entre la rangée du haut
--- (finit à 186) et la rangée du bas (commence à TEAM_BOTTOM_Y=520), marge
--- des deux côtés.
-local TEAM_CARD_COLS = 3
-local TEAM_CARD_ROW_GAP = 16
+-- Cartes du héros mis en avant (2026-08-29, puis 2026-08-30 -- "les cartes
+-- doivent être plus bas" ; puis re-simplifié le même jour -- "il ne faut en
+-- fait afficher que les 3 cartes de départ, à la place des cartes avancées
+-- on montre 1 seule carte de dos avec leur nombre") : TOUJOURS exactement 4
+-- items désormais (3 Départ + 1 dos, voir Controller:team_select_spawn_cards),
+-- une seule ligne centrée suffit -- plus besoin de la grille 3x2 conçue pour
+-- 6 cartes. Centrée sur TOUTE la largeur (pas seulement l'espace entre
+-- boutons/projecteur) : à 4 cartes, ça tient déjà largement à l'écart des
+-- deux (voir les marges vérifiées lors de ce changement).
 local TEAM_CARD_Y = 210
-local TEAM_CARD_GRID_X = 330
 function View.team_select_card_rects(count)
-  local rects = {}
-  for i = 1, count do
-    local col = (i - 1) % TEAM_CARD_COLS
-    local row = math.floor((i - 1) / TEAM_CARD_COLS)
-    rects[i] = {
-      x = TEAM_CARD_GRID_X + col * (CARD_W + ROW_GAP),
-      y = TEAM_CARD_Y + row * (CARD_H + TEAM_CARD_ROW_GAP),
-      w = CARD_W, h = CARD_H,
-    }
-  end
-  return rects
+  return centered_row(count, CARD_W, CARD_H, TEAM_CARD_Y)
 end
 
 --- Rectangle hors-écran de même taille que `to`, positionné sur le bord
@@ -2261,6 +2245,46 @@ local function draw_faded_card(def, x, y, alpha, desc_color, highlight)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
+--- Dos de carte représentant TOUTES les cartes Avancées d'une classe d'un
+-- coup (2026-08-30, écran de choix d'équipe, demande explicite -- "à la
+-- place de montrer les cartes avancées, on montre 1 seule carte de dos avec
+-- le nombre de cartes avancées actuellement débloquées pour ce personnage") :
+-- même identité de classe (couleur) que les vraies cartes, mais face cachée
+-- (motif croisé, pas de nom/texte/coût) -- seul le NOMBRE change d'une
+-- classe à l'autre (dérivé de Cards.list, jamais codé en dur -- voir
+-- Controller:team_select_spawn_cards).
+local function draw_card_back_face(w, h, class_id, count)
+  local palette = Theme.card_class[class_id] or Theme.card_class.generic
+  panel(0, 0, w, h, palette.bg)
+  set(Theme.black); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", 0, 0, w, h, 10, 10)
+  set(palette.border); love.graphics.setLineWidth(1)
+  love.graphics.rectangle("line", 3, 3, w - 6, h - 6, 8, 8)
+  set(palette.border, 0.4)
+  love.graphics.setLineWidth(1)
+  for i = -3, 3 do
+    love.graphics.line(w / 2 + i * 12, 8, w / 2 + i * 12 + 26, h - 8)
+    love.graphics.line(w / 2 + i * 12 + 26, 8, w / 2 + i * 12, h - 8)
+  end
+  love.graphics.setLineWidth(1)
+  set(Theme.text)
+  love.graphics.setFont(Fonts.get(30))
+  love.graphics.printf(tostring(count), 0, h / 2 - 34, w, "center")
+  text("cartes avancées\ndébloquées", 3, h / 2 + 2, w - 6, 9, Theme.muted, "center")
+end
+
+--- Même détour par canvas que draw_faded_card ci-dessus (fondu uniforme).
+local function draw_faded_card_back(class_id, count, x, y, alpha)
+  card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+  love.graphics.setCanvas(card_flight_canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  draw_card_back_face(CARD_W, CARD_H, class_id, count)
+  love.graphics.setCanvas()
+  love.graphics.setColor(1, 1, 1, alpha)
+  love.graphics.draw(card_flight_canvas, x, y)
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
 --- Version "+" à afficher pour `def` -- protège contre un double-suffixe
 -- (2026-08-28) : la carte CHOISIE a déjà son `instance.def` remplacé par
 -- Forge.apply_upgrade au moment où ce module la dessine encore une fois pour
@@ -2630,8 +2654,13 @@ local function draw_team_select(controller)
   -- disparaître aucune carte en attente non plus).
   for _, a in ipairs(ts.card_anims) do
     local delay = a.delay or 0
+    -- Carte de dos "cartes Avancées" (2026-08-30, voir
+    -- Controller:team_select_spawn_cards -- `a.is_back`, pas de `a.def`) :
+    -- même vol/fondu que n'importe quelle autre carte de cette liste, juste
+    -- un rendu différent.
     if a.elapsed < delay then
-      draw_faded_card(a.def, a.from.x, a.from.y, 1)
+      if a.is_back then draw_faded_card_back(a.class_id, a.count, a.from.x, a.from.y, 1)
+      else draw_faded_card(a.def, a.from.x, a.from.y, 1) end
     else
       local elapsed_since_start = a.elapsed - delay
       local p = math.min(1, elapsed_since_start / a.duration)
@@ -2639,7 +2668,10 @@ local function draw_team_select(controller)
       local x = a.from.x + (a.to.x - a.from.x) * ease
       local y = a.from.y + (a.to.y - a.from.y) * ease
       local alpha = a.mode == "in" and math.min(1, p * 1.6) or (1 - p)
-      if alpha > 0 then draw_faded_card(a.def, x, y, alpha) end
+      if alpha > 0 then
+        if a.is_back then draw_faded_card_back(a.class_id, a.count, x, y, alpha)
+        else draw_faded_card(a.def, x, y, alpha) end
+      end
     end
   end
 

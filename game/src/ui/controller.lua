@@ -327,14 +327,23 @@ function Controller:team_select_move_hero(id, from, to, duration)
   ts.hero_anims[#ts.hero_anims + 1] = { id = id, from = from, to = to, elapsed = 0, duration = duration or TEAM_HERO_MOVE_DURATION }
 end
 
---- Toutes les cartes de `class_id` (Départ + Avancé, 6 au total) -- ordre de
--- Cards.list, jamais recalculé/trié différemment d'un affichage à l'autre.
-local function cards_of_class(class_id)
-  local out = {}
+--- Les 3 cartes "depart" de `class_id`, PLUS le nombre de cartes "avance"
+-- (2026-08-30, demande explicite -- "il ne faut en fait afficher que les 3
+-- cartes de départ. À la place de montrer les cartes avancées, on montre 1
+-- seule carte de dos avec le nombre de cartes avancées actuellement
+-- débloquées") : ce nombre est dérivé de Cards.list, jamais codé en dur --
+-- vaut 3 pour toute classe aujourd'hui (aucun système de déblocage
+-- n'existe encore), mais suivrait automatiquement si une classe en gagnait
+-- plus tard. Voir Controller:team_select_spawn_cards, seul appelant.
+local function depart_cards_and_advance_count(class_id)
+  local depart, advance_count = {}, 0
   for _, def in ipairs(Cards.list) do
-    if def.class_id == class_id then out[#out + 1] = def end
+    if def.class_id == class_id then
+      if def.tier == "depart" then depart[#depart + 1] = def
+      elseif def.tier == "avance" then advance_count = advance_count + 1 end
+    end
   end
-  return out
+  return depart, advance_count
 end
 
 --- Bascule chaque vol "in" encore actif en vol "out" (2026-08-29) : point
@@ -416,9 +425,12 @@ function Controller:team_select_spawn_cards(id)
   local ts = self.team_select
   if not ts or ts.focused_id ~= id then return end
   local def = Heroes.by_id(id)
-  local defs = cards_of_class(def.class_id)
-  local targets = View.team_select_card_rects(#defs)
-  for i, card_def in ipairs(defs) do
+  local depart, advance_count = depart_cards_and_advance_count(def.class_id)
+  -- +1 pour la carte de dos "cartes Avancées" (2026-08-30, demande explicite) --
+  -- voir View.team_select_card_rects, sa grille s'adapte déjà à N'IMPORTE QUEL
+  -- nombre d'items, jamais figée à 6.
+  local targets = View.team_select_card_rects(#depart + 1)
+  for i, card_def in ipairs(depart) do
     local to = targets[i]
     local from = View.team_select_offscreen_rect(to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
     ts.card_anims[#ts.card_anims + 1] = {
@@ -426,8 +438,16 @@ function Controller:team_select_spawn_cards(id)
       duration = TEAM_CARD_FLY_DURATION, mode = "in",
     }
   end
+  local back_to = targets[#depart + 1]
+  local back_from = View.team_select_offscreen_rect(back_to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
+  ts.card_anims[#ts.card_anims + 1] = {
+    is_back = true, class_id = def.class_id, count = advance_count,
+    from = back_from, to = back_to, elapsed = 0,
+    duration = TEAM_CARD_FLY_DURATION, mode = "in",
+  }
   -- Rafale courte, pas 1 flup par carte (2026-08-30 -- voir le commentaire
-  -- sur TEAM_CARD_BURST_COUNT) : les 6 cartes arrivent toutes ensemble.
+  -- sur TEAM_CARD_BURST_COUNT) : les 4 cartes (3 Départ + 1 dos) arrivent
+  -- toutes ensemble.
   self:team_select_play_card_burst()
 end
 
