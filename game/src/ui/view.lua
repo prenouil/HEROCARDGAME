@@ -204,6 +204,28 @@ local PILE_W, PILE_H = CARD_W * 0.5, CARD_H * 0.5
 View.deck_pile_rect = { x = 20, y = HAND_Y, w = PILE_W, h = PILE_H }
 View.discard_pile_rect = { x = W - 20 - PILE_W, y = HAND_Y, w = PILE_W, h = PILE_H }
 
+-- "Voir le deck" (2026-08-30, demande explicite -- une fenêtre listant TOUTES
+-- les cartes possédées, ouvrable aussi bien en cliquant la pioche/la défausse
+-- elles-mêmes -- voir Input.mousepressed_tap/arrow -- que ce bouton dédié) :
+-- casé dans l'espace resté libre entre le bas de la pioche (519) et la
+-- rangée "Recommencer..."/"victoire instantanée" (BOTTOM_ROW_Y, 592) --
+-- jamais chevauché, voir draw_deck_view/View.deck_view_cards pour le contenu.
+View.deck_view_button = {
+  x = View.deck_pile_rect.x, y = View.deck_pile_rect.y + View.deck_pile_rect.h + 5,
+  w = 96, h = 20, label = "Voir le deck",
+}
+
+-- Fenêtre "voir le deck" elle-même (2026-08-30) : grand panneau centré,
+-- au-dessus de N'IMPORTE quel écran (voir Controller.deck_view_open) --
+-- volontairement à taille fixe plutôt que collée à une pile précise, puisque
+-- ce même panneau s'ouvre aussi bien depuis la pioche/défausse en combat que
+-- depuis le deck de l'écran de choix d'équipe.
+View.deck_view_panel_rect = { x = 40, y = 40, w = W - 80, h = H - 80 }
+View.deck_view_close_button = {
+  x = View.deck_view_panel_rect.x + View.deck_view_panel_rect.w - 90,
+  y = View.deck_view_panel_rect.y + 10, w = 80, h = 26, label = "Fermer",
+}
+
 -- Énergie globale (2026-08-11, remplace l'énergie individuelle par héros) :
 -- déplacée à droite de la pioche (2026-08-27, demande explicite -- avant,
 -- au-dessus). Cadre agrandi (2026-08-27, deuxième retour explicite -- "trop
@@ -548,6 +570,12 @@ View.point_in = point_in
 
 local function set(c, a) love.graphics.setColor(c[1], c[2], c[3], a or 1) end
 
+--- Interpole RGB entre 2 couleurs (2026-08-30, mort d'un héros -- voir
+-- draw_hero/self.hero_death_fade) : `t` = 0 -> `a`, `t` = 1 -> `b`.
+local function lerp_color(a, b, t)
+  return { a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t }
+end
+
 -- `alpha` (optionnel, 2026-08-30, Temple -- fondu des aventuriers non
 -- choisis) : par défaut 1, tous les appels existants restent inchangés.
 local function panel(x, y, w, h, color, alpha)
@@ -692,13 +720,27 @@ local function draw_badge_row(items, x, y, w, size, color, pop_lookup, pop_durat
   end
 end
 
-local function bar(x, y, w, h, pct, color)
+--- Barre de PV "à 2 niveaux" (2026-08-30, demande explicite -- "quand un
+-- personnage perd de la vie, il faut ajouter un effet ... la barre rouge
+-- perd la vie de suite, mais une barre jaune est encore présente et se vide
+-- lentement pour atteindre la même valeur que la barre rouge, afin de
+-- laisser le temps au joueur de se rendre compte de la perte de vie") :
+-- `trail_pct` (fraction de PV, tenue par Controller:update dans
+-- self.hp_trail -- voir son commentaire) reste au-dessus de `pct` un moment
+-- après un coup encaissé, dessinée EN DESSOUS en jaune, pendant que le rouge
+-- (la vraie valeur actuelle) grignote par-dessus au fil de sa propre
+-- descente -- un simple `pct == trail_pct` (aucune perte récente, ou soin --
+-- Controller:update fait remonter `trail_pct` immédiatement sur un gain, pas
+-- de traînée à la hausse) retombe visuellement sur l'ancien rendu à 1 niveau.
+local function hp_bar(x, y, w, h, pct, trail_pct, color)
   set({ 0, 0, 0 }, 0.35)
   love.graphics.rectangle("fill", x, y, w, h, 4, 4)
+  if trail_pct and trail_pct > pct then
+    set(Theme.hp_trail)
+    love.graphics.rectangle("fill", x, y, w * math.max(0, math.min(1, trail_pct)), h, 4, 4)
+  end
   set(color)
   love.graphics.rectangle("fill", x, y, w * math.max(0, math.min(1, pct)), h, 4, 4)
-  -- Contour noir (2026-08-10, demande explicite) : accentue l'importance de la barre,
-  -- même traitement que name_badge.
   set(Theme.black)
   love.graphics.setLineWidth(2)
   love.graphics.rectangle("line", x, y, w, h, 4, 4)
@@ -842,6 +884,16 @@ local function draw_hero(controller, h, r)
   local dead = h.hp <= 0
   local hero_palette = Theme.card_class[h.class_id] or Theme.card_class.generic
 
+  -- "S'éteint" doucement à la mort (2026-08-30, demande explicite -- "que le
+  -- héros s'éteigne doucement pour atteindre l'état actuel") : `fade_p`
+  -- (0 = encore pleinement "vivant" à l'écran, 1 = état "mort" final atteint)
+  -- remplace un simple bascule instantanée `dead and X or Y` sur les alphas/
+  -- couleurs ci-dessous -- voir self.hero_death_fade (Controller:update, seul
+  -- écrivain, + le son "hero_death" joué une fois au moment où hp tombe à 0).
+  -- Reste à 0 tant que le héros est vivant (fade == nil).
+  local fade = controller.hero_death_fade[h.id]
+  local fade_p = fade and math.min(1, fade.t / fade.duration) or 0
+
   local pending = controller.state.pending
   local eligible_target = pending and pending.hero_id and pending.def.target == "ally" and not dead and h.id ~= pending.hero_id
   -- Chaque carte a désormais un propriétaire fixe (def.class_id, voir
@@ -871,8 +923,13 @@ local function draw_hero(controller, h, r)
     border, border_w = Theme.energy, 3
   elseif awaiting_own_target then
     border, border_w = Theme.accent, 3
-  elseif ready then
-    border, border_w = hero_palette.border, 3
+  elseif ready or fade_p < 1 then
+    -- Glisse vers le contour terne au lieu d'y basculer d'un coup
+    -- (2026-08-30) : couleur de classe pleine tant que fade_p vaut 0 (héros
+    -- vivant -- rendu identique à avant ce correctif), mélangée
+    -- progressivement vers Theme.panel_light (le contour "mort") au fil de
+    -- fade_p -- épaisseur du contour suit le même mouvement (3 -> 1).
+    border, border_w = lerp_color(hero_palette.border, Theme.panel_light, fade_p), 3 - 2 * fade_p
   end
 
   local arrow_mode = controller.input_mode == "arrow"
@@ -905,22 +962,23 @@ local function draw_hero(controller, h, r)
   love.graphics.scale(scale, scale)
   love.graphics.translate(-r.w / 2, -r.h / 2)
 
-  set(Theme.panel, dead and 0.5 or 1)
+  set(Theme.panel, 1 - 0.5 * fade_p)
   love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
   -- Fond de plus en plus rouge sombre sous 50% de PV (2026-08-27, demande
   -- explicite), proportionnel aux PV perdus au-delà de ce seuil -- "montrer
   -- qu'il est de plus en plus blessé et proche de la mort". Simple surcouche
   -- semi-transparente (Theme.hp, le rouge déjà utilisé pour les dégâts/la
   -- barre de PV -- pas une nouvelle teinte) plutôt qu'un vrai mélange RGB :
-  -- alpha 0 pile à 50% de PV, jusqu'à 0.6 à 0 PV. Un héros déjà vaincu (voile
-  -- gris via l'alpha du panneau ci-dessus) n'a plus besoin de cet indice.
-  if not dead then
-    local hp_pct = h.hp / h.max_hp
-    if hp_pct < 0.5 then
-      local wound_t = math.min(1, (0.5 - hp_pct) / 0.5)
-      set(Theme.hp, wound_t * 0.6)
-      love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
-    end
+  -- alpha 0 pile à 50% de PV, jusqu'à 0.6 à 0 PV -- puis, une fois mort,
+  -- s'estompe avec le reste du fondu (2026-08-30, `* (1 - fade_p)`) au lieu
+  -- de disparaître d'un coup (voile gris du panneau ci-dessus déjà en train
+  -- de monter en parallèle, aucun besoin de le garder à plein une fois le
+  -- fondu terminé).
+  local hp_pct = math.max(0, h.hp) / h.max_hp
+  if hp_pct < 0.5 then
+    local wound_t = math.min(1, (0.5 - hp_pct) / 0.5)
+    set(Theme.hp, wound_t * 0.6 * (1 - fade_p))
+    love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
   end
   set(border); love.graphics.setLineWidth(border_w)
   love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
@@ -931,9 +989,15 @@ local function draw_hero(controller, h, r)
   -- -> barre de PV -> mana/discrétion -> statuts -> nom, au lieu de portrait
   -- -> nom -> barre -> ... avant. Le badge de Défense s'ancre désormais au-dessus
   -- du nom (voir cy passé à draw_defense_badge_big), pas près du bas par défaut.
-  set(Theme.text, dead and 0.45 or 1)
+  -- `alpha` (dernier argument, 2026-08-30) : le portrait est un vrai sprite
+  -- pour tous les héros (Icons.draw_class -- radius 27 > SPRITE_MIN_RADIUS),
+  -- qui gère SON PROPRE alpha via ce paramètre explicite plutôt que l'état
+  -- ambiant `set()` (toujours remis à plein par Icons.draw_class juste avant
+  -- de dessiner) -- sans ce paramètre, le portrait ne se serait PAS
+  -- réellement estompé, seuls le panneau/le contour l'auraient fait.
+  set(Theme.text, 1 - 0.55 * fade_p)
   local HERO_PORTRAIT_SIZE = 54
-  draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, HERO_PORTRAIT_SIZE, Theme.text)
+  draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, HERO_PORTRAIT_SIZE, Theme.text, 1 - 0.55 * fade_p)
   -- Badges de bénédiction/malédiction du Temple (2026-08-28/29, demande
   -- explicite -- "représenté par une icone de statue de la bonne couleur, 1
   -- pour les bénédictions, l'autre pour les malédictions") : coin haut-droit
@@ -970,7 +1034,7 @@ local function draw_hero(controller, h, r)
   draw_defense_badge_big(h, r, name_y - 24)
   -- Barre de PV épaissie, valeur DEDANS plutôt qu'en dessous (2026-08-27,
   -- demande explicite) : texte superposé plutôt qu'une ligne à part.
-  bar(8, 62, r.w - 16, 16, h.hp / h.max_hp, Theme.hp)
+  hp_bar(8, 62, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
   text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 62, r.w, 16, 10, Theme.text)
 
   -- Mana (2026-08-20, ressource propre au Mage, voir hero.mana dans game.lua) :
@@ -1217,8 +1281,50 @@ local function draw_telegraph_body(parts, y, w)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
+--- Lignes de fissure qui gagnent en netteté à l'approche de l'explosion
+-- (2026-08-30, demande explicite -- "il se fissure puis explose", voir
+-- Controller:update/self.enemy_death) : motif FIXE par segment (dérivé de
+-- l'index seul, jamais de math.random appelé à chaque frame -- sinon les
+-- lignes grouilleraient au lieu de se figer/s'accumuler) -- seuls l'opacité
+-- ET le nombre de segments déjà "apparus" suivent `crack_p` (0 -> 1).
+local ENEMY_CRACK_LINES = 5
+local function draw_enemy_crack(r, crack_p)
+  if crack_p <= 0 then return end
+  set(Theme.hp, math.min(1, crack_p * 1.3))
+  love.graphics.setLineWidth(2)
+  local cx, cy = r.w / 2, r.h / 2
+  for i = 1, ENEMY_CRACK_LINES do
+    if crack_p * ENEMY_CRACK_LINES >= i - 1 then
+      local seed = i * 37.13
+      local angle = (i / ENEMY_CRACK_LINES) * math.pi * 2 + math.sin(seed) * 0.6
+      local len = r.w * 0.4 + (i % 3) * 6
+      local mx = cx + math.cos(angle) * len * 0.5 + math.sin(seed * 2) * 6
+      local my = cy + math.sin(angle) * len * 0.5 + math.cos(seed * 2) * 6
+      local ex = cx + math.cos(angle) * len
+      local ey = cy + math.sin(angle) * len
+      love.graphics.line(cx, cy, mx, my, ex, ey)
+    end
+  end
+  love.graphics.setLineWidth(1)
+end
+
 local function draw_enemy(controller, e, r)
   local dead = e.hp <= 0
+  -- Séquence de mort (2026-08-30, demande explicite -- "il se fissure puis
+  -- explose en particules qui vanish ... il ne reste plus rien de lui") :
+  -- une fois `death.exploded` vrai (voir Controller:update), plus RIEN n'est
+  -- dessiné pour cet ennemi -- même la trame/le cadre -- les particules déjà
+  -- semées (self.particles, indépendantes de cette table) continuent seules
+  -- de s'éteindre, voir draw_particles.
+  local death = controller.enemy_death[e.id]
+  if death and death.exploded then return end
+  -- Traînée de PV (2026-08-30, voir hp_bar/Controller.hp_trail) : tant
+  -- qu'elle n'a pas fini de rattraper 0, l'ennemi reste affiché "en vie"
+  -- (barre, badges, télégraphe) même si `e.hp` est déjà <= 0 -- seul
+  -- `trail_dead` (traînée ELLE-MÊME à 0) déclenche l'apparence "vaincu"
+  -- ci-dessous, remplace `dead` sur tous les éléments concernés par ce délai.
+  local trail = controller.hp_trail[e.id] or e.hp
+  local trail_dead = dead and trail <= 0
 
   local pending = controller.state.pending
   local hero = pending and pending.hero_id and Combat.hero_by_id(controller.state, pending.hero_id)
@@ -1237,6 +1343,17 @@ local function draw_enemy(controller, e, r)
     end
   end
 
+  -- Fissure (2026-08-30) : secousse de plus en plus forte à l'approche de
+  -- l'explosion -- fenêtre `death` active tant que `not death.exploded`
+  -- (voir Controller:update, ENEMY_DEATH_CRACK_DURATION). `crack_p` réutilisé
+  -- plus bas par draw_enemy_crack pour les lignes de fissure elles-mêmes.
+  local crack_p = 0
+  if death and not death.exploded then
+    crack_p = math.min(1, death.t / (death.crack_duration or 0.45))
+    dx = dx + math.sin(death.t * 60) * 3 * crack_p
+    dy = dy + math.cos(death.t * 47) * 2 * crack_p
+  end
+
   love.graphics.push()
   love.graphics.translate(r.x + r.w / 2 + dx, r.y + r.h / 2 + dy)
   love.graphics.scale(scale, scale)
@@ -1245,25 +1362,45 @@ local function draw_enemy(controller, e, r)
   -- Cadre bleu = cible possible pour la carte en attente de résolution
   -- (2026-08-08) -- même couleur que côté héros (voir eligible_target dans
   -- draw_hero), pour que "bleu" signifie systématiquement "cible cliquable".
-  set(Theme.panel, dead and 0.5 or 1)
+  -- Fond quasi imperceptible (2026-08-30, demande explicite -- "le fond de
+  -- cadre des ennemis peut être beaucoup plus discret") : servait avant de
+  -- plaque opaque plein Theme.panel, masquant le décor derrière chaque
+  -- ennemi -- ne reste plus qu'un très léger voile, le contour (ligne
+  -- ci-dessous) et les éléments dessinés par-dessus (barre de PV, portrait,
+  -- badges) suffisent déjà à délimiter la zone.
+  set(Theme.panel, trail_dead and 0.06 or 0.12)
   love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
-  set(awaiting_enemy_target and Theme.energy or Theme.panel_light)
-  love.graphics.setLineWidth(awaiting_enemy_target and 3 or 1)
-  love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
+  -- Contour retiré au repos (2026-08-30, demande explicite -- "il faut aussi
+  -- enlever le bord du cadre") : ne reste que le bleu de ciblage
+  -- (awaiting_enemy_target), signal fonctionnel, jamais un simple liseré
+  -- décoratif -- cohérent avec le fond déjà rendu quasi imperceptible juste
+  -- au-dessus.
+  if awaiting_enemy_target then
+    set(Theme.energy)
+    love.graphics.setLineWidth(3)
+    love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
+  end
 
   -- Barre de PV au-dessus du portrait, pas en dessous (2026-08-27, demande
   -- explicite) : bar 4->20, épaissie (10->16) avec la valeur DEDANS plutôt
   -- qu'une ligne à part (même traitement que draw_hero) ; portrait décalé de
   -- 4 à 26 pour lui laisser la place. Nom/niveau restent hors du cadre
   -- (2026-08-27, voir tooltip_lines) : rien ne les remplace ici.
-  set(Theme.text, dead and 0.45 or 1)
-  if not dead then
-    bar(8, 4, r.w - 16, 16, e.hp / e.max_hp, Theme.hp)
+  -- `trail_dead`, pas `dead` (2026-08-30) : la barre (et sa traînée jaune,
+  -- voir hp_bar) reste affichée tant que la traînée n'a pas fini de
+  -- rattraper 0, même si `e.hp` est déjà tombé à 0/négatif.
+  set(Theme.text, trail_dead and 0.45 or 1)
+  if not trail_dead then
+    hp_bar(8, 4, r.w - 16, 16, e.hp / e.max_hp, trail / e.max_hp, Theme.hp)
     text_v_centered(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 4, r.w, 16, 10, Theme.text)
   end
   -- Portrait agrandi (2026-08-27, demande explicite -- "toutes les images des
   -- aventuriers et des ennemis doivent être plus gros") : 46->54.
-  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 24, r.w, 54, Theme.text)
+  -- Regrandi (2026-08-30, redemandé explicitement) : 54->62, remonté de 24 à
+  -- 20 pour garder exactement le même bas (contact avec la barre de PV
+  -- au-dessus à y=20, contact avec la rangée de badges en dessous à y=82) --
+  -- aucun autre élément du cadre n'a besoin de bouger.
+  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 20, r.w, 62, Theme.text)
   -- Position du corps du télégraphe (voir plus bas) calculée en premier :
   -- le badge de bouclier (2026-08-27, troisième retour explicite -- "ne pas
   -- cacher l'annonce d'attaque, remonter le bouclier pour qu'il soit juste
@@ -1277,7 +1414,7 @@ local function draw_enemy(controller, e, r)
   local telegraph_y = r.h - 38
   draw_defense_badge_big(e, r, telegraph_y - 24)
   local parts = enemy_telegraph_parts(controller.state, e)
-  if not dead then
+  if not trail_dead then
     local badges = {}
     -- Sensibilité au feu (2026-08-24, demande explicite) : pas un statut
     -- temporaire (pas de valeur, jamais retiré) -- toujours en tête de rangée
@@ -1317,6 +1454,7 @@ local function draw_enemy(controller, e, r)
     text(parts.target, 0, r.h - 11, r.w, 10, target_palette.border)
   end
 
+  draw_enemy_crack(r, crack_p)
   draw_shield_fx(controller, e.id, r)
   draw_tooltip_hint(r.w, r.h)
   love.graphics.pop()
@@ -1527,7 +1665,10 @@ local function draw_energy_display(state)
   local icon = Sprites.keyword("energie")
   if icon then
     love.graphics.setColor(1, 1, 1, 1)
-    Sprites.draw_centered(icon, r.x + r.w / 2, r.y + 24, 18)
+    -- Icône agrandie (2026-08-30, demande explicite -- "seulement l'icône") :
+    -- 18->24 de rayon, recentrée un peu plus bas pour garder une marge avant
+    -- le texte "X / Y" juste en dessous (r.y + 52), lui-même inchangé.
+    Sprites.draw_centered(icon, r.x + r.w / 2, r.y + 26, 24)
   end
   text(state.energy .. " / " .. Game.TURN_START_ENERGY, r.x, r.y + 52, r.w, 24, Theme.energy)
 end
@@ -1613,6 +1754,17 @@ local function draw_hand(controller)
   draw_energy_turn_anim(controller)
   draw_pile(View.deck_pile_rect, "\u{1F0A0}", "PIOCHE", #state.deck)
   draw_pile(View.discard_pile_rect, "\u{1F5D1}\u{FE0F}", "DEFAUSSE", #state.discard)
+  -- "Voir le deck" (2026-08-30, demande explicite) : seulement en combat
+  -- (screen == "playing") -- pendant un évènement "camp", ce coin de l'écran
+  -- est de toute façon recouvert par le voile sombre de l'écran en question,
+  -- voir View.deck_view_button.
+  if controller.screen == "playing" then
+    local db = View.deck_view_button
+    panel(db.x, db.y, db.w, db.h, Theme.panel_light)
+    set(Theme.muted); love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", db.x, db.y, db.w, db.h, 6, 6)
+    text(db.label, db.x, db.y + 4, db.w, 11, Theme.text, "center")
+  end
 
   -- Mode "flèche" (2026-08-09) : la carte sélectionnée reste posée en avant
   -- tant qu'elle est en attente, et la carte survolée grossit immédiatement
@@ -2128,18 +2280,59 @@ end
 -- Controller:spawn_ash) : replis sur le burst d'impact rouge d'origine
 -- (Theme.hp, gravité qui fait retomber) quand absents, jamais un 2ᵉ système
 -- de particules parallèle pour un simple changement de couleur/trajectoire.
+-- `pt.canvas`/`pt.quad`/`pt.tile` (optionnels, 2026-08-30, mort d'un ennemi --
+-- voir Controller:spawn_enemy_shatter/View.capture_enemy_shatter) : une tuile
+-- DÉCOUPÉE DANS L'IMAGE RÉELLE de l'ennemi plutôt qu'un simple carré de
+-- couleur -- même trajectoire/fondu que les autres particules, juste un
+-- rendu différent (texture au lieu d'un rectangle plein), avec en plus une
+-- légère rotation propre (pt.rot0/pt.vrot) pour l'effet "débris".
 local PARTICLE_GRAVITY = 160
 
 local function draw_particles(controller)
   for _, pt in ipairs(controller.particles) do
-    local p = math.min(1, pt.t / controller.particle_duration)
+    local p = math.min(1, pt.t / (pt.duration or controller.particle_duration))
     local gravity = pt.gravity or PARTICLE_GRAVITY
     local x = pt.x + pt.vx * pt.t
     local y = pt.y + pt.vy * pt.t + 0.5 * gravity * pt.t * pt.t
-    set(pt.color or Theme.hp, 1 - p)
-    love.graphics.rectangle("fill", x - 2, y - 2, 4, 4)
+    if pt.canvas and pt.quad then
+      love.graphics.setColor(1, 1, 1, 1 - p)
+      local rot = (pt.rot0 or 0) + (pt.vrot or 0) * pt.t
+      love.graphics.draw(pt.canvas, pt.quad, x, y, rot, 1, 1, pt.tile / 2, pt.tile / 2)
+    else
+      set(pt.color or Theme.hp, 1 - p)
+      love.graphics.rectangle("fill", x - 2, y - 2, 4, 4)
+    end
   end
   love.graphics.setColor(1, 1, 1, 1)
+end
+
+--- Rend l'icône (sprite réel si dispo, sinon silhouette vectorielle -- voir
+-- Icons.draw_enemy, même appel que draw_enemy_icon ci-dessus) d'un ennemi
+-- dans un nouveau canvas carré de `size` px, puis le découpe en `grid` x
+-- `grid` Quads (2026-08-30, demande explicite -- "que ce soit l'image de
+-- l'ennemi elle-même qui soit découpée en petits carrés qui partent dans
+-- toutes les directions", remplace un burst de particules grises génériques) :
+-- appelée UNE SEULE FOIS par Controller:spawn_enemy_shatter au moment de
+-- l'explosion (jamais à chaque frame) -- le canvas et les Quads résultants
+-- sont ensuite portés par chaque particule pour toute leur durée de vie
+-- (voir pt.canvas/pt.quad, draw_particles ci-dessus), jusqu'à disparition.
+function View.capture_enemy_shatter(template_id, size, grid)
+  local canvas = love.graphics.newCanvas(size, size)
+  love.graphics.push()
+  love.graphics.origin()
+  love.graphics.setCanvas(canvas)
+  love.graphics.clear(0, 0, 0, 0)
+  Icons.draw_enemy(template_id, size / 2, size / 2, size / 2, Theme.text)
+  love.graphics.setCanvas()
+  love.graphics.pop()
+  local tile = size / grid
+  local quads = {}
+  for gy = 0, grid - 1 do
+    for gx = 0, grid - 1 do
+      quads[#quads + 1] = { quad = love.graphics.newQuad(gx * tile, gy * tile, tile, tile, size, size), gx = gx, gy = gy }
+    end
+  end
+  return canvas, quads, tile
 end
 
 local function draw_tooltip(controller)
@@ -2615,13 +2808,18 @@ local function draw_campfire(controller)
   local rects = View.campfire_hero_rects(controller)
   for _, h in ipairs(controller.state.heroes) do
     local r = rects[h.id]
+    local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
     panel(r.x, r.y, r.w, r.h, Theme.panel_light)
-    set(Theme.heal); love.graphics.setLineWidth(2)
+    -- Couleur personnelle de l'aventurier (2026-08-30, bug signalé -- "les
+    -- contours des aventuriers sont tous de la même couleur avant sélection,
+    -- il faut qu'ils gardent leur couleur personnelle") : avant, Theme.heal
+    -- fixe pour les 4 -- remplacé par palette.border (même couleur que sur sa
+    -- carte/son nom, voir Theme.card_class), qui les distingue à nouveau.
+    set(palette.border); love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
     love.graphics.setLineWidth(1)
     local portrait_size = 70
     draw_class_icon(h.class_id, h.icon, h.label, r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size, Theme.text)
-    local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
     name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
     text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 110, r.w, 11, Theme.muted, "center")
     local healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
@@ -2647,13 +2845,15 @@ local function draw_refuge(controller)
   local rects = View.refuge_hero_rects(controller)
   for _, h in ipairs(controller.state.heroes) do
     local r = rects[h.id]
+    local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
     panel(r.x, r.y, r.w, r.h, Theme.panel_light)
-    set(Theme.heal); love.graphics.setLineWidth(2)
+    -- Couleur personnelle (2026-08-30, même correctif que draw_campfire ci-dessus) --
+    -- voir son commentaire.
+    set(palette.border); love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
     love.graphics.setLineWidth(1)
     local portrait_size = 70
     draw_class_icon(h.class_id, h.icon, h.label, r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size, Theme.text)
-    local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
     name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
     text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 110, r.w, 11, Theme.muted, "center")
     local healed
@@ -2742,8 +2942,16 @@ local function draw_temple(controller)
       hero_alpha = 1 - math.min(1, anim.t / (controller.temple_choice_anim_duration or 1))
     end
     if hero_alpha > 0 then
+      local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
       panel(r.x, r.y, r.w, r.h, eligible and Theme.panel_light or Theme.panel, hero_alpha)
-      set(selected and Theme.accent or (eligible and Theme.accent or Theme.muted), hero_alpha)
+      -- Couleur personnelle avant sélection (2026-08-30, bug signalé -- même
+      -- correctif que draw_campfire/draw_refuge) : un aventurier ÉLIGIBLE
+      -- mais pas encore choisi gardait quand même le contour or de
+      -- Theme.accent (identique pour les 4), au lieu de sa propre couleur de
+      -- classe -- l'or reste réservé à celui réellement sélectionné, pour que
+      -- "or" continue de signifier "choisi", sans plus rien retirer aux
+      -- autres.
+      set(selected and Theme.accent or (eligible and palette.border or Theme.muted), hero_alpha)
       love.graphics.setLineWidth(selected and 4 or 2)
       love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
       love.graphics.setLineWidth(1)
@@ -2751,7 +2959,6 @@ local function draw_temple(controller)
       draw_class_icon(h.class_id, h.icon, h.label,
         r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size,
         eligible and Theme.text or Theme.muted, hero_alpha)
-      local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
       name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
       if h.hp <= 0 then
         text("Mort", r.x, r.y + 112, r.w, 11, Theme.muted)
@@ -3168,11 +3375,145 @@ local function draw_boss_victory(controller)
   text("Le Boss est vaincu !", 0, H / 2 + 10, W, 14, Theme.muted)
 end
 
+--- Liste agrégée des cartes à afficher dans la fenêtre "voir le deck"
+-- (2026-08-30, demande explicite) : combine deck + main + défausse (tout ce
+-- que le joueur possède actuellement, la main/la défausse y compris -- ce ne
+-- sont jamais des cartes "perdues", juste temporairement ailleurs que dans le
+-- deck lui-même) -- SAUF sur l'écran de choix d'équipe, où rien de tout cela
+-- n'existe encore : reconstitue alors la liste directement depuis les héros
+-- déjà confirmés (ts.selected_ids), 3 cartes "départ" par classe -- exactement
+-- ce que Deck.build_starting_deck posera au lancement (voir
+-- Deck.starting_cards_for_class, même source).
+-- PAS de regroupement par doublon (2026-08-30, demande explicite -- "pour
+-- l'instant, il n'y a pas beaucoup de cartes dans un deck, je préfère ne pas
+-- regrouper et lister toutes les cartes même identiques") : une entrée par
+-- exemplaire réellement possédé, jamais un badge "×N" -- triée par classe
+-- puis nom pour un ordre stable d'un appel à l'autre (jamais l'ordre
+-- d'arrivée dans le deck, qui changerait à chaque mélange) ; l'ordre entre 2
+-- exemplaires IDENTIQUES n'a pas d'importance (ce sont la même carte).
+function View.deck_view_cards(controller)
+  local defs = {}
+  if controller.screen == "team_select" then
+    local ts = controller.team_select
+    if ts then
+      for _, class_id in ipairs(ts.selected_ids) do
+        for _, def in ipairs(Deck.starting_cards_for_class(class_id)) do defs[#defs + 1] = def end
+      end
+    end
+  else
+    local state = controller.state
+    if state then
+      for _, c in ipairs(state.deck) do defs[#defs + 1] = c.def end
+      for _, c in ipairs(state.hand) do defs[#defs + 1] = c.def end
+      for _, c in ipairs(state.discard) do defs[#defs + 1] = c.def end
+    end
+  end
+  table.sort(defs, function(a, b)
+    if a.class_id ~= b.class_id then return a.class_id < b.class_id end
+    if a.name ~= b.name then return a.name < b.name end
+    return false
+  end)
+  local out = {}
+  for _, def in ipairs(defs) do out[#out + 1] = { def = def } end
+  return out
+end
+
+--- Fenêtre "voir le deck" (2026-08-30, demande explicite -- accessible depuis
+-- la pioche, la défausse, le deck de l'écran de choix d'équipe, et un bouton
+-- dédié, voir Controller:open_deck_view/View.deck_view_button ci-dessus) :
+-- panneau fixe (View.deck_view_panel_rect) par-dessus l'écran courant, grille
+-- de cartes recalculée à chaque frame (View.deck_view_cards). Taille de
+-- cellule adaptative -- plutôt qu'un défilement (aucune brique de scroll
+-- n'existe ailleurs dans ce projet) : le nombre de colonnes vise un quasi-
+-- carré proportionné à la zone disponible, puis chaque carte est rapetissée
+-- au besoin pour que la grille entière tienne toujours dans le panneau, quel
+-- que soit le nombre de cartes réellement possédées.
+local DECK_VIEW_GAP = 10
+local DECK_VIEW_LABEL_H = 14
+local DECK_VIEW_MAX_CARD_W, DECK_VIEW_MAX_CARD_H = 78, 116
+local function draw_deck_view(controller)
+  if not controller.deck_view_open then return end
+  set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
+
+  local p = View.deck_view_panel_rect
+  panel(p.x, p.y, p.w, p.h, Theme.panel)
+  set(Theme.accent); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", p.x, p.y, p.w, p.h, 10, 10)
+  love.graphics.setLineWidth(1)
+
+  local cards = View.deck_view_cards(controller)
+  text("Toutes les cartes (" .. #cards .. ")", p.x + 20, p.y + 16, p.w - 130, 18, Theme.text, "left")
+
+  local cb = View.deck_view_close_button
+  set(Theme.panel_light); love.graphics.rectangle("fill", cb.x, cb.y, cb.w, cb.h, 8, 8)
+  set(Theme.muted); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", cb.x, cb.y, cb.w, cb.h, 8, 8)
+  love.graphics.setLineWidth(1)
+  text(cb.label, cb.x, cb.y + 6, cb.w, 14, Theme.text, "center")
+
+  local area_x, area_y = p.x + 20, p.y + 56
+  local area_w, area_h = p.w - 40, p.h - 76
+
+  if #cards == 0 then
+    text("Aucune carte pour l'instant.", area_x, area_y + area_h / 2 - 10, area_w, 14, Theme.muted)
+    return
+  end
+
+  -- Colonnes visant un quasi-carré proportionné à la zone (2026-08-30) :
+  -- point de départ raisonnable avant le rapetissement forcé ci-dessous.
+  local cols = math.max(1, math.min(#cards, math.ceil(math.sqrt(#cards * area_w / area_h))))
+  local rows = math.ceil(#cards / cols)
+
+  -- Proportions VERROUILLÉES sur CARD_W/CARD_H (2026-08-30, bug signalé --
+  -- "le texte déborde du cadre de la carte") : `card_w`/`card_h` fixés
+  -- indépendamment l'un de l'autre (largeur bornée par la colonne, hauteur
+  -- par la ligne) déformait le ratio d'une vraie carte -- draw_card_face
+  -- positionne tout son contenu (nom, description, pastilles...) en pixels
+  -- ABSOLUS calés sur 92x138, jamais recalculés selon `w`/`h` reçus, donc un
+  -- format plus large/plat que l'original faisait déborder le texte au lieu
+  -- de simplement le montrer en plus petit. Un seul facteur d'échelle
+  -- (`card_w / CARD_W`), retenu comme le plus restrictif des deux budgets
+  -- (colonne ET ligne), rend TOUJOURS un rectangle proportionné à une vraie
+  -- carte -- voir le rendu par canvas ci-dessous (même technique que
+  -- draw_faded_card/draw_card_flights : dessiné une fois en pleine résolution
+  -- native, puis affiché à l'échelle -- le texte rapetisse AVEC la carte au
+  -- lieu de déborder).
+  local aspect = CARD_H / CARD_W
+  local avail_w = area_w / cols - DECK_VIEW_GAP
+  local avail_h = area_h / rows - DECK_VIEW_GAP - DECK_VIEW_LABEL_H
+  local card_w = math.max(20, math.min(DECK_VIEW_MAX_CARD_W, avail_w, avail_h / aspect))
+  local card_h = card_w * aspect
+
+  local cell_w, cell_h = card_w + DECK_VIEW_GAP, card_h + DECK_VIEW_LABEL_H + DECK_VIEW_GAP
+  local grid_w, grid_h = cols * cell_w, rows * cell_h
+  local ox = area_x + (area_w - grid_w) / 2
+  local oy = area_y + (area_h - grid_h) / 2
+
+  card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+  for i, entry in ipairs(cards) do
+    local col = (i - 1) % cols
+    local row = math.floor((i - 1) / cols)
+    local cx = ox + col * cell_w
+    local cy = oy + row * cell_h
+
+    love.graphics.push()
+    love.graphics.origin()
+    love.graphics.setCanvas(card_flight_canvas)
+    love.graphics.clear(0, 0, 0, 0)
+    draw_card_face(entry.def, CARD_W, CARD_H, tostring(entry.def.cost or 0), entry.def.desc, Theme.muted, false, false, false, false)
+    love.graphics.setCanvas()
+    love.graphics.pop()
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(card_flight_canvas, cx, cy, 0, card_w / CARD_W, card_h / CARD_H)
+  end
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
 function View.draw(controller)
   if controller.screen == "menu" then draw_menu(controller); return end
   if controller.screen == "options" then draw_options(controller); return end
   if controller.screen == "bossVictory" then draw_boss_victory(controller); return end
-  if controller.screen == "team_select" then draw_team_select(controller); return end
+  if controller.screen == "team_select" then draw_team_select(controller); draw_deck_view(controller); return end
 
   local state = controller.state
   Background.draw(state.enemies, W, H)
@@ -3351,6 +3692,8 @@ function View.draw(controller)
   if controller.screen == "playing" or controller.screen == "draft" or controller.screen == "forge" or controller.screen == "temple" then
     draw_tooltip(controller)
   end
+
+  draw_deck_view(controller)
 
   love.graphics.setColor(1, 1, 1, 1)
 end

@@ -113,6 +113,22 @@ BUILDERS.hop = function()
   end, 0.35)
 end
 
+-- "enemy_death" -- un ennemi vaincu qui se fissure puis explose en particules
+-- (2026-08-30, demande explicite -- "il se fissure puis explose en
+-- particules qui vanish") : 2 craquements secs (bruit très court, attaque
+-- immédiate, comme une fissure qui cède) suivis d'un souffle grave qui
+-- s'éteint (l'explosion elle-même) -- distinct de hit_physical/hit_magic, qui
+-- couvrent déjà le COUP qui l'a achevé, pas ce qui suit une fois à 0 PV.
+BUILDERS.enemy_death = function()
+  return Chiptune.concat({
+    note(0, 0.04, "noise", 3, 0.5),
+    note(0, 0.05, "noise", 3, 0.5),
+    Chiptune.render(0.5, function(t)
+      return (Chiptune.noise() * 0.7 + Chiptune.square(60, t, 0.5) * 0.3) * Chiptune.decay(t, 0.5, 1.2)
+    end, 0.55),
+  })
+end
+
 -- "roar" -- avant qu'un ennemi n'agisse : grondement grave, bruit + trémolo.
 BUILDERS.enemy_telegraph = function()
   return Chiptune.render(0.4, function(t)
@@ -138,6 +154,19 @@ BUILDERS.upgrade = function()
   return Chiptune.concat({
     note(1046.50, 0.06, "square", 1.6, 0.4, 0.3),
     note(1318.51, 0.16, "square", 1.2, 0.45, 0.3),
+  })
+end
+
+-- "forge_impact" -- conclusion de la fusion base -> améliorée à la Forge
+-- (2026-08-30, demande explicite -- "le mouvement de carte ... se conclue par
+-- un effet ou une animation") : DISTINCT de "eclat"/upgrade ci-dessus (joué
+-- au CLIC, annonce le choix) -- ici, un éclat bref au moment précis où la
+-- carte de base finit sa chute et fusionne dans l'améliorée, accent carré
+-- suivi d'un scintillement triangle plus aigu.
+BUILDERS.forge_impact = function()
+  return Chiptune.concat({
+    note(1568.00, 0.05, "square", 1.6, 0.45, 0.3),
+    note(2093.00, 0.16, "triangle", 1.1, 0.4),
   })
 end
 
@@ -193,6 +222,22 @@ BUILDERS.defeat = function()
     note(C4, 0.22, "triangle", 1, 0.45),
     note(G3, 0.55, "triangle", 0.8, 0.5),
   })
+end
+
+-- "hero_death" -- un aventurier tombe au combat (2026-08-30, demande
+-- explicite -- "un son grave, déprimant, caractéristique de la mort") :
+-- glissando triangle qui plonge lentement vers le grave sur toute sa durée,
+-- doublé d'un souffle de bruit sourd au tout début (le coup qui l'achève) --
+-- DISTINCT de "defeat" ci-dessus (fanfare complète de fin de RUN, plusieurs
+-- notes qui descendent) : ici un seul ton qui s'éteint, pour UN aventurier
+-- qui tombe, pas toute l'équipe qui est vaincue.
+BUILDERS.hero_death = function()
+  return Chiptune.render(1.3, function(t)
+    local p = math.min(1, t / 1.3)
+    local freq = 220 - 160 * p
+    local thud = t < 0.12 and Chiptune.noise() * (1 - t / 0.12) * 0.5 or 0
+    return Chiptune.triangle(freq, t) * Chiptune.decay(t, 1.3, 0.6) * 0.7 + thud
+  end, 0.5)
 end
 
 -- "cendre" -- carte "Amnésie" qui se disperse en cendres au lieu de partir en

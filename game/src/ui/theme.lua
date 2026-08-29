@@ -12,6 +12,12 @@ local Theme = {
   panel_light = hex("3a2a48"),
   accent = hex("e8b93f"),
   hp = hex("d9455f"),
+  -- "Traînée" de PV tout juste perdus (2026-08-30, demande explicite --
+  -- barre de vie "à 2 niveaux" : le rouge chute d'un coup, un jaune se vide
+  -- ensuite lentement pour le rattraper, voir hp_bar/Controller.hp_trail
+  -- dans view.lua/controller.lua) -- jaune franc, distinct de Theme.accent
+  -- (or, réservé à "sélectionné"/"choisi") et de Theme.energy (cyan).
+  hp_trail = hex("e8c93f"),
   heal = hex("4caf7d"),
   energy = hex("3fb6e8"),
   -- Ressource propre au Mage (2026-08-20) : même teinte que le liseré de ses

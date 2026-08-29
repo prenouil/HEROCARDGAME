@@ -14,6 +14,26 @@ local function find_rect(rects_by_id, x, y)
   return nil
 end
 
+--- Fenêtre "voir le deck" (2026-08-30, demande explicite) : passe AVANT tout
+-- le reste (menu_click compris) tant qu'elle est ouverte -- un clic sur
+-- "Fermer" OU en dehors du panneau la referme, un clic À L'INTÉRIEUR (sur une
+-- carte, par exemple) ne fait rien de plus que "consommer" le clic, jamais
+-- retomber sur l'écran masqué en dessous. Réutilisée telle quelle par
+-- mousepressed_tap/arrow ET is_hovering_clickable_tap/arrow, même schéma que
+-- menu_click/post_combat_click.
+local function deck_view_click(controller, x, y)
+  if not controller.deck_view_open then return false end
+  if View.point_in(View.deck_view_close_button, x, y) or not View.point_in(View.deck_view_panel_rect, x, y) then
+    controller:close_deck_view()
+  end
+  return true
+end
+
+local function deck_view_hovering(controller, x, y)
+  if not controller.deck_view_open then return false end
+  return View.point_in(View.deck_view_close_button, x, y) or not View.point_in(View.deck_view_panel_rect, x, y)
+end
+
 -- Écrans "menu"/"options" (2026-08-21, demande explicite) : mêmes boutons
 -- quel que soit le mode d'entrée (tap/flèche), jamais de ciblage de carte en
 -- jeu -- factorisé une seule fois, comme feu_de_camp_hovering plus bas,
@@ -139,6 +159,14 @@ local function team_select_click(controller, x, y)
     if View.point_in(View.team_select_confirm_button, x, y) then controller:team_select_confirm(); return true end
   end
 
+  -- "Voir le deck" (2026-08-30, demande explicite) : clic sur le deck qui se
+  -- construit en bas à gauche au fil des aventuriers confirmés (voir
+  -- View.team_select_deck_rect/draw_team_deck) -- ouvre la même fenêtre que
+  -- la pioche/défausse en combat, voir Controller:open_deck_view.
+  if View.point_in(View.team_select_deck_rect(#ts.selected_ids), x, y) then
+    controller:open_deck_view(); return true
+  end
+
   -- `team_select_hero_interactive` (2026-08-30, bug signalé) : ignore la case
   -- laissée VIDE par un héros mis en avant/en transit -- draw_team_select
   -- (view.lua) n'y dessine plus rien depuis son introduction, mais le rect
@@ -174,6 +202,7 @@ end
 
 local function mousepressed_tap(controller, x, y, button)
   if button ~= 1 then return end
+  if deck_view_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
   if controller.screen == "bossVictory" then return end
@@ -218,6 +247,13 @@ local function mousepressed_tap(controller, x, y, button)
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
   if View.point_in(View.restart_turn_button, x, y) then controller:restart_turn(); return end
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
+  -- "Voir le deck" (2026-08-30, demande explicite) : 3 déclencheurs pour la
+  -- même fenêtre -- la pioche, la défausse, et le bouton dédié juste en
+  -- dessous (voir Controller:open_deck_view/View.deck_view_button).
+  if View.point_in(View.deck_pile_rect, x, y) or View.point_in(View.discard_pile_rect, x, y)
+    or View.point_in(View.deck_view_button, x, y) then
+    controller:open_deck_view(); return
+  end
 
   local pending = state.pending
   -- Sélectionner une carte l'assigne directement à son propriétaire
@@ -249,6 +285,7 @@ end
 -- d'un cran.
 local function mousepressed_arrow(controller, x, y, button)
   if button ~= 1 then return end
+  if deck_view_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
   if controller.screen == "bossVictory" then return end
@@ -291,6 +328,12 @@ local function mousepressed_arrow(controller, x, y, button)
   if View.point_in(View.restart_button, x, y) then controller:restart_combat(); return end
   if View.point_in(View.restart_turn_button, x, y) then controller:restart_turn(); return end
   if View.point_in(View.instant_victory_button, x, y) then controller:trigger_instant_victory(); return end
+  -- "Voir le deck" (2026-08-30, demande explicite) : voir le commentaire
+  -- détaillé dans mousepressed_tap.
+  if View.point_in(View.deck_pile_rect, x, y) or View.point_in(View.discard_pile_rect, x, y)
+    or View.point_in(View.deck_view_button, x, y) then
+    controller:open_deck_view(); return
+  end
 
   local pending = state.pending
 
@@ -383,6 +426,7 @@ local function team_select_hovering(controller, x, y)
     if View.point_in(View.team_select_cancel_button, x, y) then return true end
     if View.point_in(View.team_select_confirm_button, x, y) then return true end
   end
+  if View.point_in(View.team_select_deck_rect(#ts.selected_ids), x, y) then return true end
   -- Même filtre que team_select_click (2026-08-30, bug signalé) : sinon le
   -- curseur "main" s'affiche encore sur la case vide laissée par un héros
   -- mis en avant/en transit.
@@ -395,6 +439,7 @@ local function team_select_hovering(controller, x, y)
 end
 
 local function is_hovering_clickable_tap(controller, x, y)
+  if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
   if controller.screen == "menu" or controller.screen == "options" then
     return menu_hovering(controller, x, y)
   end
@@ -426,6 +471,8 @@ local function is_hovering_clickable_tap(controller, x, y)
   if View.point_in(View.restart_button, x, y) then return true end
   if View.point_in(View.restart_turn_button, x, y) then return true end
   if View.point_in(View.instant_victory_button, x, y) then return true end
+  if View.point_in(View.deck_pile_rect, x, y) or View.point_in(View.discard_pile_rect, x, y)
+    or View.point_in(View.deck_view_button, x, y) then return true end
 
   local pending = state.pending
   if pending and pending.hero_id then
@@ -444,6 +491,7 @@ end
 -- mousepressed_arrow) -- mais on ne l'annonce pas comme "cliquable" au survol
 -- (curseur main), le curseur ne réagit qu'aux vraies opportunités d'action.
 local function is_hovering_clickable_arrow(controller, x, y)
+  if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
   if controller.screen == "menu" or controller.screen == "options" then
     return menu_hovering(controller, x, y)
   end
@@ -474,6 +522,8 @@ local function is_hovering_clickable_arrow(controller, x, y)
   if View.point_in(View.restart_button, x, y) then return true end
   if View.point_in(View.restart_turn_button, x, y) then return true end
   if View.point_in(View.instant_victory_button, x, y) then return true end
+  if View.point_in(View.deck_pile_rect, x, y) or View.point_in(View.discard_pile_rect, x, y)
+    or View.point_in(View.deck_view_button, x, y) then return true end
 
   local pending = state.pending
   if pending and pending.hero_id then
@@ -495,6 +545,7 @@ function Input.is_hovering_clickable(controller, x, y)
 end
 
 function Input.mousemoved(controller, x, y)
+  if controller.deck_view_open then controller:set_hover(nil, nil); return end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
     controller:set_hover(nil, nil)
     return
@@ -614,8 +665,15 @@ function Input.mousemoved(controller, x, y)
   local hero_id = find_rect(View.hero_rects(state), x, y)
   if hero_id then controller:set_hover("hero", hero_id); return end
 
+  -- Un ennemi entièrement explosé (2026-08-30, voir Controller:update/
+  -- self.enemy_death -- draw_enemy ne dessine plus rien pour lui) ne garde
+  -- pas d'infobulle : son emplacement, sinon vide à l'écran, ne doit plus
+  -- réagir à la souris.
   local enemy_id = find_rect(View.enemy_rects(state), x, y)
-  if enemy_id then controller:set_hover("enemy", enemy_id); return end
+  if enemy_id then
+    local death = controller.enemy_death[enemy_id]
+    if not (death and death.exploded) then controller:set_hover("enemy", enemy_id); return end
+  end
 
   -- Pioche/défausse (2026-08-21, demande explicite) : survolables pour une
   -- infobulle (nombre de cartes + règle associée, voir tooltip_lines dans

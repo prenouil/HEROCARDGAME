@@ -127,8 +127,15 @@ local BOUNDED_COMBAT_COUNT = 9
 -- PUIS 1s de pause (carte déjà réglée, juste le temps de la lire) avant
 -- d'enchaîner sur l'étape suivante -- remplace la pause générique
 -- POST_COMBAT_RESOLVE_PAUSE sur ce chemin précis.
-local FORGE_UPGRADE_ANIM_DURATION = 0.5
+-- Ralentie (2026-08-30, demande explicite -- "le mouvement de carte après le
+-- choix [doit être] plus lent, pour plus d'intensité, et se conclue par un
+-- effet ou une animation") : 0.5 -> 1.1, la chute de la carte de base se lit
+-- désormais clairement AVANT l'impact, plutôt qu'un fondu quasi instantané.
+-- Voir Controller:choose_forge_card pour la gerbe dorée + le son distinct
+-- déclenchés pile à la fin de cette durée (la "conclusion" demandée).
+local FORGE_UPGRADE_ANIM_DURATION = 1.1
 local FORGE_UPGRADE_HOLD_PAUSE = 1.0
+local FORGE_BURST_PARTICLE_COUNT = 16
 
 -- Choix au Temple (2026-08-29, refonte -- "après le choix, les statues non
 -- choisies fade et laisse la place à celle choisie, avec l'indication 'Bonne
@@ -184,6 +191,35 @@ local TEAM_CARD_BURST_STAGGER = 0.07
 local FLOATER_DURATION = 0.9 -- s -- nombre de dégâts/soin flottant
 local PARTICLE_DURATION = 0.45 -- s -- petit burst de pixels à l'impact
 local PARTICLE_COUNT = 6
+
+-- Barre de PV "à 2 niveaux" (2026-08-30, demande explicite) : vitesse à
+-- laquelle self.hp_trail rattrape unit.hp après une perte, en FRACTION du
+-- max_hp de l'unité par seconde -- pas un nombre de PV/s fixe, pour qu'un
+-- petit gobelin (peu de PV max) et le Boss (beaucoup) mettent tous deux un
+-- temps comparable, proportionnellement, à afficher toute leur traînée.
+local HP_TRAIL_RATE = 0.6
+
+-- Mort d'un ennemi (2026-08-30, demande explicite -- "quand un ennemi est
+-- vaincu ... il se fissure puis explose en particules qui vanish au bout de
+-- quelques secondes, il ne reste plus rien de lui") : 2 temps courts avant
+-- l'explosion elle-même (voir Controller:update, seul déclencheur, ET
+-- draw_enemy dans view.lua, seul lecteur) -- la fissure laisse le temps à
+-- l'oeil de comprendre "il est en train de céder" avant le burst.
+local ENEMY_DEATH_CRACK_DURATION = 0.45
+local ENEMY_DEATH_PARTICLE_DURATION = 1.8 -- s -- "quelques secondes", plus long que PARTICLE_DURATION
+-- Découpage de l'image de l'ennemi en tuiles qui volent (2026-08-30, demande
+-- explicite -- remplace un burst de particules grises génériques) : grille
+-- 6x6 = 36 tuiles, bon compromis lisibilité/détail pour un portrait
+-- d'ennemi ; taille du canvas source légèrement AU-DESSUS de celle du
+-- portrait affiché en combat (62px, voir draw_enemy dans view.lua) pour
+-- capturer un peu plus de détail, purement cosmétique.
+local ENEMY_SHATTER_GRID = 6
+local ENEMY_SHATTER_SIZE = 72
+
+-- Mort d'un HÉROS (2026-08-30, demande explicite -- "que le héros 's'éteigne'
+-- doucement pour atteindre l'état actuel", + un son grave dédié) : durée du
+-- fondu, voir self.hero_death_fade/draw_hero (view.lua).
+local HERO_DEATH_FADE_DURATION = 1.2
 local STATUS_POP_DURATION = 0.35 -- s -- pop d'échelle d'un badge de statut à son application
 local SHIELD_FX_DURATION = 1.0 -- s -- gros bouclier en fondu sur un gain de Défense
 -- "Amnésie" (2026-08-28, demande explicite) : durée du rétrécissement/fondu
@@ -215,6 +251,14 @@ function Controller.new()
   -- Controller:start_boss_test -- une victoire ramène au menu plutôt que
   -- d'enchaîner un faux combat suivant). nil tant qu'aucun run n'a encore
   -- démarré (écran "menu").
+  -- Fenêtre "voir le deck" (2026-08-30, demande explicite -- liste de toutes
+  -- les cartes possédées, accessible depuis plusieurs endroits : pioche,
+  -- défausse, deck de l'écran de choix d'équipe, bouton dédié) : un simple
+  -- booléen d'overlay, indépendant de `self.screen` -- peut s'ouvrir par-dessus
+  -- N'IMPORTE quel écran de jeu (combat, choix d'équipe...) sans y toucher, et
+  -- s'y refermer, voir Controller:open_deck_view/close_deck_view et
+  -- View.deck_view_cards (calcule la liste à afficher selon l'écran courant).
+  self.deck_view_open = false
   self.run_mode = nil
   -- Dernière équipe lancée avec succès (2026-08-29, écran de choix
   -- d'équipe) : liste de 4 ids -- reconduite par "Rejouer" après une défaite
@@ -281,6 +325,31 @@ function Controller.new()
   -- lu par draw_enemy (view.lua) pour substituer un y hors-écran + fondu à la
   -- position de repos tant que `elapsed < delay + duration`.
   self.enemy_entrance = {}
+  -- [unit_id] = valeur de PV AFFICHÉE, héros ET ennemis (2026-08-30, demande
+  -- explicite -- "quand un personnage perd de la vie, il faut ajouter un
+  -- effet ... la barre jaune se vide lentement") : suit `unit.hp` avec un
+  -- temps de retard sur une PERTE (voir Controller:update, seul écrivain),
+  -- remonte instantanément sur un GAIN (soin) -- jamais l'inverse, ce serait
+  -- un soin qui semble progressif au lieu d'un dégât. Lu par draw_hero/
+  -- draw_enemy (view.lua/hp_bar) pour la portion jaune "pas encore rattrapée".
+  self.hp_trail = {}
+  -- [enemy_id] = { t = elapsed, exploded = bool|nil } (2026-08-30, demande
+  -- explicite -- "quand un ennemi est vaincu ... il se fissure puis explose
+  -- en particules qui vanish") : créée UNE SEULE FOIS par Controller:update
+  -- quand la traînée de PV (ci-dessus) rattrape enfin 0 pour un ennemi déjà à
+  -- hp <= 0 -- PAS au moment où hp passe sous 0 (sinon la fissure/explosion
+  -- couperait court à l'animation de traînée jaune, qui n'aurait plus le
+  -- temps de se voir). Voir ENEMY_DEATH_CRACK_DURATION/EXPLODE_DURATION plus
+  -- bas et draw_enemy (view.lua), seul lecteur.
+  self.enemy_death = {}
+  -- [hero_id] = { t = elapsed } (2026-08-30, demande explicite -- "à la mort
+  -- de l'un d'eux ... que le héros s'éteigne doucement pour atteindre l'état
+  -- actuel") : créée UNE SEULE FOIS par Controller:update dès qu'un héros
+  -- tombe à 0 PV (contrairement à self.enemy_death, purement cosmétique ici
+  -- -- aucune phase à déclencher, juste un fondu -- voir HERO_DEATH_FADE_DURATION
+  -- et draw_hero dans view.lua, seul lecteur, qui INTERPOLE ses alphas plutôt
+  -- que de basculer instantanément sur "mort" comme avant ce correctif).
+  self.hero_death_fade = {}
   self.floaters = {} -- liste de { x, y, text, kind = "damage"|"heal", t } -- lu par view.lua
   self.particles = {} -- liste de { x, y, vx, vy, t } -- petit burst à l'impact
   self.status_pop = {} -- [unit_id] = { [status_key] = elapsed } -- pop d'un badge à son application
@@ -332,6 +401,21 @@ function Controller.new()
   -- entre deux runs et qui rejouerait donc le jingle à chaque partie.
   Sfx.play("jingle")
   return self
+end
+
+-- ---------- fenêtre "voir le deck" ----------
+
+--- Ouvre la fenêtre "toutes les cartes" (2026-08-30, demande explicite),
+-- par-dessus l'écran courant -- voir self.deck_view_open. Ne fait rien de
+-- plus que basculer le booléen : le CONTENU (quelles cartes lister) est
+-- recalculé à chaque frame par View.deck_view_cards à partir de l'écran
+-- courant, jamais figé ici au moment de l'ouverture.
+function Controller:open_deck_view()
+  self.deck_view_open = true
+end
+
+function Controller:close_deck_view()
+  self.deck_view_open = false
 end
 
 -- ---------- écran "Choisis ton équipe" ----------
@@ -1026,6 +1110,60 @@ function Controller:spawn_impact(unit_id)
   end
 end
 
+--- Gerbe de particules radiales depuis un POINT choisi par l'appelant (2026-08-30,
+-- généralisé à partir de spawn_impact ci-dessus, qui reste dédié aux coups reçus
+-- par une unité) : couleur et nombre au choix -- réutilisée par la conclusion de
+-- fusion de la Forge (voir Controller:choose_forge_card) ET l'explosion d'un
+-- ennemi vaincu (voir Controller:update/ENEMY_DEATH_*). `duration` (optionnel) :
+-- durée de vie de CES particules précises, indépendante de self.particle_duration
+-- (voir son champ `p.duration`, honoré en priorité par draw_particles/la purge
+-- dans Controller:update ci-dessous) -- l'explosion d'un ennemi doit durer
+-- "quelques secondes", bien plus qu'un simple burst d'impact.
+function Controller:spawn_burst(x, y, color, count, duration)
+  for _ = 1, count do
+    local angle = math.random() * math.pi * 2
+    local speed = 70 + math.random() * 90
+    self.particles[#self.particles + 1] = {
+      x = x, y = y, vx = math.cos(angle) * speed, vy = math.sin(angle) * speed, t = 0,
+      color = color, duration = duration,
+    }
+  end
+end
+
+--- Découpe l'image RÉELLE de l'ennemi (sprite si disponible, sinon sa
+-- silhouette vectorielle -- voir View.capture_enemy_shatter/Icons.draw_enemy)
+-- en petites tuiles qui partent chacune dans SA direction (2026-08-30,
+-- demande explicite -- "que ce soit l'image de l'ennemi elle-même qui soit
+-- découpée en petits carrés qui partent dans toutes les directions ... rend
+-- très bien les destructions d'ennemi") : la direction de chaque tuile
+-- dérive directement de sa position dans la grille par rapport au centre
+-- (une tuile de coin part en diagonale, une tuile du bord part droit devant),
+-- pour un éclatement qui a l'air de vraiment provenir du centre de l'image,
+-- pas un simple tir aléatoire dans toutes les directions. `(cx, cy)` : centre
+-- du PORTRAIT au moment de l'explosion (voir Controller:update, seul
+-- appelant) -- chaque tuile garde SA POSITION D'ORIGINE au sein de l'image
+-- comme point de départ, pas toutes empilées au centre.
+function Controller:spawn_enemy_shatter(cx, cy, template_id)
+  local canvas, quads, tile = View.capture_enemy_shatter(template_id, ENEMY_SHATTER_SIZE, ENEMY_SHATTER_GRID)
+  local center = (ENEMY_SHATTER_GRID - 1) / 2
+  for _, q in ipairs(quads) do
+    local dx, dy = q.gx - center, q.gy - center
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len < 0.001 then dx, dy, len = 1, 0, 1 end
+    dx, dy = dx / len, dy / len
+    local speed = 70 + math.random() * 120
+    self.particles[#self.particles + 1] = {
+      x = cx - ENEMY_SHATTER_SIZE / 2 + q.gx * tile + tile / 2,
+      y = cy - ENEMY_SHATTER_SIZE / 2 + q.gy * tile + tile / 2,
+      vx = dx * speed + (math.random() - 0.5) * 30,
+      vy = dy * speed - 40 + (math.random() - 0.5) * 30,
+      t = 0, duration = ENEMY_DEATH_PARTICLE_DURATION,
+      canvas = canvas, quad = q.quad, tile = tile,
+      rot0 = math.random() * math.pi * 2, vrot = (math.random() - 0.5) * 6,
+    }
+  end
+end
+
 --- Petit nuage de particules réparties sur tout un RECT (pas un point comme
 -- spawn_impact, une carte entière) -- réutilise `self.particles`/
 -- draw_particles (view.lua) tel quel, `color`/`gravity` (2026-08-28) sont
@@ -1143,6 +1281,15 @@ end
 -- la "parade des aventuriers" ne démarre qu'une fois tous les ennemis posés.
 function Controller:play_enemy_entrance_sequence()
   self.enemy_entrance = {}
+  -- Traînée de PV/séquence de mort (2026-08-30, voir leurs commentaires plus
+  -- bas) : remises à zéro ICI, au même point que enemy_entrance ci-dessus --
+  -- appelé à CHAQUE entrée en combat (reset_run/start_boss_test/
+  -- advance_to_next_combat), jamais ailleurs -- sans ça, un id d'ennemi réutilisé
+  -- d'un combat au suivant (ex. un 2ᵉ "squelette") hériterait de la traînée/de
+  -- la séquence de mort de son homonyme du combat précédent, déjà à 0.
+  self.hp_trail = {}
+  self.enemy_death = {}
+  self.hero_death_fade = {}
   local enemies = self.state.enemies
   if #enemies == 0 then return 0 end
   local is_boss = self.state.run.is_boss
@@ -1310,7 +1457,85 @@ function Controller:update(dt)
   for i = #self.particles, 1, -1 do
     local p = self.particles[i]
     p.t = p.t + dt
-    if p.t >= self.particle_duration then table.remove(self.particles, i) end
+    if p.t >= (p.duration or self.particle_duration) then table.remove(self.particles, i) end
+  end
+  -- Traînée de PV "à 2 niveaux" (2026-08-30, demande explicite -- voir
+  -- self.hp_trail, Controller.new, et hp_bar dans view.lua) : rattrape
+  -- unit.hp au fil du temps sur une PERTE (vitesse proportionnelle au
+  -- max_hp de l'unité, voir HP_TRAIL_RATE), remonte INSTANTANÉMENT sur un
+  -- gain (soin) -- jamais l'inverse. Héros ET ennemis, même boucle -- une
+  -- fois la traînée d'un ennemi déjà à 0 PV redescendue à son tour à 0,
+  -- déclenche sa séquence de mort (fissure -> explosion) ci-dessous, UNE
+  -- SEULE FOIS (self.enemy_death[e.id] sert de garde).
+  local function advance_trail(u)
+    local trail = self.hp_trail[u.id]
+    if trail == nil or trail < u.hp then trail = u.hp
+    elseif trail > u.hp then trail = math.max(u.hp, trail - u.max_hp * HP_TRAIL_RATE * dt) end
+    self.hp_trail[u.id] = trail
+    return trail
+  end
+  for _, h in ipairs(self.state.heroes) do
+    advance_trail(h)
+    -- Mort d'un héros (2026-08-30, demande explicite) : déclenchée UNE SEULE
+    -- FOIS, dès que hp tombe à 0 (contrairement à l'ennemi, pas besoin
+    -- d'attendre la traînée -- il n'y a pas de séquence à faire, juste un
+    -- fondu, voir draw_hero dans view.lua). Effacée dès que hp remonte
+    -- au-dessus de 0 (2026-08-30, bug évité -- le Feu de camp/le Refuge
+    -- n'excluent pas un héros à 0 PV de leur soin, voir Controller:
+    -- choose_campfire_hero/choose_refuge_rest, aucun garde-fou là-bas) :
+    -- sans ça, un héros ranimé resterait affiché "éteint" pour toujours,
+    -- l'entrée n'étant jamais remise à nil ailleurs.
+    if h.hp <= 0 then
+      if not self.hero_death_fade[h.id] then
+        self.hero_death_fade[h.id] = { t = 0, duration = HERO_DEATH_FADE_DURATION }
+        Sfx.play("hero_death")
+      end
+    else
+      self.hero_death_fade[h.id] = nil
+    end
+  end
+  for id, fade in pairs(self.hero_death_fade) do
+    fade.t = math.min(fade.duration, fade.t + dt)
+  end
+  for _, e in ipairs(self.state.enemies) do
+    local trail = advance_trail(e)
+    if e.hp <= 0 and trail <= 0 and not self.enemy_death[e.id] then
+      -- `crack_duration` copié ici plutôt que relu depuis une constante
+      -- dupliquée côté view.lua (2026-08-30) : draw_enemy (seul lecteur de
+      -- cette table) n'a besoin de connaître QUE ce qui est écrit dedans,
+      -- jamais une 2ᵉ copie de ENEMY_DEATH_CRACK_DURATION à garder synchronisée.
+      -- `template_id` (2026-08-30, voir Controller:spawn_enemy_shatter) :
+      -- capturé ICI plutôt que relu sur `e` au moment de l'explosion -- cette
+      -- table est la SEULE chose que la boucle d'explosion, plus bas,
+      -- parcourt (par id, pas par unité), jamais un second lookup dans
+      -- self.state.enemies qui pourrait échouer si l'ennemi en était
+      -- entre-temps retiré (n'arrive pas aujourd'hui, mais pas d'hypothèse
+      -- supplémentaire à porter).
+      self.enemy_death[e.id] = { t = 0, crack_duration = ENEMY_DEATH_CRACK_DURATION, template_id = e.template_id }
+    end
+  end
+  -- Séquence de mort d'un ennemi (2026-08-30, demande explicite -- "il se
+  -- fissure puis explose en particules qui vanish au bout de quelques
+  -- secondes ... il ne reste plus rien de lui") : `d.exploded` bascule une
+  -- seule fois, à la fin de la fissure -- voir ENEMY_DEATH_CRACK_DURATION,
+  -- draw_enemy (view.lua) arrête alors de dessiner cet ennemi ENTIÈREMENT
+  -- (plus de cadre "vaincu" -- les particules déjà semées, indépendantes de
+  -- cette table, continuent seules de s'éteindre, voir draw_particles).
+  for id, d in pairs(self.enemy_death) do
+    d.t = d.t + dt
+    if not d.exploded and d.t >= ENEMY_DEATH_CRACK_DURATION then
+      d.exploded = true
+      local r = View.unit_rect(self.state, id)
+      if r then
+        -- Centre du PORTRAIT, pas du cadre entier (2026-08-30) : même
+        -- ancrage que draw_enemy_icon (y=20, taille 62, voir view.lua) --
+        -- (r.x + r.w/2, r.y + 51) -- pour que les tuiles partent bien de
+        -- "l'image de l'ennemi elle-même", pas du centre géométrique de tout
+        -- le cadre (barre de PV/badges compris).
+        self:spawn_enemy_shatter(r.x + r.w / 2, r.y + 51, d.template_id)
+      end
+      Sfx.play("enemy_death")
+    end
   end
   for _, keys in pairs(self.status_pop) do
     for k, t in pairs(keys) do
@@ -1833,7 +2058,29 @@ function Controller:choose_forge_card(index)
   Forge.apply_upgrade(instance)
   self.forge_upgrade_anim = { chosen_index = index, base_def = base_def, t = 0 }
   Sfx.play("upgrade")
-  self:finish_forge(FORGE_UPGRADE_ANIM_DURATION + FORGE_UPGRADE_HOLD_PAUSE)
+  -- Conclusion (2026-08-30, demande explicite -- "le mouvement de carte
+  -- après le choix ... se conclue par un effet ou une animation") : gerbe de
+  -- particules dorées + son distinct de "upgrade" (joué au clic, ci-dessus),
+  -- déclenchés UNE SEULE FOIS, pile au moment où la carte de base termine sa
+  -- chute (voir FORGE_UPGRADE_ANIM_DURATION, ralentie pour "plus
+  -- d'intensité") -- distinct du flash continu déjà en place PENDANT la
+  -- chute (voir draw_forge, view.lua), qui reste un effet de survol/impact
+  -- léger, pas une vraie conclusion. `seq:push(run, wait)` exécute `run`
+  -- IMMÉDIATEMENT et attend ENSUITE `wait` avant l'étape suivante (voir
+  -- src/util/sequencer.lua) -- il faut donc une étape VIDE porteuse du délai
+  -- D'ABORD, la vraie étape (burst + son) ensuite sans délai, jamais l'inverse
+  -- (qui déclencherait le burst tout de suite, avant même que la carte n'ait
+  -- fini de tomber).
+  local self_ = self
+  self.seq:push(function() end, FORGE_UPGRADE_ANIM_DURATION)
+  self.seq:push(function()
+    local ur = View.forge_upgraded_card_rects(self_)[index]
+    if ur then
+      self_:spawn_burst(ur.x + ur.w / 2, ur.y + ur.h / 2, Theme.accent, FORGE_BURST_PARTICLE_COUNT)
+    end
+    Sfx.play("forge_impact")
+  end)
+  self:finish_forge(FORGE_UPGRADE_HOLD_PAUSE)
 end
 
 --- "Passer" -- seule option valide quand aucune carte n'est proposée (deck
