@@ -77,8 +77,8 @@ local function post_combat_click(controller, x, y)
     return true
   end
   if controller.screen == "refuge" then
-    if controller.refuge and View.point_in(View.refuge_continue_button, x, y) then
-      controller:confirm_refuge()
+    if controller.refuge and View.point_in(View.refuge_rest_button, x, y) then
+      controller:choose_refuge_rest()
     end
     return true
   end
@@ -189,6 +189,10 @@ local function mousepressed_tap(controller, x, y, button)
     for i, r in ipairs(rects) do
       if View.point_in(r, x, y) and controller:draft_card_ready(i) then controller:choose_draft_card(i); return end
     end
+    -- "Ne rien prendre" (2026-08-30, demande explicite) : voir View.draft_skip_button.
+    if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then
+      controller:skip_draft()
+    end
     return
   end
 
@@ -204,7 +208,7 @@ local function mousepressed_tap(controller, x, y, button)
   -- par Game.select_card) ; une autre carte -> échange la sélection ; tout le
   -- reste -> valide la carte en attente.
   if state.pending and state.pending.awaiting_confirm_kind then
-    local hand_id = View.hand_hit(state, x, y)
+    local hand_id = View.hand_hit(state, x, y, View.hand_hiding_uids(controller))
     if hand_id then controller:select_card(hand_id)
     else controller:confirm_pending() end
     return
@@ -232,7 +236,7 @@ local function mousepressed_tap(controller, x, y, button)
 
   -- Sélection/désélection d'une carte de la main (toujours possible tant
   -- qu'aucune cible n'est en cours de résolution).
-  local hand_id = View.hand_hit(state, x, y)
+  local hand_id = View.hand_hit(state, x, y, View.hand_hiding_uids(controller))
   if hand_id then controller:select_card(hand_id) end
 end
 
@@ -260,6 +264,10 @@ local function mousepressed_arrow(controller, x, y, button)
     for i, r in ipairs(rects) do
       if View.point_in(r, x, y) and controller:draft_card_ready(i) then controller:choose_draft_card(i); return end
     end
+    -- "Ne rien prendre" (2026-08-30, demande explicite) : voir View.draft_skip_button.
+    if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then
+      controller:skip_draft()
+    end
     return
   end
 
@@ -273,7 +281,7 @@ local function mousepressed_arrow(controller, x, y, button)
   -- annule tout" du mode flèche (juste en dessous) : ici, un clic hors main
   -- CONFIRME, il n'annule jamais.
   if state.pending and state.pending.awaiting_confirm_kind then
-    local hand_id = View.hand_hit(state, x, y)
+    local hand_id = View.hand_hit(state, x, y, View.hand_hiding_uids(controller))
     if hand_id then controller:select_card(hand_id)
     else controller:confirm_pending() end
     return
@@ -305,7 +313,7 @@ local function mousepressed_arrow(controller, x, y, button)
   end
 
   -- Pas de carte en attente : un clic sur la main la sélectionne.
-  local hand_id = View.hand_hit(state, x, y)
+  local hand_id = View.hand_hit(state, x, y, View.hand_hiding_uids(controller))
   if hand_id then controller:select_card(hand_id) end
 end
 
@@ -334,7 +342,7 @@ local function post_combat_hovering(controller, x, y)
     return false
   end
   if controller.screen == "refuge" then
-    return controller.refuge ~= nil and View.point_in(View.refuge_continue_button, x, y)
+    return controller.refuge ~= nil and View.point_in(View.refuge_rest_button, x, y)
   end
   if controller.screen == "forge" then
     local f = controller.forge
@@ -403,6 +411,7 @@ local function is_hovering_clickable_tap(controller, x, y)
     for i, r in ipairs(rects) do
       if View.point_in(r, x, y) and controller:draft_card_ready(i) then return true end
     end
+    if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then return true end
     return false
   end
 
@@ -428,7 +437,7 @@ local function is_hovering_clickable_tap(controller, x, y)
     end
   end
 
-  return View.hand_hit(state, x, y) ~= nil
+  return View.hand_hit(state, x, y, View.hand_hiding_uids(controller)) ~= nil
 end
 
 -- Contrairement au mode tap, une zone/cible invalide ANNULE au clic (voir
@@ -451,6 +460,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
     for i, r in ipairs(rects) do
       if View.point_in(r, x, y) and controller:draft_card_ready(i) then return true end
     end
+    if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then return true end
     return false
   end
 
@@ -476,7 +486,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
     return false
   end
 
-  return View.hand_hit(state, x, y) ~= nil
+  return View.hand_hit(state, x, y, View.hand_hiding_uids(controller)) ~= nil
 end
 
 function Input.is_hovering_clickable(controller, x, y)
@@ -597,7 +607,7 @@ function Input.mousemoved(controller, x, y)
   local state = controller.state
 
   if controller.input_mode == "arrow" then
-    local hovered_uid = View.hand_hit(state, x, y)
+    local hovered_uid = View.hand_hit(state, x, y, View.hand_hiding_uids(controller))
     controller:set_arrow_hand_hover(hovered_uid)
   end
 
@@ -618,7 +628,7 @@ function Input.mousemoved(controller, x, y)
   -- (voir plus haut dans ce fichier), ceci ajoute juste le survol.
   if View.point_in(View.end_turn_button, x, y) then controller:set_hover("end_turn", nil); return end
 
-  local hover_uid = View.hand_hit(state, x, y)
+  local hover_uid = View.hand_hit(state, x, y, View.hand_hiding_uids(controller))
   if hover_uid then
     for _, c in ipairs(state.hand) do
       if c.uid == hover_uid then controller:set_hover("card", c.def); return end

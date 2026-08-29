@@ -1585,6 +1585,23 @@ function Controller:choose_draft_card(index)
   self:enter_post_combat_sequence()
 end
 
+--- "Ne rien prendre" (2026-08-30, demande explicite -- "si le joueur ne veut
+-- gagner aucune des cartes proposées, il peut cliquer sur le bouton 'ne rien
+-- prendre' [...] à la place de cliquer sur une carte") : ferme l'écran sans
+-- ajouter de carte au deck. `self.last_drafted_uid` remis à nil (2026-08-30) :
+-- sans carte gagnée ICI, une valeur laissée par un draft plus ancien
+-- exclurait à tort une carte d'un combat précédent des choix de la Forge qui
+-- suit (voir Controller:enter_forge_screen) -- seule "la carte tout juste
+-- gagnée" doit jamais être exclue, pas "la dernière jamais gagnée".
+function Controller:skip_draft()
+  if self.screen ~= "draft" or not self.draft_picks then return end
+  Combat.log(self.state, "Aucune carte gagnée.", "sys")
+  self.draft_picks = nil
+  self.last_drafted_uid = nil
+  self.card_anims = {}
+  self:enter_post_combat_sequence()
+end
+
 -- ---------- forge / temple (post-combat) ----------
 
 --- Choisit ET lance l'UNIQUE évènement "camp" de ce combat gagné (2026-08-30,
@@ -1740,26 +1757,37 @@ end
 -- aucun choix à faire) -- l'écran reste affiché le temps que le joueur
 -- clique "Continuer", juste pour qu'il ait le temps de voir le résultat
 -- avant d'enchaîner.
+--- N'applique PLUS le soin ici (2026-08-30, bug signalé -- "il faut quand
+-- même une action joueur, au moins 1 clic, pour déclencher le soin. Il faut
+-- donc ajouter un bouton 'se reposer'") : avant, le soin avait lieu ICI, à
+-- l'entrée sur l'écran, avant même que le joueur ne voie ses PV réels --
+-- c'est d'ailleurs ce qui donnait l'impression d'une barre de vie "déjà
+-- pleine" (bug signalé séparément, même cause racine). Le soin réel vit
+-- maintenant dans Controller:choose_refuge_rest, déclenché par le bouton
+-- "Se reposer" (voir View.refuge_rest_button/Input.lua).
 function Controller:enter_refuge_screen()
   self.screen = "refuge"
-  local healed = {}
+  self.refuge = { resolved = false, healed = {} }
+end
+
+--- "Se reposer" (2026-08-30) : SEULE action possible sur cet écran -- soigne
+-- toute l'équipe de 30% des PV max puis enchaîne (droit sur le Boss si c'est
+-- le Refuge obligatoire de fin de run borné, voir Controller:
+-- advance_to_next_combat), même idiome "1 clic résout tout" que le feu de
+-- camp/la Forge/le Temple -- pas de bouton "Continuer" séparé. `resolved`
+-- garde contre un double-clic pendant la pause de résolution (même principe
+-- que forge_choosable/campfire_choosable).
+function Controller:choose_refuge_rest()
+  if self.screen ~= "refuge" or not self.refuge or self.refuge.resolved then return end
+  self.refuge.resolved = true
   for _, h in ipairs(self.state.heroes) do
     local amount = Combat.grant_heal(h, h.max_hp * REFUGE_HEAL_FRACTION)
-    healed[h.id] = amount
+    self.refuge.healed[h.id] = amount
     if amount > 0 then
       Combat.log(self.state, h.name .. " se repose au Refuge (+" .. amount .. " PV).", "heal")
     end
   end
-  self.refuge = { healed = healed }
   Sfx.play("heal")
-end
-
---- "Continuer" (2026-08-30) : seule action possible sur cet écran, le soin a
--- déjà eu lieu à l'entrée (voir enter_refuge_screen) -- referme l'écran et
--- enchaîne (droit sur le Boss si c'est le Refuge obligatoire de fin de run
--- borné, voir Controller:advance_to_next_combat).
-function Controller:confirm_refuge()
-  if self.screen ~= "refuge" or not self.refuge then return end
   local self_ = self
   self.seq:push(function() end, POST_COMBAT_RESOLVE_PAUSE)
   self.seq:push(function()

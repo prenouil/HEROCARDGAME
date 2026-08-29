@@ -163,13 +163,36 @@ end
 -- la portée lexicale d'un `local function` ne remonte pas avant sa
 -- déclaration) : sans risque, cette fonction n'est appelée qu'au clic/survol
 -- réel, bien après le chargement complet du module.
-function View.hand_hit(state, x, y)
+-- `hiding_uids` (optionnel, 2026-08-30, bug signalé -- "au début du combat,
+-- avant la pioche des cartes, je peux déjà avoir accès aux info bulles des
+-- cartes, alors qu'elles ne sont pas encore dans ma main") : state.hand est
+-- rempli de façon SYNCHRONE avant même que l'animation de vol ne démarre
+-- (voir Controller:play_turn_start_sequence) -- sans ce filtre, une carte
+-- pouvait être survolée/cliquée à SA position finale avant même d'y être
+-- visuellement arrivée. Même ensemble que draw_hand (voir View.hand_hiding_uids,
+-- désormais la SEULE source de vérité pour "cette carte est-elle vraiment là
+-- pour de vrai" -- jamais un 2ᵉ calcul qui pourrait diverger).
+function View.hand_hit(state, x, y, hiding_uids)
   local rects = View.hand_rects(state)
   for i = #state.hand, 1, -1 do
     local c = state.hand[i]
-    if View.point_in(rects[c.uid], x, y) then return c.uid end
+    if not (hiding_uids and hiding_uids[c.uid]) and View.point_in(rects[c.uid], x, y) then return c.uid end
   end
   return nil
+end
+
+--- Uids de state.hand encore "cachés" (vol pioche -> main pas terminé, voir
+-- Controller:animate_draw/pending_draw_uids) -- calculé UNE FOIS ici, utilisé
+-- à la fois par draw_hand (rendu, ci-dessous) et View.hand_hit (hit-test,
+-- ci-dessus, via Input.lua) : les deux doivent toujours s'accorder, "visible"
+-- et "cliquable/survolable" ne doivent jamais diverger.
+function View.hand_hiding_uids(controller)
+  local hiding_uids = {}
+  for _, a in ipairs(controller.card_anims) do
+    if a.fade_in and a.uid then hiding_uids[a.uid] = true end
+  end
+  for uid in pairs(controller.pending_draw_uids) do hiding_uids[uid] = true end
+  return hiding_uids
 end
 
 -- Réduites de 50% (2026-08-27, demande explicite) : la pioche/défausse
@@ -356,9 +379,11 @@ end
 
 -- Écran "Le Refuge" (2026-08-30, nouvel évènement -- "pas de choix, tous les
 -- persos vont regagner 30% de leurs PV") : même rangée de 4 que le feu de
--- camp, mais purement informative ici (le soin a déjà eu lieu à l'entrée sur
--- l'écran, voir Controller:enter_refuge_screen) -- un seul bouton
--- "Continuer" fait avancer, pas de clic sur un aventurier.
+-- camp. "Se reposer", pas "Continuer" (2026-08-30, bug signalé -- "il faut
+-- quand même une action joueur, au moins 1 clic, pour déclencher le soin") :
+-- ce bouton déclenche maintenant le soin lui-même (voir Controller:
+-- choose_refuge_rest), pas de clic sur un aventurier individuel (toute
+-- l'équipe est soignée d'un coup, "pas de choix").
 local REFUGE_HERO_W, REFUGE_HERO_H = 150, 170
 local REFUGE_HERO_Y = 240
 function View.refuge_hero_rects(controller)
@@ -367,8 +392,8 @@ function View.refuge_hero_rects(controller)
   for i, h in ipairs(controller.state.heroes) do out[h.id] = rects[i] end
   return out
 end
-View.refuge_continue_button = {
-  x = W / 2 - 100, y = REFUGE_HERO_Y + REFUGE_HERO_H + 20, w = 200, h = 44, label = "Continuer",
+View.refuge_rest_button = {
+  x = W / 2 - 100, y = REFUGE_HERO_Y + REFUGE_HERO_H + 20, w = 200, h = 44, label = "Se reposer",
 }
 
 -- Écran "Choisis ton équipe" (2026-08-29, avant chaque run -- 4 aventuriers
@@ -1602,17 +1627,14 @@ local function draw_hand(controller)
   -- on voit la carte "déjà là" pendant que le fantôme la rejoint. Le vrai
   -- rendu de la carte reste donc masqué tant que SON vol d'arrivée n'est pas
   -- terminé (voir Controller:animate_draw, qui pose `uid` sur ces entrées).
-  local hiding_uids = {}
-  for _, a in ipairs(controller.card_anims) do
-    if a.fade_in and a.uid then hiding_uids[a.uid] = true end
-  end
   -- Cartes déjà dans state.hand mais dont le vol pioche -> main n'a pas
   -- encore démarré (2026-08-21, bug signalé -- pendant l'attente de l'anim
   -- d'énergie ou d'un remélange défausse -> pioche en cours de pioche) : sans
   -- ça, elles s'affichaient "déjà là" en pleine opacité avant de disparaître
   -- puis revoler depuis la pioche au moment où leur vol démarrait vraiment.
-  -- Voir Controller.pending_draw_uids.
-  for uid in pairs(controller.pending_draw_uids) do hiding_uids[uid] = true end
+  -- Calcul partagé avec View.hand_hit (2026-08-30, voir View.hand_hiding_uids) --
+  -- jamais 2 calculs séparés qui pourraient diverger.
+  local hiding_uids = View.hand_hiding_uids(controller)
 
   local function draw_one(c, popped)
     local r = rects[c.uid]
@@ -2609,16 +2631,18 @@ end
 
 --- Écran "Le Refuge" (2026-08-30, nouvel évènement -- demande explicite :
 -- "pas de choix, tous les persos vont regagner 30% de leurs PV") : le soin
--- est déjà appliqué à l'entrée sur l'écran (voir Controller:
--- enter_refuge_screen/self.refuge.healed) -- cet affichage montre donc le
--- montant RÉELLEMENT reçu, pas une prévision (contrairement au feu de camp,
--- où le choix n'est pas encore fait). Un seul bouton "Continuer", aucun
--- aventurier cliquable.
+-- n'a PLUS lieu à l'entrée sur l'écran (2026-08-30, bug signalé -- "il faut
+-- quand même une action joueur, au moins 1 clic" -- voir Controller:
+-- choose_refuge_rest) -- avant le clic sur "Se reposer", affiche donc une
+-- PRÉVISION (même formule que draw_campfire ci-dessus, PV réels pas encore
+-- modifiés) ; une fois `rf.resolved` vrai, affiche le montant RÉELLEMENT
+-- reçu (self.refuge.healed, posé par choose_refuge_rest). Aucun aventurier
+-- cliquable individuellement -- "pas de choix", toute l'équipe à la fois.
 local function draw_refuge(controller)
   local rf = controller.refuge
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
   text("Le Refuge", 0, 60, W, 24, Theme.text)
-  text("Toute l'équipe se repose (30% des PV max).", 0, 92, W, 12, Theme.muted)
+  text("Toute l'équipe va se reposer (30% des PV max).", 0, 92, W, 12, Theme.muted)
 
   local rects = View.refuge_hero_rects(controller)
   for _, h in ipairs(controller.state.heroes) do
@@ -2632,11 +2656,16 @@ local function draw_refuge(controller)
     local palette = Theme.card_class[h.class_id] or Theme.card_class.generic
     name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
     text(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 110, r.w, 11, Theme.muted, "center")
-    local healed = (rf and rf.healed[h.id]) or 0
+    local healed
+    if rf.resolved then
+      healed = rf.healed[h.id] or 0
+    else
+      healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
+    end
     text("+" .. healed .. " PV", r.x, r.y + 126, r.w, 13, Theme.heal, "center")
   end
 
-  local b = View.refuge_continue_button
+  local b = View.refuge_rest_button
   set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
   set(Theme.bg); text(b.label, b.x, b.y + 14, b.w, 14, Theme.bg, "center")
 end
@@ -3293,6 +3322,17 @@ function View.draw(controller)
         end
         love.graphics.pop()
       end
+
+      -- "Ne rien prendre" (2026-08-30, demande explicite -- "si le joueur ne
+      -- veut gagner aucune des cartes proposées, il peut cliquer sur le
+      -- bouton... à la place de cliquer sur une carte") : sous la rangée de
+      -- cartes, voir View.draft_skip_button/Controller:skip_draft.
+      local sb = View.draft_skip_button
+      set(Theme.panel_light); love.graphics.rectangle("fill", sb.x, sb.y, sb.w, sb.h, 8, 8)
+      set(Theme.muted); love.graphics.setLineWidth(2)
+      love.graphics.rectangle("line", sb.x, sb.y, sb.w, sb.h, 8, 8)
+      love.graphics.setLineWidth(1)
+      text(sb.label, sb.x, sb.y + 14, sb.w, 14, Theme.text, "center")
     end
   elseif controller.screen == "campfire" and controller.campfire then
     draw_campfire(controller)
@@ -3319,5 +3359,10 @@ function View.draft_rects(controller)
   if not controller.draft_picks or not controller.draft_cards_shown then return {} end
   return centered_row(#controller.draft_picks, 130, 190, 140, 24)
 end
+
+-- "Ne rien prendre" (2026-08-30, demande explicite) : sous la rangée de
+-- cartes (y=140, hauteur 190, voir View.draft_rects ci-dessus) -- position
+-- fixe, ne dépend pas du nombre de cartes proposées (toujours centrée).
+View.draft_skip_button = { x = W / 2 - 100, y = 350, w = 200, h = 44, label = "Ne rien prendre" }
 
 return View

@@ -256,10 +256,18 @@ function Combat.grant_defense(target_unit, base, ctx)
 end
 
 --- `ctx` (optionnel) : même convention que Combat.grant_defense ci-dessus.
+-- Renvoie le montant RÉELLEMENT appliqué, pas la demande brute (2026-08-30,
+-- bug signalé -- "j'ai l'impression que la barre de vie est pleine" au
+-- Refuge : un héros déjà à PV pleins affichait quand même "+7 PV" -- l'ancien
+-- code renvoyait `amount` avant plafonnement, jamais le vrai delta). La
+-- plupart des appelants (cartes, voir cards.lua) ignorent cette valeur de
+-- retour ; seuls Controller:choose_campfire_hero/choose_refuge_rest s'en
+-- servent pour l'affichage "+X PV" -- les deux veulent le montant réel.
 function Combat.grant_heal(target_unit, base, ctx)
   local amount = round(consume_inspiration(base, ctx))
-  target_unit.hp = math.min(target_unit.max_hp, target_unit.hp + amount)
-  return amount
+  local applied = math.min(target_unit.max_hp, target_unit.hp + amount) - target_unit.hp
+  target_unit.hp = target_unit.hp + applied
+  return applied
 end
 
 -- Seule porte d'entrée pour poser un statut depuis un effet de carte : ne
