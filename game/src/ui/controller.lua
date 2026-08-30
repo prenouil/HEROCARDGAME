@@ -372,6 +372,11 @@ function Controller.new()
   -- temps de se voir). Voir ENEMY_DEATH_CRACK_DURATION/EXPLODE_DURATION plus
   -- bas et draw_enemy (view.lua), seul lecteur.
   self.enemy_death = {}
+  -- Victoire en attente de la fin des explosions (2026-08-30, demande
+  -- explicite -- voir Controller:handle_combat_victory/all_enemy_deaths_settled,
+  -- consommé par Controller:update) : false tant qu'aucune victoire n'a
+  -- encore été déclenchée.
+  self.pending_victory = false
   -- [hero_id] = { t = elapsed } (2026-08-30, demande explicite -- "à la mort
   -- de l'un d'eux ... que le héros s'éteigne doucement pour atteindre l'état
   -- actuel") : créée UNE SEULE FOIS par Controller:update dès qu'un héros
@@ -1277,9 +1282,15 @@ function Controller:play_amnesie_vanish(rect, def)
   Sfx.play("ash")
 end
 
-function Controller:pop_status(unit_id, key)
+-- `delay` (optionnel, 2026-08-30, demande explicite -- "si il y a plusieurs
+-- cibles [...] il faut légèrement décaler le début de l'animation") : élan
+-- initial NÉGATIF plutôt qu'un vrai minuteur à part -- la même boucle
+-- `t = t + dt` (Controller:update, inchangée) fait déjà remonter `t` vers 0
+-- puis au-delà, status_badge (view.lua) traite tout `pop_t < 0` comme "pas
+-- encore son tour" (rendu normal, sans pop ni écho) jusque-là.
+function Controller:pop_status(unit_id, key, delay)
   self.status_pop[unit_id] = self.status_pop[unit_id] or {}
-  self.status_pop[unit_id][key] = 0
+  self.status_pop[unit_id][key] = -(delay or 0)
 end
 
 --- Gros chiffre d'énergie qui se pose sur sa pastille en début de tour
@@ -1423,8 +1434,10 @@ end
 -- absorbé par ce fondu quand il vient d'intercepter un coup (voir
 -- Controller:react_to_diff) -- nil sur un simple gain de Défense, voir
 -- draw_shield_fx (view.lua), seul endroit qui l'affiche.
-function Controller:spawn_shield_fx(unit_id, amount)
-  self.shield_fx[unit_id] = { t = 0, amount = amount }
+-- `delay` (optionnel, 2026-08-30) : même idiome que Controller:pop_status
+-- ci-dessus -- voir son commentaire.
+function Controller:spawn_shield_fx(unit_id, amount, delay)
+  self.shield_fx[unit_id] = { t = -(delay or 0), amount = amount }
 end
 
 --- Compare PV + statuts avant/après un appel de règles et en déduit tous les
@@ -1443,13 +1456,34 @@ end
 -- superposés. `opts.skip_shield_sfx` : évite un faux "shting" quand la
 -- Défense retombe à 0 en début de tour (Game.start_turn), qui n'est pas un
 -- blocage de dégâts. Remplace l'ancien shake_from_diff, mêmes points d'appel.
+-- Décalage entre plusieurs cibles touchées par le MÊME effet (2026-08-30,
+-- demande explicite -- "si il y a plusieurs cibles [...] il faut légèrement
+-- décaler le début de l'animation") : pas assez pour ralentir la lecture
+-- d'un coup d'œil, juste assez pour que l'œil perçoive un balayage plutôt
+-- qu'un pop uniforme sur toute l'équipe à la fois.
+local STATUS_POP_STAGGER = 0.08
 function Controller:react_to_diff(before, opts)
   opts = opts or {}
   local hit_sfx = (opts.dmg_type == "magique") and "hit_magic" or "hit_physical"
   local hit_played, shield_played = false, false
+  -- Un délai PAR UNITÉ affectée (2026-08-30, voir STATUS_POP_STAGGER
+  -- ci-dessus), pas par statut individuel -- une même unité qui gagne 2
+  -- statuts d'un coup les pop ENSEMBLE, seule la SUIVANTE (une autre unité)
+  -- décale son tour. Calculé PARESSEUSEMENT (`unit_delay`, mémoïsé dans
+  -- `delay`) : une unité qui ne gagne finalement rien ne consomme jamais de
+  -- rang dans l'ordre d'apparition.
+  local affected_count = 0
   local function react(u)
     local b = before[u.id]
     if not b then return end
+    local delay
+    local function unit_delay()
+      if not delay then
+        delay = affected_count * STATUS_POP_STAGGER
+        affected_count = affected_count + 1
+      end
+      return delay
+    end
     if u.hp < b.hp then
       self:pulse(u.id, "shake")
       self:spawn_floater(u.id, u.hp - b.hp, "damage")
@@ -1467,16 +1501,45 @@ function Controller:react_to_diff(before, opts)
       self:spawn_floater(u.id, u.discretion - b.discretion, "discretion")
     end
     for _, k in ipairs(STATUS_KEYS) do
-      if (u[k] or 0) > b[k] then self:pop_status(u.id, k) end
+      if (u[k] or 0) > b[k] then self:pop_status(u.id, k, unit_delay()) end
     end
     local defense_before, defense_now = b.defense or 0, u.defense or 0
     local absorbed = defense_before - defense_now
     if defense_now > defense_before then
-      self:spawn_shield_fx(u.id)
+      self:spawn_shield_fx(u.id, nil, unit_delay())
       if not shield_played then Sfx.play("shield"); shield_played = true end
     elseif not opts.skip_shield_sfx and absorbed > 0 then
-      self:spawn_shield_fx(u.id, absorbed)
+      self:spawn_shield_fx(u.id, absorbed, unit_delay())
       if not shield_played then Sfx.play("shield"); shield_played = true end
+    end
+  end
+  for _, h in ipairs(self.state.heroes) do react(h) end
+  for _, e in ipairs(self.state.enemies) do react(e) end
+end
+
+--- Décroissance de fin de tour (2026-08-30, demande explicite -- "tous les
+-- effets qui doivent perdre 1 [...] doivent le montrer de manière dynamique,
+-- avec un petit effet et un -1 qui descend doucement en fade") : jusqu'ici,
+-- Game.decay_end_of_turn_statuses (Incapacité/Vulnérabilité) ne déclenchait
+-- AUCUN retour visuel, contrairement à un gain (voir Controller:react_to_diff/
+-- pop_status ci-dessus) -- même "petit effet" sur le badge (pop_status,
+-- réutilisé tel quel) + un flottant DÉDIÉ qui descend en s'effaçant
+-- (kind="decay", voir draw_floaters dans view.lua -- tous les autres
+-- flottants montent, celui-ci descend délibérément, pour se lire comme "qui
+-- s'éteint" plutôt que "qui arrive"). Scindée de react_to_diff (pas juste un
+-- 3ᵉ appel dedans) : ce diff-ci porte sur un instantané DIFFÉRENT
+-- (decay_before, pris juste avant Game.decay_end_of_turn_statuses), jamais le
+-- même `before` que le reste du tour.
+local DECAY_KEYS = { "incapacite", "vulnerabilite" }
+function Controller:react_to_status_decay(before)
+  local function react(u)
+    local b = before[u.id]
+    if not b then return end
+    for _, k in ipairs(DECAY_KEYS) do
+      if (u[k] or 0) < b[k] then
+        self:pop_status(u.id, k)
+        self:spawn_floater(u.id, (u[k] or 0) - b[k], "decay")
+      end
     end
   end
   for _, h in ipairs(self.state.heroes) do react(h) end
@@ -1624,6 +1687,14 @@ function Controller:update(dt)
       end
       Sfx.play("enemy_death")
     end
+  end
+  -- Victoire différée jusqu'à la fin des explosions (2026-08-30, voir
+  -- Controller:handle_combat_victory ci-dessous) : vérifiée ICI, juste après
+  -- avoir avancé toutes les séquences de mort ci-dessus, pour basculer
+  -- l'écran dès la frame où la dernière explosion se termine plutôt qu'avec
+  -- 1 frame de retard.
+  if self.pending_victory and self:all_enemy_deaths_settled() then
+    self:handle_combat_victory_now()
   end
   for _, keys in pairs(self.status_pop) do
     for k, t in pairs(keys) do
@@ -1800,7 +1871,9 @@ function Controller:advance_after_discard_sequenced(pre_pause)
 
     self_.seq:push(function()
       if self_.state.over then return end
+      local decay_before = self_:snapshot_units()
       Game.decay_end_of_turn_statuses(self_.state)
+      self_:react_to_status_decay(decay_before)
       if Game.check_defeat(self_.state) then self_:enter_defeat_screen(); return end
       -- Discrétion de l'Assassin (2026-08-24) : "+5 s'IL termine le tour sans
       -- avoir joué de carte lui-même" -- doit lire played_card_this_turn
@@ -1841,7 +1914,37 @@ end
 -- chemin normal (draft -> feu de camp -> combat suivant) et le boss (aucun des
 -- deux, juste un bref titre puis retour au menu -- state.run.is_boss est posé
 -- par Game.start_boss_test/start_boss_combat, jamais par ce fichier).
+-- Différée (2026-08-30, demande explicite -- "quand le dernier ennemi est
+-- vaincu, il faut attendre la fin de l'explosion pour afficher la victoire
+-- et le draft") : Game.check_victory se déclenche dès que le dernier ennemi
+-- tombe à 0 PV, bien AVANT que sa traînée de PV/sa fissure/son explosion
+-- (voir self.enemy_death, Controller:update) n'aient eu le temps de se
+-- jouer -- ne bascule donc plus l'écran tout de suite, pose juste
+-- self.pending_victory, consommé par Controller:update dès que tous les
+-- ennemis à 0 PV ont fini d'exploser (voir all_enemy_deaths_settled
+-- ci-dessous) -- TOUS les appelants (victoire normale, restauration de
+-- snapshot déjà "over", victoire instantanée de debug) passent par ce même
+-- chemin, jamais un chemin immédiat séparé qui pourrait resurgir un jour et
+-- recréer le bug.
 function Controller:handle_combat_victory()
+  self.pending_victory = true
+end
+
+--- Vrai si aucun ennemi à 0 PV n'est encore en train de "mourir" visuellement
+-- (traînée de PV pas encore rattrapée, ou fissure/explosion pas encore
+-- terminée) -- voir Controller:update, seul lecteur (via self.pending_victory).
+function Controller:all_enemy_deaths_settled()
+  for _, e in ipairs(self.state.enemies) do
+    if e.hp <= 0 then
+      local d = self.enemy_death[e.id]
+      if not (d and d.exploded) then return false end
+    end
+  end
+  return true
+end
+
+function Controller:handle_combat_victory_now()
+  self.pending_victory = false
   if self.state.run.is_boss then
     self:enter_boss_victory()
   else

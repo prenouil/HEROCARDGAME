@@ -362,11 +362,15 @@ Cards.list = {
       Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 2, "magique", ctx)
       Combat.apply_status(ctx.hero, "mana", 1)
     end,
+    -- Gagne 2 mana en version améliorée (2026-08-30, demande explicite --
+    -- avant, 1 mana comme la version de base, seuls les dégâts montaient) :
+    -- donne enfin à l'amélioration un intérêt sur SA ressource propre, pas
+    -- seulement sur les dégâts infligés.
     upgrade = {
-      desc = 'Inflige 3 "etincelle" à un ennemi. Gagne 1 mana.',
+      desc = 'Inflige 3 "etincelle" à un ennemi. Gagne 2 mana.',
       effect = function(ctx)
         Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 3, "magique", ctx)
-        Combat.apply_status(ctx.hero, "mana", 1)
+        Combat.apply_status(ctx.hero, "mana", 2)
       end,
     },
   },
@@ -378,11 +382,13 @@ Cards.list = {
       Combat.grant_defense(ctx.target, 2, ctx)
       Combat.apply_status(ctx.hero, "mana", 1)
     end,
+    -- Gagne 2 mana en version améliorée (2026-08-30, demande explicite --
+    -- même correctif que "Main de feu" ci-dessus, voir son commentaire).
     upgrade = {
-      desc = 'L\'allié gagne 3 "bouclier". Gagne 1 mana.',
+      desc = 'L\'allié gagne 3 "bouclier". Gagne 2 mana.',
       effect = function(ctx)
         Combat.grant_defense(ctx.target, 3, ctx)
-        Combat.apply_status(ctx.hero, "mana", 1)
+        Combat.apply_status(ctx.hero, "mana", 2)
       end,
     },
   },

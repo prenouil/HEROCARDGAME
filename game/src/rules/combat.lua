@@ -147,8 +147,16 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
       if cat == "feu" then is_fire = true break end
     end
   end
-  local amount = round(base * Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire))
-  amount = consume_inspiration(amount, ctx)
+  -- Additif AVANT multiplicatif (2026-08-30, demande explicite -- "les bonus
+  -- en addition, comme l'inspiration, doivent être appliqués AVANT les bonus
+  -- en multiplication, comme la vulnérabilité") : Inspiration (+6 flat)
+  -- grossit d'abord `base`, la Vulnérabilité/Puissance/Incapacité (toutes
+  -- multiplicatives, voir Combat.damage_multiplier) s'appliquent ENSUITE sur
+  -- ce total -- l'ordre inverse (avant ce correctif) laissait le bonus flat
+  -- d'Inspiration hors de portée du multiplicateur. Même ordre repris côté
+  -- aperçu (voir preview_desc, view.lua), pour ne jamais diverger.
+  local amount = consume_inspiration(base, ctx)
+  amount = round(amount * Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire))
 
   local absorbed = 0
   if not opts.brut then

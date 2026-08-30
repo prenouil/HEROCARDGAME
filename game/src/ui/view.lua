@@ -698,7 +698,12 @@ local function status_badge(status_key, abbr, value, x, y, w, size, color, pop_t
   local cx, cy = x + size * 0.55, y + size / 2
   local scale = 1
   local p = nil
-  if pop_t and pop_duration then
+  -- `pop_t < 0` (2026-08-30, demande explicite -- décalage entre plusieurs
+  -- cibles touchées d'un coup, voir Controller:pop_status/react_to_diff) :
+  -- l'icône n'a pas encore "son tour", rendue normalement (aucun pop/écho)
+  -- jusqu'à ce que `pop_t` atteigne 0 -- jamais un `p` négatif, qui ferait
+  -- grossir le badge sans limite au lieu de simplement ne rien animer.
+  if pop_t and pop_t >= 0 and pop_duration then
     p = math.min(1, pop_t / pop_duration)
     scale = 1 + 0.5 * (1 - p)
   end
@@ -832,6 +837,9 @@ end
 local function draw_shield_fx(controller, unit_id, r)
   local s = controller.shield_fx[unit_id]
   if not s then return end
+  -- `s.t < 0` (2026-08-30, décalage multi-cibles, voir Controller:
+  -- spawn_shield_fx/react_to_diff) : pas encore "son tour", rien à dessiner.
+  if s.t < 0 then return end
   local dur = controller.shield_fx_duration
   local t = s.t
   local alpha
@@ -1568,20 +1576,19 @@ end
 
 local function preview_desc(def, hero, target)
   local text = def.desc
+  -- Additif (Inspiration) AVANT multiplicatif (Puissance/Incapacité/
+  -- Vulnérabilité) -- 2026-08-30, demande explicite, même ordre que
+  -- Combat.deal_damage (voir son commentaire) : l'aperçu doit rester
+  -- IDENTIQUE à la résolution réelle, jamais un calcul divergent.
+  if hero and (hero.inspiration or 0) > 0 then
+    for _, kw in ipairs(INSPIRATION_KEYWORDS_ORDERED) do
+      if Glossary.has_keyword(def.desc, kw) then text = add_near_keyword(text, kw, 6) break end
+    end
+  end
   local dmg_mult = Combat.damage_multiplier(hero, target, def.dmg_type, card_is_fire(def))
   if dmg_mult ~= 1 then
     for kw in pairs(DAMAGE_KEYWORDS) do
       if Glossary.has_keyword(def.desc, kw) then text = scale_near_keyword(text, kw, dmg_mult) end
-    end
-  end
-  -- Inspiration (2026-08-29, demande explicite -- "le bonus doit être
-  -- calculé et affiché automatiquement dès que le joueur sélectionne la
-  -- carte") : `hero` ici est TOUJOURS le lanceur (previewing_hero, voir
-  -- draw_hand) -- le même hero.inspiration que consume_inspiration lira
-  -- réellement à la résolution, jamais un calcul divergent.
-  if hero and (hero.inspiration or 0) > 0 then
-    for _, kw in ipairs(INSPIRATION_KEYWORDS_ORDERED) do
-      if Glossary.has_keyword(def.desc, kw) then text = add_near_keyword(text, kw, 6) break end
     end
   end
   return text
@@ -2272,7 +2279,11 @@ local FLOATER_RISE = 34
 -- teinte propre (Theme.discretion, déjà celle du texte "DISCR N" sous le
 -- portrait) pour qu'un flottant de Discrétion ne se confonde jamais avec un
 -- vrai soin.
-local FLOATER_COLOR = { damage = "hp", heal = "heal", discretion = "discretion" }
+-- "decay" (2026-08-30, demande explicite -- décroissance de fin de tour,
+-- Incapacité/Vulnérabilité -- voir Controller:react_to_status_decay) : teinte
+-- neutre/éteinte (Theme.muted), jamais une couleur de statut précise -- ce
+-- flottant marque juste "un effet perd 1 point", pas lequel.
+local FLOATER_COLOR = { damage = "hp", heal = "heal", discretion = "discretion", decay = "muted" }
 -- Retour du porteur de projet (2026-08-09) : les dégâts doivent taper plus
 -- fort visuellement -- police nettement plus grosse + un zoom qui dépasse puis
 -- se stabilise (ease_out_back, déjà utilisé pour le titre "Victoire !", pas
@@ -2290,7 +2301,11 @@ local function draw_floaters(controller)
   for _, f in ipairs(controller.floaters) do
     local p = math.min(1, f.t / controller.floater_duration)
     local ease = 1 - (1 - p) ^ 2
-    local y = f.y - ease * FLOATER_RISE
+    -- "decay" DESCEND, tous les autres montent (2026-08-30, demande
+    -- explicite -- "un -1 qui descend doucement en fade") : signe inversé
+    -- sur FLOATER_RISE plutôt qu'une 2ᵉ constante, même vitesse/même courbe
+    -- dans les 2 sens.
+    local y = f.kind == "decay" and (f.y + ease * FLOATER_RISE) or (f.y - ease * FLOATER_RISE)
     local alpha = 1 - p * p
     set(Theme[FLOATER_COLOR[f.kind]] or Theme.text, alpha)
     if f.kind == "damage" then
@@ -3074,6 +3089,19 @@ local function draw_temple(controller)
       elseif not eligible then
         text(t.type == "blessing" and "Déjà béni" or "Déjà maudit", r.x, r.y + 112, r.w, 11, Theme.muted)
       end
+      -- "?" manquant (2026-08-30, bug signalé -- "pour les aventuriers, il
+      -- n'y a pas le '?' ni les info bulles") : la rangée de statues juste
+      -- au-dessus en a un (voir plus haut, draw_tooltip_hint), jamais posé
+      -- ici -- Input.mousemoved fait pourtant déjà de chaque portrait une
+      -- vraie cible de survol (kind "hero", voir son commentaire), seul le
+      -- rendu du hint manquait. Même garde `not anim` que les statues :
+      -- plus de survol/tooltip une fois la fusion lancée.
+      if not anim then
+        love.graphics.push()
+        love.graphics.translate(r.x, r.y)
+        draw_tooltip_hint(r.w, r.h, Theme.text)
+        love.graphics.pop()
+      end
     end
   end
 
@@ -3721,6 +3749,20 @@ function View.draw(controller)
     elseif controller.screen == "forge" and controller.forge then draw_forge(controller)
     elseif controller.screen == "temple" and controller.temple then draw_temple(controller)
     elseif controller.screen == "refuge" and controller.refuge then draw_refuge(controller)
+    end
+    -- Infobulles (2026-08-30, bug signalé -- "dans le Temple, il n'y a pas
+    -- d'info bulle sur les statues, pourtant le '?' est bien présent") :
+    -- régression du découpage de View.draw ci-dessus (2026-08-30, même
+    -- jour) -- l'appel à draw_tooltip vivait plus bas dans cette fonction,
+    -- gardé par une condition qui incluait "forge"/"temple" -- en dispatchant
+    -- ces 2 écrans à part, tôt, avec un retour anticipé, ce bas de fonction
+    -- (jamais modifié lui) est devenu inatteignable pour eux : le "?" (dessiné
+    -- DANS draw_forge/draw_temple) restait visible, mais plus aucun appel ne
+    -- venait jamais lire controller.hover pour composer le contenu de la
+    -- bulle elle-même. Campfire/Refuge n'ont jamais eu de tooltip (aucune
+    -- régression à corriger là).
+    if controller.screen == "forge" or controller.screen == "temple" then
+      draw_tooltip(controller)
     end
     draw_deck_view(controller)
     love.graphics.setColor(1, 1, 1, 1)
