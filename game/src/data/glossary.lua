@@ -38,6 +38,10 @@ Glossary.terms = {
   { key = "vulnerabilite", icon = nil, has_icon = false, related = "", explain = "Reçoit +25% de dégâts, -1 Vulnérabilité au début de chaque tour." },
   { key = "camoufle", icon = nil, has_icon = false, related = "", explain = "Ne peut pas être ciblé par un ennemi. Reste tant qu'un allié est en vie et jusqu'à jouer une carte." },
   { key = "puissance", icon = nil, has_icon = false, related = "", explain = "Les attaques physiques gagnent +25%, -1 Puissance au début de chaque tour." },
+  -- "Vol" (2026-08-30, second boss -- l'Aigle Géant, voir enemies.lua) : ne
+  -- décroît PAS tout seul (contrairement à Incapacité/Vulnérabilité
+  -- ci-dessus) -- seule "Charge en Piqué" le retire, voir Game.resolve_enemy_action.
+  { key = "vol", icon = nil, has_icon = false, related = "", explain = "Les dégâts de type \"épée\" (physique) sont réduits à 0. Retiré par Charge en Piqué." },
   -- Discrétion (2026-08-24, ressource propre à l'Assassin, DISTINCTE de
   -- Camouflé -- voir hero.discretion/Game.gain_discretion dans game.lua) :
   -- pas un statut de combat classique (pas de décroissance de fin de tour),

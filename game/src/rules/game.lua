@@ -61,6 +61,16 @@ end
 -- "+5 si un allié passe son tour sans agir") -- PAS une réintroduction de
 -- l'ancien has_acted (retiré 2026-08-20, un héros agit toujours librement
 -- plusieurs fois par tour), jamais lu pour gater une action.
+-- Mana de départ du Mage (2026-08-30, demande explicite -- "le Mage démarre
+-- CHAQUE combat à mana_start, qui est de 2 !") : UNE SEULE constante,
+-- utilisée à la fois par fresh_hero (tout premier combat d'un run) ET
+-- carried_hero (chaque combat suivant, voir plus bas) -- avant ce correctif,
+-- carried_hero remettait le Mana à 0 au lieu de le remonter à ce niveau
+-- (confusion avec Corruption/Discrétion, qui elles repartent bien à 0 -- le
+-- Mana est un cas à part : une réserve remise à un niveau FIXE non nul à
+-- chaque combat, pas une ressource qui démarre vide).
+local MAGE_MANA_START = 2
+
 local function fresh_hero(def)
   return {
     id = def.id, class_id = def.class_id, name = def.name, icon = def.icon, label = def.label, max_hp = def.max_hp,
@@ -79,7 +89,7 @@ local function fresh_hero(def)
     -- Game.schedule_shield, seul point d'entrée pour y ajouter une entrée.
     scheduled_shields = {},
     played_card_this_turn = false,
-    mana = def.class_id == "mage" and 2 or nil,
+    mana = def.class_id == "mage" and MAGE_MANA_START or nil,
     discretion = def.class_id == "assassin" and 0 or nil,
     -- Corruption (2026-08-29, ressource propre au Nécromancien, voir
     -- Combat.deal_damage pour le gain automatique par PV perdu) : même
@@ -199,7 +209,23 @@ local function carried_hero(h)
   -- ne doit pas hériter du même oubli).
   n.inspiration = 0; n.inspiration_shielded_turns = 0; n.encore_extra_plays = nil
   n.scheduled_damages = {}
+  -- Discrétion (Assassin) (2026-08-30, bug confirmé -- "Mana et Discrétion
+  -- doivent repartir à 0 à chaque combat") : même traitement que Corruption
+  -- juste au-dessus -- ressource propre à une classe, mais qui NE doit PAS
+  -- survivre d'un combat à l'autre, contrairement aux PV. Oubliée ici depuis
+  -- l'origine (voir reference_reset-ressource-par-combat.md côté
+  -- agent_content, qui documentait déjà ce bug) -- Corruption avait été
+  -- corrigée sans que celle-ci le soit, jamais une bonne raison à ce
+  -- qu'elles se comportent différemment.
+  if n.discretion ~= nil then n.discretion = 0 end
   if n.corruption ~= nil then n.corruption = 0 end
+  -- Mana (Mage) (2026-08-30, correction du correctif précédent -- "c'est une
+  -- erreur de ma part, le Mage démarre CHAQUE combat à mana_start, qui est
+  -- de 2 !") : PAS un simple reset à 0 comme Discrétion/Corruption
+  -- ci-dessus -- une remise à niveau FIXE non nulle, même MAGE_MANA_START
+  -- que fresh_hero (voir sa définition, tout premier combat d'un run) --
+  -- jamais 2 sources de vérité pour cette valeur.
+  if n.mana ~= nil then n.mana = MAGE_MANA_START end
   apply_combat_start_temple_effects(n)
   return n
 end
@@ -1067,12 +1093,32 @@ function Game.resolve_enemy_action(state, e)
       local label = Enemies.status_labels[move.status_key] or move.status_key
       Combat.log(state, e.name .. " inflige " .. label .. " " .. move.amount .. " à " .. target.name .. ".", "foe")
     end
+  elseif move.kind == "buff-self" then
+    -- Générique, PAS spécifique à l'Aigle Géant malgré son seul usage actuel
+    -- (2026-08-30, "Envol") : même mutation directe que "debuff" ci-dessus
+    -- (jamais Combat.apply_status, réservée aux effets de CARTE -- voir son
+    -- commentaire dans combat.lua) -- un futur ennemi qui se buffe lui-même
+    -- réutilise ce kind tel quel, sans repasser par ici.
+    e[move.status_key] = (e[move.status_key] or 0) + move.amount
+    Combat.log(state, e.name .. " " .. (move.log_text or "se transforme") .. ".", "foe")
+    -- `dmg_all_amount` (optionnel, 2026-08-30, demande explicite -- "Envol
+    -- doit faire des dégâts faibles sur tous les aventuriers") : même
+    -- résolution que le kind "dmg-all" ci-dessous (Onde Sylvestre), juste
+    -- greffée sur ce buff plutôt qu'un kind séparé -- un statut ET des
+    -- dégâts à toute l'équipe, dans le MÊME move.
+    if move.dmg_all_amount then
+      resolve_enemy_attack_all(state, e, move.dmg_all_amount)
+    end
   elseif move.kind == "dmg" then
     resolve_enemy_attack(state, e, move.amount, move.brut)
     if move.bleed then
       local target = Combat.hero_by_id(state, e.target_hero_id)
       if target and target.hp > 0 then target.saignements = (target.saignements or 0) + move.bleed end
     end
+    -- "Charge en Piqué" de l'Aigle Géant (2026-08-30, `move.lands`) : générique
+    -- comme "buff-self" ci-dessus -- un coup qui "atterrit" annule "Vol" (ou
+    -- tout futur statut similaire), quel que soit l'ennemi qui le porte.
+    if move.lands then e.vol = 0 end
   elseif move.kind == "dmg-all" then
     resolve_enemy_attack_all(state, e, move.amount)
   elseif move.kind == "revive" then

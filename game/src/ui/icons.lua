@@ -232,6 +232,40 @@ local function draw_shaman(cx, cy, r, color)
   love.graphics.polygon("fill", cx - r * 0.18, cy + r * 0.55, cx + r * 0.18, cy + r * 0.55, cx, cy + r * 0.85)
 end
 
+--- Aigle Géant AU SOL, ailes repliées (2026-08-30, second boss -- "il
+-- possède 2 images : 1 à terre, et 1 en vol") : corps ovale compact + tête +
+-- bec + ailes plaquées le long du corps -- volontairement TRÈS différente de
+-- draw_eagle_flying juste en dessous (silhouette large, ailes déployées),
+-- pour que le changement d'état (e.vol, voir enemies.lua/game.lua) se voie
+-- d'un coup d'œil, pas seulement via le badge "Vol" (voir draw_status_vol
+-- plus bas).
+local function draw_eagle(cx, cy, r, color)
+  set(color)
+  love.graphics.ellipse("fill", cx, cy + r * 0.15, r * 0.5, r * 0.7)
+  love.graphics.circle("fill", cx, cy - r * 0.6, r * 0.3)
+  love.graphics.polygon("fill", cx + r * 0.26, cy - r * 0.65, cx + r * 0.68, cy - r * 0.55, cx + r * 0.26, cy - r * 0.45)
+  love.graphics.polygon("fill", cx - r * 0.45, cy - r * 0.05, cx - r * 0.85, cy + r * 0.3, cx - r * 0.3, cy + r * 0.5)
+  love.graphics.polygon("fill", cx + r * 0.45, cy - r * 0.05, cx + r * 0.85, cy + r * 0.3, cx + r * 0.3, cy + r * 0.5)
+end
+
+--- Aigle Géant EN VOL, ailes déployées (2026-08-30) : silhouette large en
+-- rapace vu de face, tête + bec + grandes ailes en éventail de chaque côté --
+-- voir draw_eagle ci-dessus pour le contraste recherché.
+local function draw_eagle_flying(cx, cy, r, color)
+  set(color)
+  love.graphics.circle("fill", cx, cy - r * 0.15, r * 0.28)
+  love.graphics.polygon("fill", cx + r * 0.2, cy - r * 0.2, cx + r * 0.55, cy - r * 0.3, cx + r * 0.2, cy - r * 0.08)
+  love.graphics.polygon("fill",
+    cx, cy - r * 0.15,
+    cx - r * 0.95, cy - r * 0.55,
+    cx - r * 0.55, cy + r * 0.05,
+    cx - r * 0.15, cy - r * 0.1,
+    cx, cy + r * 0.75,
+    cx + r * 0.15, cy - r * 0.1,
+    cx + r * 0.55, cy + r * 0.05,
+    cx + r * 0.95, cy - r * 0.55)
+end
+
 local DRAW_BY_ENEMY = {
   gobelin = draw_goblin,
   squelette = draw_skull,
@@ -243,6 +277,8 @@ local DRAW_BY_ENEMY = {
   golem = draw_golem,
   bandit = draw_bandit,
   chaman = draw_shaman,
+  aigle = draw_eagle,
+  ["aigle-vol"] = draw_eagle_flying,
 }
 
 --- Dessine la silhouette de l'ennemi (template_id, ex. "gobelin") centrée en
@@ -445,6 +481,22 @@ local function draw_status_encore(cx, cy, r, color, alpha)
   love.graphics.polygon("fill", ax, ay, ax - r * 0.28, ay - r * 0.05, ax - r * 0.05, ay + r * 0.28)
 end
 
+--- Ailes déployées (2026-08-30, statut "Vol" de l'Aigle Géant -- voir
+-- Combat.damage_multiplier) : chevron élargi façon ailes + corps, distinct de
+-- toutes les autres silhouettes de statut ci-dessus (aucune n'évoque le vol).
+local function draw_status_vol(cx, cy, r, color, alpha)
+  set(color, alpha)
+  love.graphics.polygon("fill",
+    cx, cy - r * 0.15,
+    cx - r * 0.9, cy - r * 0.7,
+    cx - r * 0.5, cy - r * 0.05,
+    cx - r * 0.15, cy - r * 0.15,
+    cx, cy + r * 0.75,
+    cx + r * 0.15, cy - r * 0.15,
+    cx + r * 0.5, cy - r * 0.05,
+    cx + r * 0.9, cy - r * 0.7)
+end
+
 local DRAW_BY_STATUS = {
   defense = draw_status_defense,
   esquive = draw_status_esquive,
@@ -462,6 +514,7 @@ local DRAW_BY_STATUS = {
   malus = draw_status_malus,
   inspiration = draw_status_inspiration,
   encore = draw_status_encore,
+  vol = draw_status_vol,
 }
 
 --- Dessine l'icône d'un statut (clé Lua, ex. "defense", "esquive"...) centrée

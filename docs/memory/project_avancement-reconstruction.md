@@ -1,0 +1,44 @@
+---
+name: avancement-reconstruction
+description: État d'avancement de la reconstruction des documents de design (docs/design/) depuis le code, et URL de l'Artifact combiné "tableur".
+metadata:
+  type: project
+---
+
+Le "tableur" (6 onglets : Classes, Cartes de classes, Glossaire, Bestiaire, Temple, Événements) a été entièrement reconstruit le 2026-08-30, à partir d'une relecture fraîche du code (`game/src/data/heroes.lua`, `cards.lua`, `glossary.lua`, `enemies.lua`, `game/src/rules/encounter.lua`, `combat.lua`, `temple.lua`, `forge.lua`, `draft.lua`, `game/src/ui/controller.lua`).
+
+**Fichiers Markdown git-suivis (source de vérité)** dans `C:\Claude\HEROCARDGAME\docs\design\` :
+- `classes.md` — roster des 6 classes, PV, ressources propres.
+- `cartes.md` — 36 cartes (6 classes × 6), format Nom/Classe/Palier/Coût/Mots-clés/Texte base/Texte amélioré.
+- `glossaire.md` — 25 termes du glossaire (icônes cosmétiques + statuts/mécaniques texte).
+- `bestiaire.md` — 10 ennemis du mode Infini + 2 boss (Homme Arbre, Aigle Géant), composition de rencontre et courbe de difficulté.
+- `temple.md` — 8 bénédictions + 8 malédictions.
+- `evenements.md` — Feu de camp / Refuge / Forge (sélection, conditions de déclenchement, séquencement complet post-combat).
+
+**Artifact combiné publié (URL stable, à republier sur la même URL lors des mises à jour)** : https://claude.ai/code/artifact/7554fe23-0c31-4dfb-b10d-cc589dfc1345 — titre "Codex Hero Card Game" (à garder stable sur les prochaines republications). Page HTML à onglets cliquables (Classes/Cartes de classes/Glossaire/Bestiaire/Statues de Temple/Événements), contenu HTML statique (tables écrites en dur, pas de JS de rendu de données ni de fetch externe — seul le switch d'onglet est en JS). Le fichier source de l'artifact vit dans le scratchpad de session (temporaire) — pour une republication future, régénérer le HTML depuis les 6 .md ci-dessus plutôt que de chercher à relire l'ancien fichier scratchpad (qui ne survit pas d'une session à l'autre).
+
+**Limite d'environnement notée le 2026-08-30** : agent_doc n'a pas d'outil shell/bash dans cet environnement (seulement Read/Write/Edit/Glob/Grep/WebFetch/WebSearch/Artifact) — impossible de faire un `git mv`/renommage de fichier sur disque. Un "renommage de document" demandé par l'utilisateur (ex. temple.md → "Statues de Temple") se traite donc en éditant le titre/contenu interne du fichier existant, PAS en renommant le fichier lui-même — `docs/design/temple.md` reste le nom de fichier même quand son titre affiché change.
+
+**Reste à faire** (demande explicite de l'utilisateur, prochaine étape) : document de règles (`docs/design/regles.md`) — boucle de jeu, structure d'un run, ressources, résolution de combat, ordre de calcul additif/multiplicatif, conditions de victoire/défaite. Pas commencé — l'utilisateur veut d'abord valider les 6 tableaux ci-dessus.
+
+**Corrections apportées le 2026-08-30 suite au retour utilisateur sur les 5 écarts signalés** (`classes.md`/`cartes.md` + Artifact republiés) :
+- Roster 40 héros (GDD BMAD) : reformulé comme roadmap future hors périmètre, pas une contradiction.
+- "Transcendance" : confirmé intégralement retirée.
+- "Pouvoir de Classe" (ancien système automatique) : nuancé classe par classe plutôt qu'une affirmation globale "retiré" — Nécromancien (Corruption)/Mage (Mana)/Assassin (Discrétion)/Barde (Inspiration) ont une mécanique/ressource propre qui joue un rôle comparable ; Guerrier et Paladin n'en ont aucune.
+- Bug Mana/Discrétion non reset entre combats : CORRIGÉ côté code entre-temps par la session principale (`carried_hero` dans `game.lua` traite désormais `discretion`/`corruption` en les remettant à 0 — voir précision Mana ci-dessous, distincte).
+- Barde jouable : commentaire trompeur de `cards.lua` corrigé côté code par la session principale. Plus aucune réserve dans `cartes.md`.
+- "Avalanche de coups"/"Se cacher" (valeurs 4→6) : confirmées correctes telles quelles, plus de flag "à confirmer".
+- Bestiaire/Temple/Événements : confirmés sans réserve, aucun changement.
+
+**Correction ultérieure (même jour) sur le Mana du Mage** : ma première passe avait documenté à tort "Mana repart à 0 entre 2 combats, sauf le 1er combat de la run qui démarre à 2" — FAUX, corrigé après retour utilisateur. Le code (`game/src/rules/game.lua`) introduit une constante dédiée `MAGE_MANA_START = 2`, utilisée à la fois par `fresh_hero` (1er combat) ET `carried_hero` (chaque combat suivant, boss compris) : `if n.mana ~= nil then n.mana = MAGE_MANA_START end`, PAS un reset à 0. Le Mana est donc un cas à part parmi les ressources propres : une remise à niveau FIXE non nulle à CHAQUE combat (même principe que l'Énergie d'équipe en début de tour), contrairement à Discrétion/Corruption qui elles repartent bien à 0. `classes.md` et l'Artifact ont été corrigés en conséquence.
+
+**3 corrections supplémentaires (même jour) — glossaire.md, temple.md, evenements.md + Artifact republiés :**
+1. **Icônes du Glossaire fausses** : ma première passe recopiait le champ `icon` de `glossary.lua` (emoji Unicode, ex. "⚔️") comme si c'était l'icône réellement affichée en jeu. FAUX — le rendu réel (`RichText.draw` → `Sprites.keyword`, `game/src/ui/richtext.lua`/`sprites.lua`) charge un PNG pixel-art dédié dans `game/assets/icons/keywords/<clé>.png` (16 fichiers). Le champ `icon` n'est qu'une métadonnée de design jamais consommée par ce chemin de rendu — même le commentaire en tête de `glossary.lua` le dit déjà ("`label` : repli texte utilisé par la UI LÖVE ... `icon` reste la vraie donnée de design ... pour un rendu capable de les afficher plus tard"), preuve qu'il fallait vérifier le chemin de rendu réel avant de recopier ce champ. `glossaire.md`/Artifact corrigés : la colonne "Icône" cite désormais le fichier PNG réel. Cas particulier "mana" : seul terme "à icône" SANS PNG dédié (`Sprites.keyword` échoue silencieusement via `pcall`), retombe sur du texte brut sans icône en jeu — signalé explicitement.
+2. **Onglet "Temple" renommé "Statues de Temple"** (contenu inchangé). Limite technique notée : agent_doc n'a pas d'outil shell/bash dans cet environnement, donc pas de `git mv` possible — le fichier reste nommé `docs/design/temple.md` sur disque, seul le titre interne (`# Statues de Temple`) et le nom d'onglet dans l'Artifact ont changé.
+3. **Entrée Temple ajoutée dans `evenements.md`** (nouvel onglet "Le Temple", entre Forge et Refuge) : décrit le comportement de l'écran (déclenchement via `Temple.any_type_viable`, tirage du type, jusqu'à 3 effets proposés, aventuriers éligibles, confirmation obligatoire) SANS re-détailler chaque bénédiction/malédiction — renvoi croisé vers `temple.md`. `evenements.md` en-tête mis à jour ("couvre 4 évènements").
+
+**Correction du 2026-08-30 (mana) — `glossaire.md` + Artifact republiés :** l'utilisateur a créé `game/assets/icons/keywords/mana.png` et mis les guillemets sur les 4 mentions `"mana"` dans `cards.lua` (Main de feu/Barrière). Les 17 termes "à icône" ont désormais tous un PNG — "mana" n'est plus signalé comme exception. Demande complémentaire de l'utilisateur (afficher l'ICÔNE elle-même, pas le nom de fichier, dans l'Artifact) : tentée via `Artifact action:"upload_asset"` sur les 17 PNG, échec systématique `unavailable_to_account` (voir `reference_upload-asset-indisponible.md`) — l'Artifact affiche donc toujours le nom de fichier, avec une note explicite sur cette limite de compte plutôt qu'une fausse image.
+
+**Pourquoi :** évite de refaire un audit complet du code à chaque nouvelle demande — on repart des .md déjà reconstruits + une relecture ciblée du code concerné.
+
+**Comment l'appliquer :** au début de toute future session agent_doc, lire ce fichier pour savoir quels documents existent déjà et où en est la reconstruction, avant de proposer un plan.

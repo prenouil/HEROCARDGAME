@@ -69,18 +69,34 @@ function Encounter.instantiate_enemy(template, level, uid_gen, rng)
     max_hp = max_hp, hp = max_hp,
     shield_rolled = template.shield_base and Enemies.roll_scaled(template.shield_base, level, rng) or 0,
     defense = 0, saignements = 0, incapacite = 0, vulnerabilite = 0,
+    -- "Vol" (2026-08-30, second boss -- l'Aigle Géant, voir enemies.lua) :
+    -- 0/absent pour tout le monde par défaut, comme les autres champs de
+    -- statut ci-dessus -- seul l'Aigle le fait réellement varier (voir
+    -- Game.resolve_enemy_action, kind == "buff-self"/"dmg" avec `move.lands`).
+    vol = 0,
     defending = false, defend_cycle = false, took_damage_this_turn = false, took_fire_damage_this_turn = false,
     next_move = nil, target_hero_id = nil,
   }
 end
 
---- Rencontre fixe du boss (2026-08-21, demande explicite) : 1 Homme Arbre +
--- 4 Pousses d'Arbre, jamais tirée par le budget aléatoire (voir "boss_only"
--- sur ces 2 templates dans enemies.lua, filtré hors du pool de
--- Encounter.generate_encounter par random_pool ci-dessus) -- toujours niveau
--- 1, que le combat soit lancé depuis "Tester le boss" ou en fin d'un run
--- borné à 5 combats (voir Game.start_boss_test/Game.start_boss_combat).
+--- Rencontre fixe du boss (2026-08-21, demande explicite -- ÉTENDUE le
+-- 2026-08-30, "il faudrait un deuxième boss : un aigle géant") : tire au sort
+-- ENTRE les 2 boss disponibles à chaque appel (même `rng` que le reste de la
+-- rencontre, state.rng.encounter -- voir Game.start_boss_test/
+-- start_boss_combat, donc reproductible à l'identique pour un seed de run
+-- donné, comme tout le reste ici) -- jamais mêlée à la génération normale du
+-- mode Infini (voir "boss_only" sur ces templates dans enemies.lua, filtré
+-- hors du pool de Encounter.generate_encounter par random_pool ci-dessus).
 function Encounter.boss_encounter(uid_gen, rng)
+  if rng:random() < 0.5 then
+    return Encounter.homme_arbre_encounter(uid_gen, rng)
+  end
+  return Encounter.aigle_encounter(uid_gen, rng)
+end
+
+--- 1 Homme Arbre + 4 Pousses d'Arbre, toujours niveau 1 -- voir le
+-- commentaire de Encounter.boss_encounter ci-dessus.
+function Encounter.homme_arbre_encounter(uid_gen, rng)
   local homme_arbre = Enemies.by_id("homme-arbre")
   local pousse = Enemies.by_id("pousse")
   -- Ordre [pousse, pousse, homme-arbre, pousse, pousse] (2026-08-21, demande
@@ -96,6 +112,16 @@ function Encounter.boss_encounter(uid_gen, rng)
     instances[#instances + 1] = Encounter.instantiate_enemy(pousse, 1, uid_gen, rng)
   end
   return instances
+end
+
+--- L'Aigle Géant, seul (2026-08-30, demande explicite -- "il faudrait un
+-- deuxième boss : un aigle géant") : contrairement à l'Homme Arbre, aucun
+-- sbire -- tout son budget de PV/tours est porté par lui seul (voir
+-- enemies.lua, hp_base plus haut que celui de l'Homme Arbre pour compenser
+-- l'absence de sbires à abattre séparément).
+function Encounter.aigle_encounter(uid_gen, rng)
+  local aigle = Enemies.by_id("aigle")
+  return { Encounter.instantiate_enemy(aigle, 1, uid_gen, rng) }
 end
 
 function Encounter.summary(enemies)

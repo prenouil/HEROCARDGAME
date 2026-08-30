@@ -250,7 +250,14 @@ local ASH_PARTICLE_COUNT = 10
 -- avec le flottant de Discrétion (voir Controller:react_to_diff).
 local FURTIF_SPARKLE_COUNT = 5
 -- Champs de statut comparés avant/après pour déclencher le pop.
-local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "camoufle", "provocation" }
+-- "vol" (2026-08-30, second boss -- l'Aigle Géant) : ajouté ici pour que
+-- Controller:react_to_diff détecte automatiquement le gain (à "Envol", voir
+-- Game.resolve_enemy_action) et déclenche le petit pop d'arrivée du badge
+-- (Controller:pop_status), comme tout autre statut -- JAMAIS ajouté à
+-- Game.decay_end_of_turn_statuses : contrairement à Incapacité/Vulnérabilité,
+-- "Vol" ne décroît pas tout seul d'un tour à l'autre, seule "Charge en Piqué"
+-- (move.lands) le retire.
+local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "camoufle", "provocation", "vol" }
 
 function Controller.new()
   local self = setmetatable({}, Controller)

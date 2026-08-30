@@ -357,7 +357,7 @@ Cards.list = {
   {
     code = "flameche", name = "Main de feu", class_id = "mage", tier = "depart", cost = 1, mana_cost = 0,
     cats = { "melee", "degats", "feu" }, dmg_type = "magique", target = "enemy",
-    desc = 'Inflige 2 "etincelle" à un ennemi. Gagne 1 mana.',
+    desc = 'Inflige 2 "etincelle" à un ennemi. Gagne 1 "mana".',
     effect = function(ctx)
       Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 2, "magique", ctx)
       Combat.apply_status(ctx.hero, "mana", 1)
@@ -367,7 +367,7 @@ Cards.list = {
     -- donne enfin à l'amélioration un intérêt sur SA ressource propre, pas
     -- seulement sur les dégâts infligés.
     upgrade = {
-      desc = 'Inflige 3 "etincelle" à un ennemi. Gagne 2 mana.',
+      desc = 'Inflige 3 "etincelle" à un ennemi. Gagne 2 "mana".',
       effect = function(ctx)
         Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 3, "magique", ctx)
         Combat.apply_status(ctx.hero, "mana", 2)
@@ -377,7 +377,7 @@ Cards.list = {
   {
     code = "barriere", name = "Barrière", class_id = "mage", tier = "depart", cost = 1, mana_cost = 0,
     cats = { "defense" }, dmg_type = nil, target = "ally",
-    desc = 'L\'allié gagne 2 "bouclier". Gagne 1 mana.',
+    desc = 'L\'allié gagne 2 "bouclier". Gagne 1 "mana".',
     effect = function(ctx)
       Combat.grant_defense(ctx.target, 2, ctx)
       Combat.apply_status(ctx.hero, "mana", 1)
@@ -385,7 +385,7 @@ Cards.list = {
     -- Gagne 2 mana en version améliorée (2026-08-30, demande explicite --
     -- même correctif que "Main de feu" ci-dessus, voir son commentaire).
     upgrade = {
-      desc = 'L\'allié gagne 3 "bouclier". Gagne 2 mana.',
+      desc = 'L\'allié gagne 3 "bouclier". Gagne 2 "mana".',
       effect = function(ctx)
         Combat.grant_defense(ctx.target, 3, ctx)
         Combat.apply_status(ctx.hero, "mana", 2)
@@ -752,8 +752,13 @@ Cards.list = {
   },
 
   -- ---------- Barde ----------
-  -- Conçues avec agent_content (2026-08-29, voir content/memory/) -- PAS
-  -- encore jouables en jeu, même statut que le Nécromancien ci-dessus.
+  -- Conçues avec agent_content (2026-08-29, voir content/memory/) --
+  -- sélectionnable à l'écran de choix d'équipe comme n'importe quelle autre
+  -- classe (2026-08-30, correction -- l'ancien commentaire ici affirmait à
+  -- tort "pas encore jouable", contredit par Heroes.defs/
+  -- Controller:enter_team_select ET par le commentaire du Nécromancien
+  -- juste au-dessus, déjà correct -- confirmé explicitement par le porteur
+  -- de projet : Barde et Nécromancien sont tous deux pleinement jouables).
   -- "Inspiration" est un statut GÉNÉRIQUE (voir hero.inspiration, game.lua/
   -- combat.lua) : n'importe quel héros peut le porter, c'est le coeur de la
   -- synergie INTER-classes du Barde (jouer une carte Barde PUIS une carte

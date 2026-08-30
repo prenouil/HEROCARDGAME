@@ -108,7 +108,26 @@ end
 -- "physique", voir Main de feu côté cards.lua). Seule cible connue à ce jour :
 -- l'Homme Arbre, identifié par template_id (même convention que la Régénération
 -- du Troll un peu plus bas dans game.lua).
+-- "Vol" de l'Aigle Géant (2026-08-30, demande explicite -- "Vol : les dégâts
+-- de Type 'épée' sont réduits à 0"). "Type épée" == `dmg_type == "physique"`
+-- (2026-08-30) : le glossaire n'a aucune notion mécanique distincte entre
+-- épée/dague/etc, le mot-clé "epee" affiché sur les cartes est purement
+-- cosmétique -- Guerrier ET Assassin l'utilisent tous les deux pour leurs
+-- dégâts "physique" -- voir cards.lua. La magie (Mage/Nécromancien) reste
+-- pleinement efficace pendant que l'Aigle vole. Prédicat partagé (au lieu
+-- d'un court-circuit isolé dans damage_multiplier) pour que Combat.deal_damage
+-- puisse aussi l'appliquer en toute fin de calcul (2026-08-30, préférence
+-- explicite -- "quelles que soient les calculs intermédiaires, le résultat
+-- sera 0", pour nullifier même une addition future qui interviendrait après
+-- le multiplicateur).
+function Combat.is_immune_physical(target_unit, dmg_type)
+  return target_unit ~= nil and (target_unit.vol or 0) > 0 and dmg_type == "physique"
+end
+
 function Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire)
+  if Combat.is_immune_physical(target_unit, dmg_type) then
+    return 0
+  end
   local pct = 0
   if source_unit and (source_unit.puissance or 0) > 0 and dmg_type == "physique" then
     pct = pct + 0.25 * source_unit.puissance -- Puissance (Assassin, via Assassinat/En traître) : par stack
@@ -157,6 +176,14 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
   -- aperçu (voir preview_desc, view.lua), pour ne jamais diverger.
   local amount = consume_inspiration(base, ctx)
   amount = round(amount * Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire))
+  -- Filet de sécurité final pour "Vol" (2026-08-30) : la mise à 0 vit déjà
+  -- dans Combat.damage_multiplier (pour que l'aperçu de dégâts affiche 0 lui
+  -- aussi, voir preview_desc dans view.lua), mais on la réaffirme ici en dur
+  -- sur `amount`, tout calcul intermédiaire fait, pour garantir qu'aucun
+  -- bonus additif ne puisse jamais survivre au blocage de "Vol".
+  if Combat.is_immune_physical(target_unit, dmg_type) then
+    amount = 0
+  end
 
   local absorbed = 0
   if not opts.brut then

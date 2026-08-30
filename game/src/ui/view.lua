@@ -1245,6 +1245,20 @@ local function enemy_telegraph_parts(state, e)
     -- lui-même ou un autre ennemi -- une seule icône "bonus" neutre pour les
     -- 3, le détail reste dans l'infobulle.
     return { title = move.name, icon_source = "status", icon_key = "bonus" }
+  elseif move.kind == "buff-self" then
+    -- "Envol" de l'Aigle Géant (2026-08-30) : icône du statut posé lui-même
+    -- (ex. "vol", voir DRAW_BY_STATUS dans icons.lua) plutôt que le "bonus"
+    -- générique ci-dessus -- le joueur voit directement CE QUI arrive
+    -- (l'icône de Vol), pas juste "quelque chose de positif", puisqu'il n'y a
+    -- ici qu'une seule variante possible par ennemi (pas 3 comme soin/
+    -- résurrection à distinguer). `body` (2026-08-30, demande explicite --
+    -- "Envol doit faire des dégâts faibles sur tous les aventuriers") :
+    -- montre ces dégâts secondaires quand `move.dmg_all_amount` existe, même
+    -- format "X à tous" que le kind "dmg-all" plus bas -- ajustés côté
+    -- attaquant seulement (Puissance/Incapacité de l'Aigle), jamais une
+    -- Vulnérabilité par héros (héros multiples, comme dmg-all).
+    local body = move.dmg_all_amount and (Combat.round(move.dmg_all_amount * Combat.damage_multiplier(e, nil, "physique")) .. " à tous") or nil
+    return { title = move.name, body = body, icon_source = "status", icon_key = move.status_key or "bonus" }
   elseif move.kind == "conditional-retaliate" then
     -- Bug signalé (2026-08-09) : contrairement à dmg/debuff juste au-dessus,
     -- cette branche n'affichait jamais la cible (`e.target_hero_id`, pourtant
@@ -1448,7 +1462,15 @@ local function draw_enemy(controller, e, r)
   -- 20 pour garder exactement le même bas (contact avec la barre de PV
   -- au-dessus à y=20, contact avec la rangée de badges en dessous à y=82) --
   -- aucun autre élément du cadre n'a besoin de bouger.
-  draw_enemy_icon(e.template_id, e.icon, e.label, 0, 20, r.w, 62, Theme.text)
+  -- Image au sol/en vol (2026-08-30, second boss -- l'Aigle Géant, "il
+  -- possède 2 images : 1 à terre, et 1 en vol") : clé dérivée de `e.vol`
+  -- plutôt que `e.template_id` seul -- voir Sprites.enemy/DRAW_BY_ENEMY
+  -- ("aigle-vol"), qui suivent le même schéma de chemin générique que
+  -- n'importe quel autre template_id, aucun code spécifique ajouté là-bas.
+  -- Sans effet sur tout autre ennemi (e.vol vaut 0 pour eux tous, voir
+  -- Encounter.instantiate_enemy).
+  local enemy_icon_key = (e.vol or 0) > 0 and (e.template_id .. "-vol") or e.template_id
+  draw_enemy_icon(enemy_icon_key, e.icon, e.label, 0, 20, r.w, 62, Theme.text)
   -- Position du corps du télégraphe (voir plus bas) calculée en premier :
   -- le badge de bouclier (2026-08-27, troisième retour explicite -- "ne pas
   -- cacher l'annonce d'attaque, remonter le bouclier pour qu'il soit juste
@@ -1471,6 +1493,7 @@ local function draw_enemy(controller, e, r)
     -- Défense retirée de cette rangée (2026-08-27) : affichée à part, en plus
     -- gros, voir draw_defense_badge_big appelé plus haut près du portrait.
     if e.template_id == "homme-arbre" then badges[#badges + 1] = { key = "fireweak", abbr = "FEU" } end
+    if (e.vol or 0) > 0 then badges[#badges + 1] = { key = "vol", abbr = "VOL" } end
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
     if (e.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = e.vulnerabilite } end
@@ -1986,6 +2009,9 @@ local STATUS_TOOLTIP_FIELDS = {
   { field = "incapacite", glossary_key = "incapacite" },
   { field = "vulnerabilite", glossary_key = "vulnerabilite" },
   { field = "provocation", glossary_key = "provocation" },
+  -- "Vol" (2026-08-30, second boss -- Aigle Géant) : `hide_value` (toujours
+  -- 1, jamais un compteur qui empile -- même traitement que Camouflé).
+  { field = "vol", glossary_key = "vol", label = "Vol", hide_value = true },
   -- Inspiration/Encore (2026-08-29, Barde -- voir badges dans draw_hero) :
   -- même mécanisme générique, glossary_key pointe vers les entrées ajoutées
   -- dans glossary.lua.

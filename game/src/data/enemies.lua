@@ -271,6 +271,52 @@ Enemies.templates = {
       }
     end,
   },
+  -- Deuxième boss (2026-08-30, demande explicite -- "il faudrait un deuxième
+  -- boss : un aigle géant. Il possède 2 images : 1 à terre, et 1 en vol") :
+  -- seul (aucun sbire, contrairement à l'Homme Arbre -- voir
+  -- Encounter.aigle_encounter), `hp_base` relevé en conséquence. Cycle à 2
+  -- temps : au sol, peut choisir "Envol" (kind == "buff-self", pose `vol = 1`
+  -- sur lui-même -- voir Game.resolve_enemy_action) plutôt qu'attaquer ; une
+  -- fois en vol (`e.vol > 0`), forcé sur "Charge en Piqué" (`move.lands =
+  -- true`, le fait redescendre -- `e.vol` remis à 0 à la résolution), sa
+  -- seule attaque disponible tant qu'il vole. "Vol" réduit à 0 les dégâts de
+  -- TYPE "épée" (voir Combat.damage_multiplier) -- contraint le joueur à
+  -- garder une source de dégâts magique/nécrotique sous la main pour ne pas
+  -- perdre un tour complet de DPS à chaque envol. L'image (au sol/en vol) suit
+  -- directement `e.vol`, voir draw_enemy_icon dans view.lua.
+  {
+    id = "aigle", name = "Aigle Géant", icon = "\u{1F985}", label = "AIG", hp_base = 95, cost = 65, target_mode = "random", boss_only = true,
+    choose_move = function(e, all, rng)
+      if (e.vol or 0) > 0 then
+        return { kind = "dmg", name = "Charge en Piqué", icon = "\u{1F985}", dmg_type = "melee", amount = roll_scaled(14, e.level, rng), lands = true }
+      end
+      if rng:random() < 0.35 then
+        -- Dégâts faibles à toute l'équipe (2026-08-30, demande explicite --
+        -- "Envol doit faire des dégâts faibles sur tous les aventuriers") :
+        -- `dmg_all_amount`, EN PLUS de poser "Vol" -- voir Game.resolve_enemy_action,
+        -- qui résout les 2 effets à la suite pour ce même move. Volontairement
+        -- plus bas que "Onde Sylvestre" de l'Homme Arbre (3) : Envol accorde
+        -- déjà un vrai avantage défensif (Vol), les dégâts ne sont qu'un bonus
+        -- secondaire ("un vent tranchant" au décollage), pas son intérêt principal.
+        return {
+          kind = "buff-self", name = "Envol", icon = "\u{1FA76}", status_key = "vol", amount = 1,
+          log_text = "prend son envol dans un tourbillon tranchant", dmg_all_amount = roll_scaled(2, e.level, rng),
+        }
+      end
+      if rng:random() < 0.5 then
+        return { kind = "dmg", name = "Coup de Bec", icon = "\u{1F985}", dmg_type = "melee", amount = roll_scaled(6, e.level, rng) }
+      end
+      return { kind = "dmg", name = "Serres Tranchantes", icon = "\u{1F985}", dmg_type = "melee", amount = roll_scaled(9, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F985}", name = "Coup de Bec", text = range_text(6, level) .. " dégâts à un aventurier" },
+        { icon = "\u{1F985}", name = "Serres Tranchantes", text = range_text(9, level) .. " dégâts à un aventurier" },
+        { icon = "\u{1FA76}", name = "Envol", text = 'Prend son envol : gagne "Vol" + ' .. range_text(2, level) .. ' dégâts à tous les aventuriers -- sa prochaine attaque devient obligatoirement Charge en Piqué' },
+        { icon = "\u{1F985}", name = "Charge en Piqué", text = range_text(14, level) .. ' dégâts à un aventurier -- le ramène au sol (perd "Vol")' },
+      }
+    end,
+  },
 }
 
 function Enemies.by_id(id)
