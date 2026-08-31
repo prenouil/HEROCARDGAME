@@ -38,13 +38,12 @@ local function combats_won_text(controller)
   return tostring(math.max(0, controller.state.run.combat_index - 1))
 end
 
--- H réduit de 700 à 660 (2026-08-24, demande explicite -- fenêtre trop haute,
--- ~60px inutilisés sous le dernier élément réel, hint_text à y=632) : garder
--- IMPÉRATIVEMENT ce chiffre synchronisé avec `t.window.height = 660 * SCALE`
--- dans conf.lua -- ce module ne peut pas lire cette constante-ci (conf.lua
--- s'exécute avant le chargement du reste), d'où la duplication manuelle,
--- même schéma que SCALE (voir layout_scale.lua) partagé entre les deux.
-local W, H = 960, 660
+-- 1280x720, vrai 16:9 (2026-08-31, demande explicite -- avant : 960x660,
+-- ratio 1.4545:1). W/H viennent désormais de logical_size.lua, partagé avec
+-- conf.lua (même schéma que SCALE/layout_scale.lua) -- plus de duplication
+-- manuelle des littéraux entre les deux fichiers.
+local SIZE = require("src.ui.logical_size")
+local W, H = SIZE.W, SIZE.H
 View.W, View.H = W, H
 
 -- Dupliqué depuis controller.lua (2026-08-30, compteur "X/9 avant le Boss") :
@@ -57,7 +56,11 @@ local BOUNDED_COMBAT_COUNT = 9
 -- portrait agrandi sans tasser le reste (badges, nom en bas côté héros).
 local UNIT_W, UNIT_H = 150, 168
 local CARD_W, CARD_H = 92, 138
-local ROW_GAP = 12
+-- 12->16 (2026-08-31, passage 1280x720) : léger surplus d'air horizontal entre
+-- portraits/cartes en rangée, sans forcer UNIT_W/CARD_W à grandir eux-mêmes
+-- (le fond animé -- voir Background.draw, déjà paramétrique sur W/H -- occupe
+-- naturellement les marges latérales plus généreuses à 1280 de large).
+local ROW_GAP = 16
 
 -- ---------- rects ----------
 
@@ -79,7 +82,10 @@ function View.enemy_rects(state)
   return out
 end
 
-local HERO_ROW_Y = 250 -- 238->250 (2026-08-27, demande explicite -- "descendre un peu les aventuriers")
+-- 250->270 (2026-08-31, passage 1280x720) : profite des 60px de hauteur en
+-- plus pour redonner un peu d'air entre la rangée d'ennemis et celle des
+-- aventuriers, plutôt que de garder le tassement forcé par l'ancien H=660.
+local HERO_ROW_Y = 270
 
 function View.hero_rects(state)
   local rects = centered_row(#state.heroes, UNIT_W, UNIT_H, HERO_ROW_Y)
@@ -120,11 +126,11 @@ local HAND_OVERLAP_GAP = -CARD_W * 0.22
 
 -- Redescendue, beaucoup plus bas cette fois (2026-08-27, demande explicite --
 -- "beaucoup plus bas", après un premier +15px jugé insuffisant) : 419->450.
--- Butée par le budget vertical du bas d'écran (H=660, voir plus haut) : pour
--- y arriver sans déborder, "Fin de tour" a dû rétrécir un peu (88x74->88x64,
--- voir END_TURN_BTN_W/H plus bas) -- pas redemandé, mais nécessaire pour que
--- tout tienne encore à l'écran.
-local HAND_Y = 450
+-- 450->480 (2026-08-31, passage 1280x720) : les 60px de hauteur en plus
+-- permettent de redonner de l'air ici ET de restaurer "Fin de tour" à sa
+-- taille 88x74 d'avant le tassement forcé par l'ancien H=660 (voir
+-- END_TURN_BTN_W/H plus bas).
+local HAND_Y = 480
 
 local function hand_row_fan(count, y)
   local rects = centered_row(count, CARD_W, CARD_H, y, HAND_OVERLAP_GAP)
@@ -255,7 +261,9 @@ local BOTTOM_ROW_Y = HAND_Y + CARD_H + 4
 -- désormais cette même colonne, sous "Recommencer le combat", plutôt que
 -- d'être centré seul plus bas -- même gabarit que ses 2 voisins pour former
 -- une colonne cohérente (avant : 140x26, plus large que tout le reste).
-local RESTART_BTN_W, RESTART_BTN_H, RESTART_BTN_GAP = 96, 18, 3
+-- 18/3 -> 20/4 (2026-08-31, passage 1280x720) : un peu plus de respiration,
+-- le budget vertical n'est plus aussi serré qu'avec l'ancien H=660.
+local RESTART_BTN_W, RESTART_BTN_H, RESTART_BTN_GAP = 96, 20, 4
 View.restart_turn_button = {
   x = View.deck_pile_rect.x, y = BOTTOM_ROW_Y, w = RESTART_BTN_W, h = RESTART_BTN_H, label = "Recommencer ce tour",
 }
@@ -279,7 +287,11 @@ View.instant_victory_button = {
 -- Toujours centré sur la pioche/défausse même réduites (2026-08-27) : plus
 -- large que la pile elle-même désormais, déborde symétriquement de part et
 -- d'autre -- purement cosmétique, n'affecte pas la zone cliquable de la pile.
-local END_TURN_BTN_W, END_TURN_BTN_H = 88, 64
+-- Restauré à 88x74 (2026-08-31, passage 1280x720) : c'était sa taille avant
+-- le rétrécissement forcé (88x74->88x64, 2026-08-27) par manque de budget
+-- vertical sous l'ancien H=660 -- HAND_Y descendue à 480 laisse maintenant
+-- assez de place pour revenir à la taille d'origine.
+local END_TURN_BTN_W, END_TURN_BTN_H = 88, 74
 View.end_turn_button = {
   x = View.discard_pile_rect.x + View.discard_pile_rect.w / 2 - END_TURN_BTN_W / 2,
   y = BOTTOM_ROW_Y,
@@ -297,7 +309,7 @@ local MENU_BTN_W, MENU_BTN_H, MENU_BTN_GAP = 300, 48, 18
 -- trop près du titre") : laisse un peu plus d'air sous la bannière des 6
 -- aventuriers (MENU_HERO_ROW_Y + MENU_HERO_R, voir draw_menu_flourish),
 -- ajoutée juste avant ce même écran.
-local MENU_BTN_Y0 = 250
+local MENU_BTN_Y0 = 270 -- 250->270 (2026-08-31, passage 1280x720)
 View.menu_buttons = {}
 do
   -- Ordre demandé explicitement (2026-08-30) : Jouer un run -> Mode infini ->
@@ -337,7 +349,10 @@ View.back_button = { x = W / 2 - 90, y = H / 2 + 40, w = 180, h = 40, label = "R
 -- flèche" -- avant, seule la version améliorée était montrée, empilement
 -- VERTICAL plutôt qu'un 2ᵉ jeu de 4 cartes à côté, qui ne tiendrait pas sur
 -- la largeur de l'écran, voir l'historique de ce commentaire).
-local FORGE_CARD_Y = 170
+-- 170->190 (2026-08-31, passage 1280x720) : un peu plus d'air sous le titre,
+-- toujours largement dans le budget vertical (marge encore confortable avant
+-- View.forge_skip_button, tout en bas de cette colonne).
+local FORGE_CARD_Y = 190
 local FORGE_ARROW_H = 40
 local FORGE_CARD_GAP = 30
 function View.forge_card_rects(controller)
@@ -366,7 +381,7 @@ View.forge_skip_button = {
 -- obligatoire) -- un bouton "Confirmer" à la place, actif seulement quand
 -- aventurier ET effet sont choisis (voir Controller:confirm_temple_choice).
 local TEMPLE_EFFECT_W, TEMPLE_EFFECT_H = 140, 150
-local TEMPLE_EFFECT_Y = 108
+local TEMPLE_EFFECT_Y = 120 -- 108->120 (2026-08-31, passage 1280x720)
 local TEMPLE_EFFECT_GAP = 30
 function View.temple_effect_rects(controller)
   local t = controller.temple
@@ -375,7 +390,7 @@ function View.temple_effect_rects(controller)
 end
 
 local TEMPLE_HERO_W, TEMPLE_HERO_H = 130, 136
-local TEMPLE_HERO_Y = 300
+local TEMPLE_HERO_Y = 320 -- 300->320 (2026-08-31, passage 1280x720)
 function View.temple_hero_rects(controller)
   local rects = centered_row(#controller.state.heroes, TEMPLE_HERO_W, TEMPLE_HERO_H, TEMPLE_HERO_Y)
   local out = {}
@@ -393,7 +408,7 @@ View.temple_confirm_button = {
 -- Temple qui combine 2 choix) -- mêmes dimensions que la rangée du Temple,
 -- juste plus haute à l'écran (rien au-dessus, pas de statues).
 local CAMPFIRE_HERO_W, CAMPFIRE_HERO_H = 150, 170
-local CAMPFIRE_HERO_Y = 240
+local CAMPFIRE_HERO_Y = 260 -- 240->260 (2026-08-31, passage 1280x720)
 function View.campfire_hero_rects(controller)
   local rects = centered_row(#controller.state.heroes, CAMPFIRE_HERO_W, CAMPFIRE_HERO_H, CAMPFIRE_HERO_Y)
   local out = {}
@@ -409,7 +424,7 @@ end
 -- choose_refuge_rest), pas de clic sur un aventurier individuel (toute
 -- l'équipe est soignée d'un coup, "pas de choix").
 local REFUGE_HERO_W, REFUGE_HERO_H = 150, 170
-local REFUGE_HERO_Y = 240
+local REFUGE_HERO_Y = 260 -- 240->260 (2026-08-31, passage 1280x720)
 function View.refuge_hero_rects(controller)
   local rects = centered_row(#controller.state.heroes, REFUGE_HERO_W, REFUGE_HERO_H, REFUGE_HERO_Y)
   local out = {}
@@ -438,7 +453,11 @@ local TEAM_AVAILABLE_Y = 66
 -- centrée à 4 aventuriers déborde jusqu'à x~723, en plein sur le bouton, qui
 -- commence à x=670) : décalée pour ne jamais pouvoir le recouvrir, quel que
 -- soit le nombre d'aventuriers déjà confirmés.
-local TEAM_BOTTOM_Y = 520
+-- 520->560 (2026-08-31, passage 1280x720) : un peu plus d'air entre la 2ᵉ
+-- rangée de cartes (TEAM_CARD_Y) et cette rangée, avec les 60px de hauteur
+-- en plus -- tout le reste de la colonne (projecteur/boutons Annuler-Valider)
+-- se termine bien avant (y=488), aucun risque de chevauchement.
+local TEAM_BOTTOM_Y = 560
 local TEAM_PARTY_LEFT = 170
 
 -- Emplacements FIXES, un par héros du roster complet (2026-08-30, bug signalé
@@ -3847,7 +3866,10 @@ function View.draw(controller)
 
   draw_hand(controller)
   draw_bottom_controls(controller)
-  text(hint_text(controller), 0, 632, W, 10, Theme.muted)
+  -- 632->662 (2026-08-31, passage 1280x720) : suit le même décalage que la
+  -- rangée de boutons du bas (HAND_Y/BOTTOM_ROW_Y), pour rester à la même
+  -- hauteur relative entre la colonne de boutons et "Fin de tour".
+  text(hint_text(controller), 0, 662, W, 10, Theme.muted)
 
   if controller.screen == "defeat" then
     set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
@@ -3877,7 +3899,7 @@ function View.draw(controller)
 
     if controller.draft_cards_shown then
       text("Combat " .. (state.run.combat_index) .. " remporté ! Choisis une carte à ajouter à ton deck.", 0, 92, W, 12, Theme.muted)
-      local rects = centered_row(#controller.draft_picks, 130, 190, 140, 24)
+      local rects = centered_row(#controller.draft_picks, 130, 190, 160, 24)
       for i, def in ipairs(controller.draft_picks) do
         local r = rects[i]
         -- Retournement carte par carte (2026-08-08) : sans anim (draft_flip[i]
@@ -3974,12 +3996,15 @@ end
 
 function View.draft_rects(controller)
   if not controller.draft_picks or not controller.draft_cards_shown then return {} end
-  return centered_row(#controller.draft_picks, 130, 190, 140, 24)
+  return centered_row(#controller.draft_picks, 130, 190, 160, 24)
 end
 
 -- "Ne rien prendre" (2026-08-30, demande explicite) : sous la rangée de
 -- cartes (y=140, hauteur 190, voir View.draft_rects ci-dessus) -- position
 -- fixe, ne dépend pas du nombre de cartes proposées (toujours centrée).
-View.draft_skip_button = { x = W / 2 - 100, y = 350, w = 200, h = 44, label = "Ne rien prendre" }
+-- y=140->160/370 (2026-08-31, passage 1280x720) : même léger surplus d'air
+-- que les autres écrans, la rangée de cartes (voir View.draft_rects
+-- ci-dessus) et ce bouton restent solidaires du même décalage de +20px.
+View.draft_skip_button = { x = W / 2 - 100, y = 370, w = 200, h = 44, label = "Ne rien prendre" }
 
 return View

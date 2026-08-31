@@ -32,7 +32,7 @@ function love.draw()
 end
 
 -- Les callbacks souris de LÖVE donnent des coordonnées fenêtre réelle ; tout le
--- layout (view.lua, input.lua) raisonne dans l'espace logique 960x700 mis à
+-- layout (view.lua, input.lua) raisonne dans l'espace logique 1280x720 mis à
 -- l'échelle par love.graphics.scale() ci-dessus -- on convertit ici, une seule
 -- fois, plutôt que de propager SCALE dans chaque calcul de rectangle.
 function love.mousepressed(x, y, button)

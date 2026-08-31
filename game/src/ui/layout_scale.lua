@@ -8,4 +8,8 @@
 -- l'usage) : les portraits/barres/texte individuels ont depuis été agrandis
 -- directement dans l'espace logique (voir UNIT_H, tailles d'icône dans
 -- view.lua), donc ce facteur global peut redescendre sans redevenir illisible.
-return 1.15
+-- Repassé à 1.0 (2026-08-31, passage à 1280x720 -- demande explicite) : le
+-- canevas logique grandit déjà lui-même (960x660 -> 1280x720), une fenêtre
+-- 1.15x par-dessus serait plus grande qu'aujourd'hui sans que ce soit demandé
+-- -- fenêtre finale = 1280x720 pile, voir logical_size.lua.
+return 1.0
