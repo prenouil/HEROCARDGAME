@@ -75,7 +75,7 @@ local function fresh_hero(def)
   return {
     id = def.id, class_id = def.class_id, name = def.name, icon = def.icon, label = def.label, max_hp = def.max_hp,
     hp = def.max_hp, defense = 0, esquive = 0, camoufle = 0,
-    incapacite = 0, vulnerabilite = 0, puissance = 0, saignements = 0,
+    incapacite = 0, vulnerabilite = 0, puissance = 0, saignements = 0, brulure = 0,
     -- Provocation (2026-08-28, statut propre au Paladin, clarifié après coup --
     -- "+50% de chances d'être ciblé par les ennemis, puis diminue de 1") : un
     -- statut de combat comme les autres (voir STATUS_KEYS/STATUS_TOOLTIP_FIELDS
@@ -195,7 +195,7 @@ local function carried_hero(h)
   -- rien à faire de spécial ici pour ces 2 champs.
   local n = shallow_copy(h)
   n.defense = 0; n.esquive = 0; n.camoufle = 0
-  n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.saignements = 0
+  n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.saignements = 0; n.brulure = 0
   n.provocation = 0; n.scheduled_shields = {}
   n.played_card_this_turn = false
   -- Inspiration/Encore/Bouclier programmé de Servant d'os (2026-08-29) : des
@@ -440,15 +440,45 @@ end
 -- `Heroes.DEFAULT_PARTY_IDS` (les 4 héros historiques), pour que tout appel
 -- existant (tests compris) qui ne passe rien continue de se comporter
 -- exactement comme avant.
-function Game.reset_run(state, seed, selected_ids)
+-- 2 biomes tirés SANS remise parmi les 4 (2026-09-01, demande explicite --
+-- "tirage de biome sans remise") : toujours distincts au sein d'un même run
+-- "bounded". Consomme `rng` (state.rng.encounter), même flux que le reste de
+-- la génération de rencontre, pour rester reproductible à l'identique pour
+-- un seed de run donné.
+local function pick_run_biomes(rng)
+  local pool = {}
+  for _, b in ipairs(Enemies.ALL_BIOMES) do pool[#pool + 1] = b end
+  local first = table.remove(pool, rng:random(#pool))
+  local second = table.remove(pool, rng:random(#pool))
+  return { first, second }
+end
+
+--- Biome du combat EN COURS (2026-09-01) : combats 1-4 du run "bounded" ->
+-- 1er biome tiré, combats 5-8 -> 2e -- voir BOUNDED_COMBAT_COUNT (8) dans
+-- controller.lua/view.lua. `nil` si ce run n'a pas de biomes (mode "Infini",
+-- qui ne reçoit PAS cette mécanique -- voir Game.reset_run/random_pool).
+function Game.current_biome(state)
+  if not state.run.biomes then return nil end
+  return state.run.combat_index <= 4 and state.run.biomes[1] or state.run.biomes[2]
+end
+
+-- `mode` (optionnel, 2026-09-01, "bounded"|"infini"|nil -- même vocabulaire
+-- que Controller.run_mode, mais ce module n'en connaissait rien jusqu'ici) :
+-- SEUL mode qui reçoit la mécanique de biomes (tirage des 2 biomes, rencontre
+-- confinée à un biome, Élite au 4e/8e combat) -- "infini" (bientôt retiré du
+-- jeu, demande explicite de ne rien lui ajouter) et l'absence de mode ("Tester
+-- le boss", qui ne passe même pas par cette fonction) gardent l'ancien
+-- comportement : pool complet, jamais de state.run.biomes.
+function Game.reset_run(state, seed, selected_ids, mode)
   selected_ids = selected_ids or Heroes.DEFAULT_PARTY_IDS
   local heroes = {}
   for i, id in ipairs(selected_ids) do heroes[i] = fresh_hero(Heroes.by_id(id)) end
   state.heroes = heroes
-  state.run = { combat_index = 1, is_boss = false }
+  state.run = { combat_index = 1, is_boss = false, mode = mode }
   state.rng = Game.new_rng_streams(seed)
+  if mode == "bounded" then state.run.biomes = pick_run_biomes(state.rng.encounter) end
   local budget = Encounter.budget_for_combat(1)
-  local instances = Encounter.generate_encounter(budget, state.rng.encounter)
+  local instances = Encounter.generate_encounter(budget, state.rng.encounter, Game.current_biome(state))
   local enemies = {}
   for i, inst in ipairs(instances) do
     enemies[i] = Encounter.instantiate_enemy(inst.template, inst.level, function() return Game.next_uid(state) end, state.rng.encounter)
@@ -471,10 +501,17 @@ function Game.start_next_combat(state)
   local heroes = {}
   for i, h in ipairs(state.heroes) do heroes[i] = carried_hero(h) end
   state.heroes = heroes
-  local instances = Encounter.generate_encounter(budget, state.rng.encounter)
+  local instances = Encounter.generate_encounter(budget, state.rng.encounter, Game.current_biome(state))
   local enemies = {}
   for i, inst in ipairs(instances) do
     enemies[i] = Encounter.instantiate_enemy(inst.template, inst.level, function() return Game.next_uid(state) end, state.rng.encounter)
+  end
+  -- Élite au 4e combat de chaque biome (2026-09-01, demande explicite --
+  -- "un ennemi au hasard") : combat_index 4 (fin du 1er biome) et 8 (fin du
+  -- 2e, juste avant le Boss) -- 1 seul ennemi parmi ceux tirés pour CE combat,
+  -- jamais systématiquement le même template ("l'ancre" du biome).
+  if state.run.mode == "bounded" and (state.run.combat_index == 4 or state.run.combat_index == 8) and #enemies > 0 then
+    Encounter.promote_to_elite(enemies[state.rng.encounter:random(#enemies)])
   end
   state.enemies = enemies
   local reclaimed = {}
@@ -704,6 +741,30 @@ function Game.start_turn(state)
   Combat.log(state, "— Tour " .. state.turn .. " : énergie à " .. state.energy .. ", pioche à " .. Deck.HAND_SIZE .. " —", "sys")
 
   Encounter.roll_telegraphs(state)
+
+  -- Golem de Pierre, "Protection" (2026-09-01, demande explicite) : EXCEPTION
+  -- au fonctionnement habituel (tout le reste du bestiaire se résout dans
+  -- Game.resolve_enemy_action, après la phase joueur) -- inconditionnel,
+  -- indépendant du move choisi (qui reste Poing de Pierre uniquement).
+  -- APRÈS Encounter.roll_telegraphs, pas avant (bug trouvé en test) :
+  -- roll_telegraphs ÉCRASE `e.defense` pour chaque ennemi vivant
+  -- (`e.defense = shield_rolled + defense_bonus_this_turn`), donc accorder
+  -- Protection avant ce tirage se ferait aussitôt effacer. Reste bien "en
+  -- tout début de tour, avant la phase joueur" pour le JOUEUR (roll_telegraphs
+  -- ne fait que préparer les prochaines actions ennemies, aucune résolution
+  -- de dégât/action visible avant que le joueur ne joue une carte). Plusieurs
+  -- Golems possibles dans un même combat : chacun déclenche sa propre
+  -- distribution.
+  for _, g in ipairs(state.enemies) do
+    if g.hp > 0 and g.template_id == "golem" then
+      for _, other in ipairs(state.enemies) do
+        if other ~= g and other.hp > 0 then
+          Combat.grant_defense(other, 2)
+        end
+      end
+      Combat.log(state, g.name .. " renforce ses alliés de 2 bouclier.", "foe")
+    end
+  end
 
   -- Provocation décroît APRÈS le tirage de cible ci-dessus (2026-08-28,
   -- clarification explicite -- "décroit juste après l'application de l'effet,
@@ -1031,6 +1092,36 @@ function Game.tick_bleed(state)
   Game.sync_camoufle_visibility(state) -- un héros peut mourir du saignement
 end
 
+-- "Brûlure" (2026-09-01, nouveau statut transversal, Volcan -- demande
+-- explicite : "inflige X dégâts à chaque tour. Ne réduit pas à la fin du
+-- tour.") : calquée sur Game.tick_bleed ci-dessus, SANS la ligne de
+-- décrément -- la seule vraie différence entre les deux mécaniques. Reste
+-- délibérément en dehors de Game.decay_end_of_turn_statuses, exactement comme
+-- le Saignement (décrémenté ici, pas là-bas) -- jamais de décroissance
+-- automatique pour Brûlure, nulle part.
+function Game.tick_burn(state)
+  for _, e in ipairs(state.enemies) do
+    if e.hp > 0 and (e.brulure or 0) > 0 then
+      local dmg = e.brulure
+      e.hp = e.hp - dmg
+      Combat.log(state, e.name .. " brûle : " .. dmg .. " dégâts.", "sys")
+    end
+  end
+  for _, h in ipairs(state.heroes) do
+    if h.hp > 0 and (h.brulure or 0) > 0 then
+      local dmg = h.brulure
+      h.hp = h.hp - dmg
+      if h.hp <= 0 and h.death_ward then
+        h.hp = 1
+        h.death_ward = false
+        Combat.log(state, h.name .. " aurait dû mourir de la brûlure, mais reste debout à 1 PV !", "power")
+      end
+      Combat.log(state, h.name .. " brûle : " .. dmg .. " dégâts.", "foe")
+    end
+  end
+  Game.sync_camoufle_visibility(state) -- un héros peut mourir de la brûlure
+end
+
 local function resolve_enemy_attack(state, e, amount, brut)
   local target = Combat.hero_by_id(state, e.target_hero_id)
   if not target or target.hp <= 0 then return end
@@ -1091,7 +1182,18 @@ function Game.resolve_enemy_action(state, e)
     if target and target.hp > 0 then
       target[move.status_key] = (target[move.status_key] or 0) + move.amount
       local label = Enemies.status_labels[move.status_key] or move.status_key
-      Combat.log(state, e.name .. " inflige " .. label .. " " .. move.amount .. " à " .. target.name .. ".", "foe")
+      local msg = e.name .. " inflige " .. label .. " " .. move.amount
+      -- status_key2/amount2 (optionnel, 2026-09-01, Nécromancien Novice/
+      -- Élémentaire de Cendre -- "Malédiction"/"Souffle Étouffant" posent
+      -- désormais 2 statuts d'un coup) : même mutation directe, un 2ᵉ champ
+      -- plutôt qu'une liste, pour rester un simple ajout au-dessus du champ
+      -- existant sans jamais avoir plus de 2 statuts à gérer.
+      if move.status_key2 then
+        target[move.status_key2] = (target[move.status_key2] or 0) + move.amount2
+        local label2 = Enemies.status_labels[move.status_key2] or move.status_key2
+        msg = msg .. " et " .. label2 .. " " .. move.amount2
+      end
+      Combat.log(state, msg .. " à " .. target.name .. ".", "foe")
     end
   elseif move.kind == "buff-self" then
     -- Générique, PAS spécifique à l'Aigle Géant malgré son seul usage actuel
@@ -1115,6 +1217,14 @@ function Game.resolve_enemy_action(state, e)
       local target = Combat.hero_by_id(state, e.target_hero_id)
       if target and target.hp > 0 then target.saignements = (target.saignements or 0) + move.bleed end
     end
+    -- move.burn (2026-09-01, Cracheur de Braise -- "Brûlure") : même bolt-on
+    -- que move.bleed juste au-dessus, sur le champ h.brulure/e.brulure --
+    -- jamais décrémenté automatiquement (voir Game.tick_burn), contrairement
+    -- au Saignement.
+    if move.burn then
+      local target = Combat.hero_by_id(state, e.target_hero_id)
+      if target and target.hp > 0 then target.brulure = (target.brulure or 0) + move.burn end
+    end
     -- "Charge en Piqué" de l'Aigle Géant (2026-08-30, `move.lands`) : générique
     -- comme "buff-self" ci-dessus -- un coup qui "atterrit" annule "Vol" (ou
     -- tout futur statut similaire), quel que soit l'ennemi qui le porte.
@@ -1122,19 +1232,23 @@ function Game.resolve_enemy_action(state, e)
   elseif move.kind == "dmg-all" then
     resolve_enemy_attack_all(state, e, move.amount)
   elseif move.kind == "revive" then
-    -- Homme Arbre, "Renaissance Sylvestre" (2026-08-21, demande explicite) :
-    -- ramène à pleine vie les Pousses d'Arbre DÉJÀ existantes et tombées à 0
-    -- -- jamais une nouvelle instance créée, voir enemies.lua. Toujours au
-    -- pluriel dans le journal, jamais "(s)" (préférence actée le 2026-08-21).
+    -- Généralisé (2026-09-01, demande explicite -- Prêtre Déchu doit relever
+    -- Squelette Archer/Garde-Ossements, pas seulement les Pousses d'Arbre de
+    -- l'Homme Arbre) : `move.revive_template_ids` (liste) remplace le
+    -- `template_id == "pousse"` codé en dur -- l'Homme Arbre porte désormais
+    -- `revive_template_ids = { "pousse" }` sur son propre move (voir
+    -- enemies.lua), même mécanique, plus rien de spécifique à lui ici.
+    local wanted = {}
+    for _, id in ipairs(move.revive_template_ids or {}) do wanted[id] = true end
     local revived = 0
     for _, o in ipairs(state.enemies) do
-      if o.template_id == "pousse" and o.hp <= 0 then
+      if wanted[o.template_id] and o.hp <= 0 then
         o.hp = o.max_hp
         revived = revived + 1
       end
     end
     if revived > 0 then
-      Combat.log(state, e.name .. " ramène " .. revived .. " Pousses d'Arbre à la vie.", "foe")
+      Combat.log(state, e.name .. " ramène " .. revived .. " alliés à la vie.", "foe")
     end
   end
   Game.sync_camoufle_visibility(state) -- un héros peut mourir de cette attaque

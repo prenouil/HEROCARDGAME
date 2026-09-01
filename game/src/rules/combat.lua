@@ -262,7 +262,14 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
   end
   if source_hero and is_enemy_target then
     target_unit.took_damage_this_turn = true
-    if is_fire then target_unit.took_fire_damage_this_turn = true end
+    if is_fire then
+      target_unit.took_fire_damage_this_turn = true
+      -- Troll des Marais (2026-09-01, demande explicite) : contrairement à
+      -- took_fire_damage_this_turn ci-dessus (remis à zéro chaque tour, voir
+      -- Encounter.roll_telegraphs), ce flag n'est JAMAIS réinitialisé -- exclut
+      -- Régénération du tirage pour le reste du combat dès la première brûlure.
+      target_unit.fire_touched_ever = true
+    end
   end
 
   -- "Le Blessé" (2026-08-29, malédiction -- hero.self_damage_on_hit) :

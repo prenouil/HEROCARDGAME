@@ -46,6 +46,39 @@ module.exports = [
     subject: 'a sneaky bandit enemy character, hood, holding a dagger, standing pose' },
   { id: 'chaman', grid: 'character', out: 'game/assets/characters/enemies/chaman.png',
     subject: 'a goblin shaman enemy character, tribal robe, holding a totem staff, standing pose' },
+  // Aigle Géant, 2ᵉ boss (2026-08-31) : 2 illustrations (sol/vol, voir enemies.lua "vol").
+  // Prompts plus détaillés ("bird of prey", "sharp talons extended", "wings spread wide")
+  // rejetés par le filtre NSFW de Workers AI (faux positif, code 8007) -- formulation
+  // minimale retenue après plusieurs essais, seule à passer le filtre.
+  { id: 'aigle', grid: 'character', out: 'game/assets/characters/enemies/aigle.png',
+    subject: 'a giant eagle enemy character, bird of prey, standing pose, wings folded' },
+  { id: 'aigle-vol', grid: 'character', out: 'game/assets/characters/enemies/aigle-vol.png',
+    subject: 'a giant eagle enemy character, bird of prey, flying, wings open, mid-air' },
+
+  // Extension biomes (2026-09-01), 10 nouveaux ennemis -- voir enemies.lua pour le détail
+  // de chacun. Golem de Magma a d'abord été rejeté par le filtre NSFW avec une formulation
+  // plus détaillée ("imposing scale, bulky heavy body" façon Golem de Pierre) -- même
+  // schéma que l'Aigle Géant ci-dessus, formulation simplifiée retenue.
+  { id: 'garde-ossements', grid: 'character', out: 'game/assets/characters/enemies/garde-ossements.png',
+    subject: 'an undead skeleton guard enemy character, holding a shield, armored, standing pose' },
+  { id: 'pretre-dechu', grid: 'character', out: 'game/assets/characters/enemies/pretre-dechu.png',
+    subject: 'a corrupted priest enemy character, tattered holy robe, broken halo, standing pose' },
+  { id: 'eclaireuse', grid: 'character', out: 'game/assets/characters/enemies/eclaireuse.png',
+    subject: 'a desert scout enemy character, holding a bow, sand-colored cloak, standing pose' },
+  { id: 'chef-de-bande', grid: 'character', out: 'game/assets/characters/enemies/chef-de-bande.png',
+    subject: 'a bandit leader enemy character, holding a sword, rugged clothing, standing pose' },
+  { id: 'tireuse', grid: 'character', out: 'game/assets/characters/enemies/tireuse.png',
+    subject: 'a desert sniper enemy character, holding a crossbow, hooded, standing pose' },
+  { id: 'salamandre', grid: 'character', out: 'game/assets/characters/enemies/salamandre.png',
+    subject: 'a lava salamander enemy character, reptilian creature, glowing molten skin, on all four legs, quadruped animal stance, no human-like posture, no hands, no held weapon, viewed from the front' },
+  { id: 'cracheur', grid: 'character', out: 'game/assets/characters/enemies/cracheur.png',
+    subject: 'a small fire imp enemy character, glowing ember body, standing pose' },
+  { id: 'elementaire-cendre', grid: 'character', out: 'game/assets/characters/enemies/elementaire-cendre.png',
+    subject: 'an ash elemental enemy character, swirling grey smoke and ember body, floating, no human-like posture, viewed from the front' },
+  { id: 'golem-magma', grid: 'character', out: 'game/assets/characters/enemies/golem-magma.png',
+    subject: 'a magma golem enemy character, large rock creature, glowing lava cracks, standing pose' },
+  { id: 'vouivre', grid: 'character', out: 'game/assets/characters/enemies/vouivre.png',
+    subject: 'an ash wyvern enemy character, small dragon with wings, no human-like posture, no hands, no held weapon, viewed from the front' },
 
   // ---- Icônes de mots-clés (icon, 32x32) ----
   { id: 'energie', grid: 'icon', out: 'game/assets/icons/keywords/energie.png',

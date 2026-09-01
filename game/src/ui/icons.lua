@@ -368,6 +368,13 @@ local function draw_status_fireweak(cx, cy, r, color, alpha)
     cx - r * 0.5, cy + r * 0.1)
 end
 
+-- "Brûlure" (2026-09-01, nouveau statut, Volcan) : même silhouette de flamme
+-- que draw_status_fireweak juste au-dessus -- concept visuel déjà établi pour
+-- "feu" dans ce fichier, pas besoin d'en inventer un second.
+local function draw_status_brulure(cx, cy, r, color, alpha)
+  draw_status_fireweak(cx, cy, r, color, alpha)
+end
+
 --- Sablier simple (2026-08-28, demande explicite -- "icone dédiée" pour le
 -- bouclier programmé d'Infranchissable, voir hero.scheduled_shields dans
 -- game.lua) : 2 triangles opposés, symbole générique "à venir/en attente" --
@@ -510,6 +517,7 @@ local DRAW_BY_STATUS = {
   temple_blessing = draw_status_temple_blessing,
   temple_curse = draw_status_temple_curse,
   fireweak = draw_status_fireweak,
+  brulure = draw_status_brulure,
   bonus = draw_status_bonus,
   malus = draw_status_malus,
   inspiration = draw_status_inspiration,

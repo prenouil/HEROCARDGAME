@@ -90,6 +90,11 @@ local DRAFT_FACEDOWN_PAUSE = 1.0
 local DRAFT_FLIP_DURATION = 0.5
 local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début du suivant
 local BOSS_VICTORY_HOLD_DURATION = 2.2 -- s -- temps où "Boss vaincu !" reste affiché avant le retour au menu
+-- Écran d'annonce de biome (2026-09-01, demande explicite -- "une petite
+-- fenêtre intermédiaire pour annoncer le lieu") : même idiome que
+-- BOSS_VICTORY_HOLD_DURATION ci-dessus -- pas de bouton, tient un délai fixe
+-- puis enchaîne toute seule (voir Controller:enter_biome_intro_screen).
+local BIOME_INTRO_HOLD_DURATION = 1.8
 
 -- Écrans "camp" -- Feu de camp/La Forge/Le Temple (2026-08-30, refonte
 -- complète -- voir Controller:enter_post_combat_sequence) : entre le draft
@@ -118,7 +123,9 @@ local REFUGE_HEAL_FRACTION = 0.30
 -- même raison que la duplication SCALE/H déjà en place entre conf.lua et
 -- view.lua, ce module-là ne peut pas requérir controller.lua sans créer un
 -- cycle).
-local BOUNDED_COMBAT_COUNT = 9
+-- 9->8 (2026-09-01, demande explicite -- 2 biomes de 4 combats chacun,
+-- combat_index 4/8 promeut 1 ennemi Élite, voir Game.current_biome).
+local BOUNDED_COMBAT_COUNT = 8
 
 -- Choix "amélioration" à la Forge (2026-08-11, demande explicite -- adapté au
 -- 2026-08-28 pour 1 carte choisie parmi jusqu'à 4, plus 2 cartes systématiques) :
@@ -257,13 +264,16 @@ local FURTIF_SPARKLE_COUNT = 5
 -- Game.decay_end_of_turn_statuses : contrairement à Incapacité/Vulnérabilité,
 -- "Vol" ne décroît pas tout seul d'un tour à l'autre, seule "Charge en Piqué"
 -- (move.lands) le retire.
-local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "camoufle", "provocation", "vol" }
+-- "brulure" (2026-09-01, nouveau statut, Volcan) : même raison que "vol"
+-- ci-dessus -- décrit ailleurs (Game.tick_burn), jamais ajouté à
+-- Game.decay_end_of_turn_statuses, jamais de décroissance automatique.
+local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "camoufle", "provocation", "vol", "brulure" }
 
 function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "menu" -- "menu" | "options" | "team_select" | "playing" | "draft" | "campfire" | "forge" | "temple" | "refuge" | "bossVictory" | "defeat"
+  self.screen = "menu" -- "menu" | "options" | "team_select" | "playing" | "draft" | "campfire" | "forge" | "temple" | "refuge" | "biome_intro" | "bossVictory" | "defeat"
   -- Mode de run choisi au menu (2026-08-21, demande explicite) : "infini"
   -- (illimité, l'ancien comportement par défaut), "bounded" (BOUNDED_COMBAT_COUNT
   -- combats -- 9, 2026-08-30, était 5 -- puis l'Homme Arbre, voir
@@ -341,6 +351,7 @@ function Controller.new()
   -- -- écran "Le Refuge" (2026-08-30, nouvel évènement) : soigne TOUS les
   -- aventuriers d'un coup, aucun choix (contrairement au feu de camp).
   self.refuge = nil
+  self.biome_intro = nil -- { biome = "foret"|"catacombes"|"canyon"|"volcan" }, voir enter_biome_intro_screen
   self.forge = nil -- { choices = {instance,...}, resolved = bool|nil }, voir enter_forge_screen
   self.forge_upgrade_anim = nil -- { chosen_index, base_def, t = elapsed }, voir choose_forge_card
   self.forge_upgrade_anim_duration = FORGE_UPGRADE_ANIM_DURATION -- lu par view.lua pour l'easing
@@ -860,6 +871,7 @@ function Controller:clear_animation_state()
   self.post_combat_queue = {}
   self.campfire = nil
   self.refuge = nil
+  self.biome_intro = nil
   self.forge = nil
   self.forge_upgrade_anim = nil
   self.temple = nil
@@ -908,10 +920,31 @@ function Controller:reset_run(mode, selected_ids)
   -- jamais pour "Tester le boss" (Controller:start_boss_test, qui ne passe
   -- pas par cette fonction).
   Sfx.play("run_start")
-  Game.reset_run(self.state, nil, selected_ids)
+  Game.reset_run(self.state, nil, selected_ids, self.run_mode)
   -- Game.start_turn (appelé par reset_run) ne peut plus infliger de dégâts à
   -- ce jour -- garde-fou conservé par précaution, voir advance_after_discard_sequenced.
   if self.state.over then self:handle_combat_victory(); return end
+  -- Annonce du 1er biome (2026-09-01, demande explicite) : avant même la
+  -- descente des ennemis ci-dessous -- seul un run "bounded" en a un
+  -- (state.run.biomes, voir Game.reset_run/pick_run_biomes ; "infini" n'en
+  -- reçoit jamais). `self_:play_enter_run_combat_intro` factorise les 2
+  -- lignes suivantes pour pouvoir les rejouer identiques une fois l'annonce
+  -- refermée.
+  if self.run_mode == "bounded" and self.state.run.biomes then
+    self.camp_entrance = { t = 0 }
+    local self_ = self
+    self:enter_biome_intro_screen(self.state.run.biomes[1], function() self_:play_enter_run_combat_intro() end)
+    return
+  end
+  self:play_enter_run_combat_intro()
+end
+
+--- Descente des ennemis + séquence de début de tour du tout premier combat
+-- d'un run (2026-08-30/2026-09-01) : factorisé hors de Controller:reset_run
+-- pour être rejoué identique après l'écran d'annonce de biome (qui retarde
+-- ce beat sans en changer le contenu).
+function Controller:play_enter_run_combat_intro()
+  self.screen = "playing"
   -- Descente des ennemis (2026-08-30) AVANT la parade des aventuriers,
   -- demande explicite -- voir play_enemy_entrance_sequence, qui renvoie sa
   -- durée totale pour que ce beat "vide" fasse simplement patienter le
@@ -1849,6 +1882,7 @@ function Controller:advance_after_discard_sequenced(pre_pause)
   self_.seq:push(function()
     local before = self_:snapshot_units()
     Game.tick_bleed(self_.state)
+    Game.tick_burn(self_.state)
     self_:react_to_diff(before)
 
     if Game.check_defeat(self_.state) then self_:enter_defeat_screen(); return end
@@ -1969,6 +2003,26 @@ function Controller:enter_boss_victory()
   self.seq:push(function() self_:enter_menu() end)
 end
 
+--- Écran d'annonce de biome (2026-09-01, demande explicite) : affiché 2 fois
+-- par run "bounded" -- au tout début (voir Controller:reset_run, biome 1)
+-- et juste après le 4ᵉ combat (voir Controller:enter_post_combat_sequence,
+-- biome 2), avant même le choix de l'évènement "camp" de cette transition.
+-- Aucun clic (contrairement aux écrans "camp") : tient un délai fixe puis
+-- enchaîne sur `on_done`, fourni par l'appelant -- ce module ne sait pas
+-- lui-même "quoi faire après", volontairement générique aux 2 usages
+-- ci-dessus. Réutilise `self.camp_entrance` (déjà posé par l'appelant) pour
+-- l'animation de titre, comme les 4 écrans "camp" existants.
+function Controller:enter_biome_intro_screen(biome_key, on_done)
+  self.screen = "biome_intro"
+  self.biome_intro = { biome = biome_key }
+  local self_ = self
+  self.seq:push(function() end, BIOME_INTRO_HOLD_DURATION)
+  self.seq:push(function()
+    self_.biome_intro = nil
+    on_done()
+  end)
+end
+
 function Controller:enter_draft_screen()
   self.screen = "draft"
   self.draft_picks = Draft.pick_cards(self.state)
@@ -2071,6 +2125,30 @@ local function campfire_viable(state)
 end
 
 function Controller:enter_post_combat_sequence()
+  -- Transition douce d'entrée (2026-08-30, demande explicite -- "une
+  -- transition douce entre le draft et l'évènement... d'abord le titre qui
+  -- descend doucement depuis le haut... puis les différents éléments
+  -- apparaissent en fade in") : posée ICI, seul point de passage commun aux
+  -- 4 écrans "camp" ET à l'écran d'annonce de biome (voir self.camp_entrance,
+  -- lu par draw_campfire/draw_forge/draw_temple/draw_refuge/draw_biome_intro
+  -- dans view.lua).
+  self.camp_entrance = { t = 0 }
+
+  -- Transition vers le 2ᵉ biome (2026-09-01, demande explicite) : juste après
+  -- le 4ᵉ combat classique (avant le choix normal d'évènement "camp" de cette
+  -- transition, voir Controller:enter_biome_intro_screen) -- `combat_index`
+  -- pas encore incrémenté à ce stade (même remarque que pour le Refuge
+  -- ci-dessous), donc `== 4` désigne bien "le combat 4 vient de se terminer".
+  if self.run_mode == "bounded" and self.state.run.combat_index == 4 and self.state.run.biomes then
+    local self_ = self
+    self:enter_biome_intro_screen(self.state.run.biomes[2], function() self_:enter_post_combat_camp_choice() end)
+    return
+  end
+
+  self:enter_post_combat_camp_choice()
+end
+
+function Controller:enter_post_combat_camp_choice()
   -- "Après 9 combats et 1 dernier évènement OBLIGATOIREMENT le Refuge, on
   -- enchaîne sur le Boss" (2026-08-30, demande explicite) : ce combat-ci
   -- vient d'être bouclé (state.run.combat_index n'est pas encore incrémenté,
@@ -2080,15 +2158,6 @@ function Controller:enter_post_combat_sequence()
   -- Refuge -- la garantie "reposé juste avant le Boss" prime sur "jamais 2
   -- fois de suite"). SEUL chemin qui mène au Refuge -- voir le commentaire
   -- au-dessus de cette fonction.
-  -- Transition douce d'entrée (2026-08-30, demande explicite -- "une
-  -- transition douce entre le draft et l'évènement... d'abord le titre qui
-  -- descend doucement depuis le haut... puis les différents éléments
-  -- apparaissent en fade in") : posée ICI, seul point de passage commun aux
-  -- 4 écrans "camp" (Refuge forcé ci-dessous compris) -- voir
-  -- self.camp_entrance, lu par draw_campfire/draw_forge/draw_temple/
-  -- draw_refuge (view.lua).
-  self.camp_entrance = { t = 0 }
-
   if self.run_mode == "bounded" and self.state.run.combat_index >= BOUNDED_COMBAT_COUNT then
     self.last_post_combat_event = "refuge"
     self:enter_refuge_screen()

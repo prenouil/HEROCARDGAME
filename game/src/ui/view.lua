@@ -49,7 +49,10 @@ View.W, View.H = W, H
 -- Dupliqué depuis controller.lua (2026-08-30, compteur "X/9 avant le Boss") :
 -- même raison que la duplication SCALE/H ci-dessus -- controller.lua requiert
 -- déjà view.lua, un require dans l'autre sens créerait un cycle.
-local BOUNDED_COMBAT_COUNT = 9
+-- 9->8 (2026-09-01, demande explicite -- 2 biomes de 4 combats chacun avant
+-- le Boss, au lieu de 9 combats classiques) : voir Game.current_biome dans
+-- game.lua pour comment combat_index se répartit entre les 2 biomes.
+local BOUNDED_COMBAT_COUNT = 8
 
 -- +12 (2026-08-27, demande explicite -- portraits plus gros partout, voir
 -- HERO_PORTRAIT_SIZE plus bas) : la carte grandit un peu pour absorber le
@@ -1147,6 +1150,7 @@ local function draw_hero(controller, h, r)
   if (h.camoufle or 0) > 0 then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
   if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
   if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
+  if (h.brulure or 0) > 0 then badges[#badges + 1] = { key = "brulure", abbr = "BRU", value = h.brulure } end
   -- Incapacité/Vulnérabilité (bug signalé, 2026-08-24) : oubliées ici alors que
   -- draw_enemy les affichait déjà -- un héros PEUT porter ces deux statuts
   -- (ex. Malédiction du Nécromancien Novice pose Vulnérabilité), le
@@ -1423,6 +1427,12 @@ local function draw_enemy(controller, e, r)
       scale = scale * (1 + 0.035 * math.sin(love.timer.getTime() * 8))
     end
   end
+  -- Élite (2026-09-01, demande explicite -- "ils sont plus gros") : ~18% plus
+  -- grand qu'un ennemi normal, un pur agrandissement de RENDU (jamais r.w/r.h
+  -- eux-mêmes, qui restent la grille uniforme de centered_row/le hit-test
+  -- réel d'Input.lua) -- même compromis déjà accepté par le pulse au survol
+  -- juste au-dessus (visuel plus grand, zone cliquable inchangée).
+  if e.elite then scale = scale * 1.18 end
 
   -- Fissure (2026-08-30) : secousse de plus en plus forte à l'approche de
   -- l'explosion -- fenêtre `death` active tant que `not death.exploded`
@@ -1449,13 +1459,32 @@ local function draw_enemy(controller, e, r)
   -- ennemi -- ne reste plus qu'un très léger voile, le contour (ligne
   -- ci-dessous) et les éléments dessinés par-dessus (barre de PV, portrait,
   -- badges) suffisent déjà à délimiter la zone.
+  -- Élite : halo doré scintillant DERRIÈRE le cadre (2026-09-01, demande
+  -- explicite -- "leur cadre est doré et scintillant") -- même idiome de
+  -- pulse que le glow du bouton "Partir à l'aventure" (voir
+  -- draw_team_select), Theme.accent réutilisé tel quel (déjà la teinte "or"
+  -- du reste de l'UI). Dessiné AVANT le panneau ci-dessous (fond plein), qui
+  -- recouvre l'intérieur et ne laisse dépasser qu'un halo sur les bords.
+  if e.elite then
+    local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 4)
+    set(Theme.accent, 0.35 + 0.35 * pulse)
+    love.graphics.rectangle("fill", -6, -6, r.w + 12, r.h + 12, 14, 14)
+  end
   set(Theme.panel, trail_dead and 0.06 or 0.12)
   love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
   -- Contour retiré au repos (2026-08-30, demande explicite -- "il faut aussi
   -- enlever le bord du cadre") : ne reste que le bleu de ciblage
   -- (awaiting_enemy_target), signal fonctionnel, jamais un simple liseré
   -- décoratif -- cohérent avec le fond déjà rendu quasi imperceptible juste
-  -- au-dessus.
+  -- au-dessus. Élite ajoute son propre contour plein, doré, APRÈS le fond
+  -- (sinon recouvert) -- si l'ennemi est AUSSI une cible valide ce tour-ci,
+  -- le bleu de ciblage se dessine par-dessus juste après et prime (signal
+  -- fonctionnel avant signal cosmétique).
+  if e.elite then
+    set(Theme.accent, 0.9); love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
+    love.graphics.setLineWidth(1)
+  end
   if awaiting_enemy_target then
     set(Theme.energy)
     love.graphics.setLineWidth(3)
@@ -1514,6 +1543,7 @@ local function draw_enemy(controller, e, r)
     if e.template_id == "homme-arbre" then badges[#badges + 1] = { key = "fireweak", abbr = "FEU" } end
     if (e.vol or 0) > 0 then badges[#badges + 1] = { key = "vol", abbr = "VOL" } end
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
+    if (e.brulure or 0) > 0 then badges[#badges + 1] = { key = "brulure", abbr = "BRU", value = e.brulure } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
     if (e.vulnerabilite or 0) > 0 then badges[#badges + 1] = { key = "vulnerabilite", abbr = "VUL", value = e.vulnerabilite } end
     draw_badge_row(badges, 0, 82, r.w, 16, Theme.status, controller.status_pop[e.id], controller.status_pop_duration)
@@ -2025,6 +2055,7 @@ local STATUS_TOOLTIP_FIELDS = {
   { field = "camoufle", glossary_key = "camoufle", hide_value = true },
   { field = "puissance", glossary_key = "puissance" },
   { field = "saignements", glossary_key = "saignement" },
+  { field = "brulure", glossary_key = "brulure", label = "Brûlure" },
   { field = "incapacite", glossary_key = "incapacite" },
   { field = "vulnerabilite", glossary_key = "vulnerabilite" },
   { field = "provocation", glossary_key = "provocation" },
@@ -2162,7 +2193,12 @@ local function tooltip_lines(controller)
     end
     for _, l in ipairs(active_status_lines(e, seen)) do lines[#lines + 1] = l end
     lines[#lines + 1] = "PV max " .. e.max_hp
-    return e.name .. " Nv." .. e.level, lines
+    -- Élite (2026-09-01, demande explicite -- "nom entouré de 2 étoiles") :
+    -- les ennemis n'ont pas de plaque-nom permanente sur leur cadre (voir
+    -- draw_enemy) -- confirmé au survol via ce titre de tooltip, le halo
+    -- doré + la taille augmentée restant les 2 signaux visibles en permanence.
+    local title = e.elite and ("\u{2605} " .. e.name .. " \u{2605}") or e.name
+    return title .. " Nv." .. e.level, lines
   elseif h.kind == "card" then
     local def = h.target
     local terms = Glossary.keywords_present(def.desc)
@@ -3555,6 +3591,21 @@ end
 -- après ce combat-là, juste ce bref titre (même zoom que "Victoire !" côté
 -- draft, voir controller.victory_anim/victory_title_duration) avant le retour
 -- automatique au menu (Controller:enter_boss_victory).
+-- Écran d'annonce de biome (2026-09-01, demande explicite) : "petite fenêtre
+-- intermédiaire pour annoncer le lieu" avant le début/la reprise des combats
+-- dans ce biome -- réutilise draw_camp_entrance (même animation de titre que
+-- les 4 écrans "camp") et Background.draw avec un biome explicite (pas encore
+-- de state.enemies à ce stade, voir son 4ᵉ paramètre dans background.lua).
+local function draw_biome_intro(controller)
+  local bi = controller.biome_intro
+  if not bi then return end
+  Background.draw(nil, W, H, bi.biome)
+  local name = Enemies.BIOME_NAMES[bi.biome] or bi.biome
+  draw_camp_entrance(controller, name, H / 2 - 20, function()
+    text("Nouvelle zone…", 0, H / 2 + 14, W, 14, Theme.muted)
+  end)
+end
+
 local function draw_boss_victory(controller)
   Background.draw(nil, W, H)
   set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
@@ -3775,6 +3826,7 @@ function View.draw(controller)
   if controller.screen == "menu" then draw_menu(controller); return end
   if controller.screen == "options" then draw_options(controller); return end
   if controller.screen == "bossVictory" then draw_boss_victory(controller); return end
+  if controller.screen == "biome_intro" then draw_biome_intro(controller); return end
   if controller.screen == "team_select" then draw_team_select(controller); draw_deck_view(controller); return end
 
   -- Écrans "camp" (2026-08-30, bug signalé -- "pendant le draft on voit

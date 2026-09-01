@@ -27,19 +27,24 @@ end
 -- mêlés à une rencontre normale du mode Infini, réservés à
 -- Encounter.boss_encounter ci-dessous. Recalculé à chaque appel plutôt que
 -- mis en cache : la liste Enemies.templates ne change jamais en cours de
--- partie, le coût est négligeable (une douzaine d'entrées).
-local function random_pool()
+-- partie, le coût est négligeable (une vingtaine d'entrées).
+-- `biome` (optionnel, 2026-09-01, demande explicite -- 4 biomes, un combat
+-- confiné à un seul) : si fourni, filtre en plus sur `t.biome == biome` --
+-- nil garde l'ancien comportement (pool complet), utilisé par le mode
+-- "Infini" (qui ne reçoit PAS la mécanique de biomes, bientôt retiré du jeu)
+-- et par "Tester le boss" (qui ne passe même pas par ce pool).
+local function random_pool(biome)
   local pool = {}
   for _, t in ipairs(Enemies.templates) do
-    if not t.boss_only then pool[#pool + 1] = t end
+    if not t.boss_only and (not biome or t.biome == biome) then pool[#pool + 1] = t end
   end
   return pool
 end
 
 -- 40 tentatives, garde la composition dont le coût total colle le mieux au budget.
 -- `rng` (2026-08-10, demande explicite -- tirages reproductibles) : voir Game.reset_run.
-function Encounter.generate_encounter(budget, rng)
-  local pool = random_pool()
+function Encounter.generate_encounter(budget, rng, biome)
+  local pool = random_pool(biome)
   local best = nil
   for _ = 1, 40 do
     local count = rng:random(1, Encounter.MAX_ENEMIES_PER_COMBAT)
@@ -69,14 +74,41 @@ function Encounter.instantiate_enemy(template, level, uid_gen, rng)
     max_hp = max_hp, hp = max_hp,
     shield_rolled = template.shield_base and Enemies.roll_scaled(template.shield_base, level, rng) or 0,
     defense = 0, saignements = 0, incapacite = 0, vulnerabilite = 0,
+    -- Brûlure (2026-09-01, nouveau statut, Volcan) : même convention que les
+    -- champs de statut ci-dessus, jamais décrémentée automatiquement (voir
+    -- Game.tick_burn) contrairement à saignements.
+    brulure = 0,
     -- "Vol" (2026-08-30, second boss -- l'Aigle Géant, voir enemies.lua) :
     -- 0/absent pour tout le monde par défaut, comme les autres champs de
     -- statut ci-dessus -- seul l'Aigle le fait réellement varier (voir
     -- Game.resolve_enemy_action, kind == "buff-self"/"dmg" avec `move.lands`).
     vol = 0,
+    -- Élite (2026-09-01) : false par défaut, voir Encounter.promote_to_elite
+    -- ci-dessous -- jamais posé ici directement (l'appelant décide APRÈS
+    -- l'instanciation normale, une fois l'ennemi déjà tiré).
+    elite = false,
+    -- fire_touched_ever (2026-09-01, Troll des Marais) : jamais réinitialisé,
+    -- contrairement à took_fire_damage_this_turn -- voir Combat.deal_damage.
+    fire_touched_ever = false,
     defending = false, defend_cycle = false, took_damage_this_turn = false, took_fire_damage_this_turn = false,
     next_move = nil, target_hero_id = nil,
   }
+end
+
+-- Élite (2026-09-01, demande explicite -- "chaque ennemi peut être décliné
+-- sous forme d'élite... l'élite ne coûte pas plus cher") : mutation posée sur
+-- une instance DÉJÀ créée par Encounter.instantiate_enemy ci-dessus -- jamais
+-- en touchant `level`/`cost`, qui resteraient lus par Enemies.cost_at_level
+-- (le budget de rencontre, déjà calculé bien avant cet appel) et rendraient
+-- l'Élite payante malgré la règle explicite. ×1.6 sur PV/bouclier ; les
+-- montants portés par les COUPS (dégâts/soin/statuts) sont, eux, boostés
+-- séparément à chaque tirage -- voir apply_elite dans Encounter.roll_telegraphs
+-- plus bas, pas ici (un coup n'existe pas encore à l'instanciation).
+function Encounter.promote_to_elite(e)
+  e.elite = true
+  e.max_hp = Enemies.round(e.max_hp * 1.6)
+  e.hp = e.max_hp
+  e.shield_rolled = Enemies.round((e.shield_rolled or 0) * 1.6)
 end
 
 --- Rencontre fixe du boss (2026-08-21, demande explicite -- ÉTENDUE le
@@ -200,6 +232,27 @@ end
 -- directement -- voir Game.reset_run. `state` porte déjà `rng`, pas besoin d'un
 -- paramètre séparé ici (contrairement à generate_encounter/instantiate_enemy, qui
 -- ne reçoivent pas `state`).
+-- Élite, 2ᵉ volet (2026-09-01, voir Encounter.promote_to_elite ci-dessus pour
+-- le 1ᵉʳ) : ×1.3 sur tout montant PORTÉ PAR UN COUP déjà télégraphié/roulé --
+-- amount/bleed/burn/dmg_all_amount (variantes "à qui ce coup fait combien de
+-- dégâts/statut"), amount2 (2ᵉ statut, voir Malédiction/Souffle Étouffant) et
+-- defense_bonus_this_turn (gain de bouclier ponctuel du Gobelourd). Chaque
+-- champ est optionnel sur un move donné -- ne touche que ceux réellement
+-- présents. Appelé à CHAQUE endroit où un move final est construit (2 dans ce
+-- fichier : le tirage normal ci-dessous, et le repli du Nécromancien plus
+-- bas), jamais une seule fois -- un Nécromancien Élite forcé sur son repli
+-- doit garder son bonus.
+local function apply_elite(move, e)
+  if not e.elite then return move end
+  if move.amount then move.amount = Enemies.round(move.amount * 1.3) end
+  if move.bleed then move.bleed = Enemies.round(move.bleed * 1.3) end
+  if move.burn then move.burn = Enemies.round(move.burn * 1.3) end
+  if move.dmg_all_amount then move.dmg_all_amount = Enemies.round(move.dmg_all_amount * 1.3) end
+  if move.amount2 then move.amount2 = Enemies.round(move.amount2 * 1.3) end
+  if move.defense_bonus_this_turn then move.defense_bonus_this_turn = Enemies.round(move.defense_bonus_this_turn * 1.3) end
+  return move
+end
+
 function Encounter.roll_telegraphs(state)
   local rng = state.rng.enemy_turn
   for _, e in ipairs(state.enemies) do
@@ -211,7 +264,7 @@ function Encounter.roll_telegraphs(state)
       e.defense = 0
     else
       local template = Enemies.by_id(e.template_id)
-      local move = template.choose_move(e, state.enemies, rng)
+      local move = apply_elite(template.choose_move(e, state.enemies, rng), e)
       e.next_move = move
       e.defense = (e.shield_rolled or 0) + (move.defense_bonus_this_turn or 0)
       if Combat.TARGETABLE_MOVE_KINDS[move.kind] then
@@ -242,7 +295,7 @@ function Encounter.roll_telegraphs(state)
   if not any_damage then
     for _, e in ipairs(state.enemies) do
       if e.hp > 0 and e.template_id == "necromancien" and e.next_move and e.next_move.kind ~= "dmg" then
-        e.next_move = { kind = "dmg", name = "Toucher Nécrotique", icon = "\u{1F480}", amount = Enemies.roll_scaled(3, e.level, rng) }
+        e.next_move = apply_elite({ kind = "dmg", name = "Toucher Nécrotique", icon = "\u{1F480}", amount = Enemies.roll_scaled(3, e.level, rng) }, e)
       end
     end
   end

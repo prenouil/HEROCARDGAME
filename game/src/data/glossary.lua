@@ -42,6 +42,11 @@ Glossary.terms = {
   -- décroît PAS tout seul (contrairement à Incapacité/Vulnérabilité
   -- ci-dessus) -- seule "Charge en Piqué" le retire, voir Game.resolve_enemy_action.
   { key = "vol", icon = nil, has_icon = false, related = "", explain = "Les dégâts de type \"épée\" (physique) sont réduits à 0. Retiré par Charge en Piqué." },
+  -- "Brûlure" (2026-09-01, nouveau statut transversal, Volcan) : ne décroît
+  -- JAMAIS toute seule (contrairement à Saignement ci-dessus, -1/tour) --
+  -- reste à sa valeur tant que rien ne la retire explicitement (rien ne le
+  -- fait pour l'instant, voir Game.tick_burn).
+  { key = "brulure", icon = nil, has_icon = false, related = "", explain = "Inflige X dégâts brut à la fin du tour. Ne perd jamais de charge automatiquement (contrairement à Saignement).", aliases = { "brulures" } },
   -- Discrétion (2026-08-24, ressource propre à l'Assassin, DISTINCTE de
   -- Camouflé -- voir hero.discretion/Game.gain_discretion dans game.lua) :
   -- pas un statut de combat classique (pas de décroissance de fin de tour),

@@ -4,6 +4,7 @@
 -- game/README.md) : gratuit, jamais flou, jamais raté par une génération IA.
 
 local Theme = require("src.ui.theme")
+local Enemies = require("src.data.enemies")
 
 local Background = {}
 
@@ -12,28 +13,33 @@ local VIGNETTE_SIZE = 140 -- px, profondeur du fondu sur chaque bord
 local VIGNETTE_STEPS = 10
 local VIGNETTE_MAX_ALPHA = 0.45
 
--- Catégorie de biome par ennemi -- lecture purement visuelle (game/src/data/enemies.lua
--- ne porte pas cette info et n'en a pas besoin, aucune règle n'en dépend).
-local ENEMY_BIOME = {
-  gobelin = "foret", gobelourd = "foret", troll = "foret", loup = "foret", araignee = "foret",
-  squelette = "donjon", golem = "donjon", necromancien = "donjon",
-  bandit = "repaire", chaman = "repaire",
-}
-
+-- 4 biomes (2026-09-01, extension biomes -- remplace l'ancien ENEMY_BIOME/
+-- BIOMES à 3 catégories purement visuelles) : palette par CLÉ de biome
+-- désormais lue depuis le vrai champ `Enemies.by_id(template_id).biome`
+-- (une vraie donnée de jeu, voir enemies.lua/Encounter.generate_encounter),
+-- plus une table à part maintenue ici. Forêt reprise à l'identique ; les 3
+-- autres remplacent foret/donjon/repaire (couleurs proposées par agent_content,
+-- Artifact v3).
 local BIOMES = {
-  foret   = { top = { 0.24, 0.38, 0.24 }, bottom = { 0.02, 0.03, 0.02 } },
-  donjon  = { top = { 0.22, 0.26, 0.36 }, bottom = { 0.02, 0.03, 0.05 } },
-  repaire = { top = { 0.36, 0.24, 0.12 }, bottom = { 0.04, 0.03, 0.02 } },
-  defaut  = { top = Theme.panel_light, bottom = Theme.bg },
+  foret      = { top = { 0.24, 0.38, 0.24 }, bottom = { 0.02, 0.03, 0.02 } },
+  catacombes = { top = { 0.20, 0.18, 0.32 }, bottom = { 0.02, 0.02, 0.05 } },
+  canyon     = { top = { 0.42, 0.30, 0.14 }, bottom = { 0.05, 0.03, 0.02 } },
+  volcan     = { top = { 0.42, 0.14, 0.08 }, bottom = { 0.05, 0.02, 0.02 } },
+  defaut     = { top = Theme.panel_light, bottom = Theme.bg },
 }
 
 --- Biome dominant d'un combat : celui du premier ennemi vivant trouvé -- un mélange
 -- pondéré n'apporterait rien de lisible en plus pour une simple teinte d'ambiance.
-local function biome_for(enemies)
+-- `biome_key` (optionnel, 2026-09-01, écran d'annonce de biome) : override
+-- direct par clé quand il n'y a PAS encore de `state.enemies` (avant que le
+-- combat lui-même ne démarre) -- prioritaire sur `enemies` s'il est fourni.
+local function biome_for(enemies, biome_key)
+  if biome_key and BIOMES[biome_key] then return BIOMES[biome_key] end
   for _, e in ipairs(enemies or {}) do
     if e.hp > 0 then
-      local biome = ENEMY_BIOME[e.template_id]
-      if biome then return BIOMES[biome] end
+      local template = Enemies.by_id(e.template_id)
+      local biome = template and template.biome
+      if biome and BIOMES[biome] then return BIOMES[biome] end
     end
   end
   return BIOMES.defaut
@@ -51,8 +57,8 @@ local function band_bounds(i, count, total)
   return from, to - from
 end
 
-function Background.draw(enemies, w, h)
-  local pal = biome_for(enemies)
+function Background.draw(enemies, w, h, biome_key)
+  local pal = biome_for(enemies, biome_key)
   for i = 1, STRIPES do
     local t = (i - 1) / (STRIPES - 1)
     local y, band_h = band_bounds(i, STRIPES, h)

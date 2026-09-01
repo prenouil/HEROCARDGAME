@@ -1,4 +1,9 @@
--- Bestiaire (10 ennemis, "Run Infini", 2026-08-06) et aides de scaling par niveau.
+-- Bestiaire (20 ennemis communs, "Run Infini", 2026-08-06 puis extension biomes
+-- 2026-09-01) et aides de scaling par niveau. Chaque ennemi commun (pas les
+-- boss) porte désormais un champ `biome` ("foret"|"catacombes"|"canyon"|
+-- "volcan") qui confine la génération de rencontre à un seul biome par combat
+-- (voir Encounter.generate_encounter) -- avant, purement visuel (ENEMY_BIOME
+-- dans background.lua), maintenant une vraie donnée de jeu.
 -- Port fidèle de ENEMY_TEMPLATES / VALUE_VARIANCE / LEVEL_GROWTH / roll*/scaled*
 -- depuis proto-cartes-completes/index.html. Seules les VALEURS scalent avec le
 -- niveau ; le comportement de chaque ennemi (chooseMove) est fixe.
@@ -66,11 +71,19 @@ local function range_text(base, level)
   return lo .. "-" .. hi
 end
 
-Enemies.status_labels = { vulnerabilite = "Vulnérabilité", incapacite = "Incapacité" }
+Enemies.status_labels = { vulnerabilite = "Vulnérabilité", incapacite = "Incapacité", brulure = "Brûlure" }
+
+-- Noms d'affichage des 4 biomes (2026-09-01) -- utilisés par l'écran
+-- d'annonce de biome et le fond de combat (voir background.lua), jamais par
+-- la génération de rencontre elle-même (qui ne lit que la clé, `t.biome`).
+Enemies.BIOME_NAMES = {
+  foret = "Forêt Sauvage", catacombes = "Catacombes", canyon = "Canyon des Brigands", volcan = "Volcan",
+}
+Enemies.ALL_BIOMES = { "foret", "catacombes", "canyon", "volcan" }
 
 Enemies.templates = {
   {
-    id = "gobelin", name = "Gobelin Maraudeur", icon = "\u{1F47A}", label = "GOB", hp_base = 15, cost = 8, target_mode = "random",
+    id = "gobelin", name = "Gobelin Maraudeur", icon = "\u{1F47A}", label = "GOB", hp_base = 15, cost = 8, target_mode = "random", biome = "foret",
     choose_move = function(e, all, rng)
       if rng:random() < 2 / 3 then
         return { kind = "dmg", name = "Griffure", icon = "\u{1FA78}", dmg_type = "melee", amount = roll_scaled(4, e.level, rng) }
@@ -85,7 +98,7 @@ Enemies.templates = {
     end,
   },
   {
-    id = "squelette", name = "Squelette Archer", icon = "\u{1F480}", label = "SQE", hp_base = 12, cost = 6, target_mode = "random",
+    id = "squelette", name = "Squelette Archer", icon = "\u{1F480}", label = "SQE", hp_base = 12, cost = 6, target_mode = "random", biome = "catacombes",
     choose_move = function(e, all, rng)
       return { kind = "dmg", name = "Tir à l'Arc", icon = "\u{1F3F9}", dmg_type = "ranged", amount = roll_scaled(4, e.level, rng) }
     end,
@@ -94,15 +107,23 @@ Enemies.templates = {
     end,
   },
   {
-    id = "troll", name = "Troll des Marais", icon = "\u{1F9CC}", label = "TRL", hp_base = 28, cost = 14, target_mode = "random",
+    id = "troll", name = "Troll des Marais", icon = "\u{1F9CC}", label = "TRL", hp_base = 28, cost = 14, target_mode = "random", biome = "foret",
     -- Bug signalé (2026-08-24) : Régénération pouvait être télégraphiée/jouée
     -- même à PV pleins (e.hp >= e.max_hp), pour un soin plafonné à 0 -- tour
     -- gâché sans que rien ne se passe à l'écran. `e.hp < e.max_hp` exclut
     -- Régénération du tirage dans ce cas, jamais Coup de Massue à la place --
     -- distinct de l'annulation par les flammes (Game.resolve_enemy_action),
     -- qui s'applique APRÈS coup, une fois déjà télégraphiée.
+    -- `e.fire_touched_ever` (2026-09-01, demande explicite -- "ne peut plus
+    -- lancer régénération du combat si a été touché par du feu") : posé une
+    -- fois pour toutes dans Combat.deal_damage, jamais réinitialisé -- exclut
+    -- DÉFINITIVEMENT Régénération du tirage dès la première brûlure, tout le
+    -- reste du combat. Distinct de `took_fire_damage_this_turn` (annulation
+    -- À LA RÉSOLUTION, toujours utile pour le cas où le Troll brûle APRÈS
+    -- avoir déjà télégraphié Régénération ce même tour, avant que
+    -- `fire_touched_ever` n'ait eu la chance d'exclure le tirage suivant).
     choose_move = function(e, all, rng)
-      if e.hp < e.max_hp and rng:random() < 1 / 3 then
+      if e.hp < e.max_hp and not e.fire_touched_ever and rng:random() < 1 / 3 then
         return { kind = "heal-self", name = "Régénération", icon = "\u{1F49A}", amount = roll_scaled(15, e.level, rng) }
       end
       return { kind = "dmg", name = "Coup de Massue", icon = "\u{1F528}", dmg_type = "melee", amount = roll_scaled(8, e.level, rng) }
@@ -110,38 +131,54 @@ Enemies.templates = {
     moves_info = function(level)
       return {
         { icon = "\u{1F528}", name = "Coup de Massue", text = range_text(8, level) .. " dégâts (fréquent)" },
-        { icon = "\u{1F49A}", name = "Régénération", text = "+" .. range_text(15, level) .. ' "PV" (rare) — annulée si le Troll a subi des dégâts "feu" pendant la phase joueur de ce tour' },
+        { icon = "\u{1F49A}", name = "Régénération", text = "+" .. range_text(15, level) .. ' "PV" (rare) — définitivement indisponible dès que le Troll a subi des dégâts "feu" une seule fois ce combat' },
       }
     end,
   },
   {
-    id = "gobelourd", name = "Gobelourd", icon = "\u{1F5FF}", label = "GBD", hp_base = 20, cost = 10, shield_base = 1, target_mode = "random",
+    -- Bouclier passif 1->3, coût 10->12 (2026-09-01, demande explicite) : un
+    -- bouclier permanent de 3 mitige un coup faible presque en entier chaque
+    -- tour, valeur défensive nettement supérieure à l'ancien 1 quasi
+    -- anecdotique. Coup "agressif" gagne aussi "Saignement" 1 (nouveau) --
+    -- l'autre tour sur deux ("défensif") reste inchangé, juste +3 bouclier
+    -- supplémentaire qui s'ajoute au passif (soit 6 "bouclier" ce tour-là).
+    id = "gobelourd", name = "Gobelourd", icon = "\u{1F5FF}", label = "GBD", hp_base = 20, cost = 12, shield_base = 3, target_mode = "random", biome = "foret",
     choose_move = function(e, all, rng)
       e.defend_cycle = not e.defend_cycle
       local defending = e.defend_cycle
       e.defending = defending
-      local amount = defending and roll_scaled(3, e.level, rng) or roll_scaled(8, e.level, rng)
-      local defense_bonus = defending and roll_scaled(3, e.level, rng) or 0
-      return { kind = "dmg", name = "Coup de Gourdin", icon = "\u{1F528}", dmg_type = "melee", amount = amount, defense_bonus_this_turn = defense_bonus }
+      if defending then
+        return {
+          kind = "dmg", name = "Coup de Gourdin", icon = "\u{1F528}", dmg_type = "melee",
+          amount = roll_scaled(3, e.level, rng), defense_bonus_this_turn = roll_scaled(3, e.level, rng),
+        }
+      end
+      return {
+        kind = "dmg", name = "Coup de Gourdin", icon = "\u{1F528}", dmg_type = "melee",
+        amount = roll_scaled(8, e.level, rng), bleed = roll_scaled(1, e.level, rng),
+      }
     end,
     moves_info = function(level)
       return {
-        { icon = "\u{1F528}", name = "Coup de Gourdin", text = range_text(8, level) .. ' dégâts hors défense / ' .. range_text(3, level) .. ' en défense (+ "bouclier"), un tour sur deux chacun — attaque toujours' },
-        { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(1, level) .. ' "bouclier" en permanence' },
+        { icon = "\u{1F528}", name = "Coup de Gourdin", text = range_text(8, level) .. ' dégâts + "Saignement" ' .. range_text(1, level) .. ' hors défense / ' .. range_text(3, level) .. ' dégâts (+ "bouclier") en défense, un tour sur deux chacun — attaque toujours' },
+        { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(3, level) .. ' "bouclier" en permanence' },
       }
     end,
   },
   {
-    id = "loup", name = "Loup Enragé", icon = "\u{1F43A}", label = "LUP", hp_base = 10, cost = 9, target_mode = "random",
+    -- Dégâts directs 9->7 + "Saignement" 2 (nouveau) (2026-09-01, demande
+    -- explicite -- retouche confirmée telle quelle) : le dégât baisse pour
+    -- compenser l'ajout du Saignement, pas un pur nerf.
+    id = "loup", name = "Loup Enragé", icon = "\u{1F43A}", label = "LUP", hp_base = 10, cost = 9, target_mode = "random", biome = "foret",
     choose_move = function(e, all, rng)
-      return { kind = "dmg", name = "Morsure", icon = "\u{1F43E}", dmg_type = "melee", amount = roll_scaled(9, e.level, rng) }
+      return { kind = "dmg", name = "Morsure", icon = "\u{1F43E}", dmg_type = "melee", amount = roll_scaled(7, e.level, rng), bleed = roll_scaled(2, e.level, rng) }
     end,
     moves_info = function(level)
-      return { { icon = "\u{1F43E}", name = "Morsure", text = range_text(9, level) .. ' dégâts (toujours) — peu de "PV"' } }
+      return { { icon = "\u{1F43E}", name = "Morsure", text = range_text(7, level) .. ' dégâts + "Saignement" ' .. range_text(2, level) .. ' (toujours) — peu de "PV"' } }
     end,
   },
   {
-    id = "araignee", name = "Araignée Venimeuse", icon = "\u{1F577}\u{FE0F}", label = "ARA", hp_base = 12, cost = 7, target_mode = "random",
+    id = "araignee", name = "Araignée Venimeuse", icon = "\u{1F577}\u{FE0F}", label = "ARA", hp_base = 12, cost = 7, target_mode = "random", biome = "foret",
     choose_move = function(e, all, rng)
       return { kind = "dmg", name = "Piqûre", icon = "\u{2620}\u{FE0F}", dmg_type = "melee", amount = roll_scaled(2, e.level, rng), brut = true, bleed = roll_scaled(3, e.level, rng) }
     end,
@@ -150,7 +187,7 @@ Enemies.templates = {
     end,
   },
   {
-    id = "necromancien", name = "Nécromancien Novice", icon = "\u{1F9D9}", label = "NEC", hp_base = 10, cost = 8, target_mode = "random",
+    id = "necromancien", name = "Nécromancien Novice", icon = "\u{1F9D9}", label = "NEC", hp_base = 10, cost = 9, target_mode = "random", biome = "catacombes",
     -- Deux attaques désormais (2026-08-21, demande explicite -- avant,
     -- Malédiction inconditionnelle) : Malédiction 2/3 du temps, Toucher
     -- Nécrotique (dégâts) 1/3 du temps. La règle tacite "si aucun ennemi ne
@@ -158,33 +195,48 @@ Enemies.templates = {
     -- dégâts" vit à part, dans Encounter.roll_telegraphs -- jamais ici, et
     -- jamais dans moves_info ci-dessous (règle volontairement invisible pour
     -- le joueur, ne doit apparaître dans aucun texte affiché).
+    -- Malédiction pose désormais Vulnérabilité ET Incapacité (2026-09-01,
+    -- demande explicite) via status_key2/amount2 (voir la branche "debuff"
+    -- généralisée dans Game.resolve_enemy_action).
     choose_move = function(e, all, rng)
       if rng:random() < 1 / 3 then
         return { kind = "dmg", name = "Toucher Nécrotique", icon = "\u{1F480}", dmg_type = "magic", amount = roll_scaled(3, e.level, rng) }
       end
-      return { kind = "debuff", name = "Malédiction", icon = "\u{1F52E}", status_key = "vulnerabilite", amount = roll_scaled(3, e.level, rng) }
+      return {
+        kind = "debuff", name = "Malédiction", icon = "\u{1F52E}",
+        status_key = "vulnerabilite", amount = roll_scaled(3, e.level, rng),
+        status_key2 = "incapacite", amount2 = roll_scaled(3, e.level, rng),
+      }
     end,
     moves_info = function(level)
       return {
-        { icon = "\u{1F52E}", name = "Malédiction", text = '"Vulnérabilité" ' .. range_text(3, level) .. ", pas de dégât direct (fréquent)" },
+        { icon = "\u{1F52E}", name = "Malédiction", text = '"Vulnérabilité" ' .. range_text(3, level) .. ' ET "Incapacité" ' .. range_text(3, level) .. ", pas de dégât direct (fréquent)" },
         { icon = "\u{1F480}", name = "Toucher Nécrotique", text = range_text(3, level) .. " dégâts (rare)" },
       }
     end,
   },
   {
-    id = "golem", name = "Golem de Pierre", icon = "\u{1FAA8}", label = "GOL", hp_base = 35, cost = 16, shield_base = 3, target_mode = "random",
+    -- Coût 16->20 (2026-09-01, demande explicite -- nouvelle capacité
+    -- "Protection", voir Game.start_turn) : Protection est une EXCEPTION au
+    -- fonctionnement habituel du moteur -- elle ne vit PAS dans choose_move/
+    -- ce fichier (contrairement à toutes les autres capacités), elle se
+    -- déclenche inconditionnellement en tout DÉBUT de tour, avant même la
+    -- phase joueur, indépendamment du move télégraphié ci-dessous (qui reste
+    -- uniquement Poing de Pierre).
+    id = "golem", name = "Golem de Pierre", icon = "\u{1FAA8}", label = "GOL", hp_base = 35, cost = 20, shield_base = 3, target_mode = "random", biome = "catacombes",
     choose_move = function(e, all, rng)
       return { kind = "conditional-retaliate", name = "Repos (sauf si touché)", icon = "\u{1FAA8}", dmg_type = "melee", amount = roll_scaled(7, e.level, rng) }
     end,
     moves_info = function(level)
       return {
+        { icon = "\u{1F6E1}\u{FE0F}", name = "Protection", text = 'Donne 2 "bouclier" à tous les autres ennemis vivants, au tout début de chaque tour (avant que vous ne jouiez) — inconditionnel' },
         { icon = "\u{1FAA8}", name = "Poing de Pierre", text = range_text(7, level) .. " dégâts, seulement s'il subit des dégâts pendant la phase joueur ; sinon ne fait rien" },
         { icon = "\u{1F6E1}\u{FE0F}", name = "Bouclier passif", text = range_text(3, level) .. ' "bouclier" en permanence — très gros "PV"' },
       }
     end,
   },
   {
-    id = "bandit", name = "Bandit Fourbe", icon = "\u{1F52A}", label = "BAN", hp_base = 14, cost = 9, target_mode = "lowest-hp",
+    id = "bandit", name = "Bandit Fourbe", icon = "\u{1F52A}", label = "BAN", hp_base = 14, cost = 9, target_mode = "lowest-hp", biome = "canyon",
     choose_move = function(e, all, rng)
       return { kind = "dmg", name = "Coup Sournois", icon = "\u{1F52A}", dmg_type = "melee", amount = roll_scaled(6, e.level, rng) }
     end,
@@ -193,7 +245,8 @@ Enemies.templates = {
     end,
   },
   {
-    id = "chaman", name = "Chaman Gobelin", icon = "\u{1FA84}", label = "CHA", hp_base = 12, cost = 8, target_mode = "random",
+    -- Soin 5->10, coût 8->9 (2026-09-01, demande explicite) : soin doublé.
+    id = "chaman", name = "Chaman Gobelin", icon = "\u{1FA84}", label = "CHA", hp_base = 12, cost = 9, target_mode = "random", biome = "canyon",
     choose_move = function(e, all, rng)
       local wounded = {}
       for _, o in ipairs(all) do
@@ -201,14 +254,177 @@ Enemies.templates = {
       end
       if #wounded > 0 then
         local target = wounded[rng:random(#wounded)]
-        return { kind = "heal-ally", name = "Chant Rituel", icon = "\u{1FA84}", amount = roll_scaled(5, e.level, rng), heal_target_id = target.id }
+        return { kind = "heal-ally", name = "Chant Rituel", icon = "\u{1FA84}", amount = roll_scaled(10, e.level, rng), heal_target_id = target.id }
       end
       return { kind = "dmg", name = "Chant Rituel (repli)", icon = "\u{2734}\u{FE0F}", dmg_type = "magic", amount = roll_scaled(3, e.level, rng) }
     end,
     moves_info = function(level)
       return {
-        { icon = "\u{1FA84}", name = "Chant Rituel", text = "Soigne un allié blessé de " .. range_text(5, level) .. ' "PV" s\'il y en a un' },
+        { icon = "\u{1FA84}", name = "Chant Rituel", text = "Soigne un allié blessé de " .. range_text(10, level) .. ' "PV" s\'il y en a un' },
         { icon = "\u{2734}\u{FE0F}", name = "Chant Rituel (repli)", text = "Sinon, attaque pour " .. range_text(3, level) .. " dégâts" },
+      }
+    end,
+  },
+
+  -- ---------- Nouveaux ennemis, extension biomes (2026-09-01) ----------
+  {
+    id = "garde-ossements", name = "Garde-Ossements", icon = "\u{1F480}", label = "GOS", hp_base = 18, cost = 10, shield_base = 2, target_mode = "random", biome = "catacombes",
+    choose_move = function(e, all, rng)
+      if rng:random() < 2 / 3 then
+        return { kind = "dmg", name = "Coup de Bouclier", icon = "\u{1F6E1}\u{FE0F}", dmg_type = "melee", amount = roll_scaled(5, e.level, rng) }
+      end
+      return { kind = "debuff", name = "Brise-Volonté", icon = "\u{1F4A2}", status_key = "incapacite", amount = roll_scaled(2, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F6E1}\u{FE0F}", name = "Coup de Bouclier", text = range_text(5, level) .. " dégâts (fréquent)" },
+        { icon = "\u{1F4A2}", name = "Brise-Volonté", text = '"Incapacité" ' .. range_text(2, level) .. ", pas de dégât direct (rare)" },
+      }
+    end,
+  },
+  -- Ancre de la mécanique des Catacombes ("les morts ne restent pas morts") :
+  -- relève les Squelette Archer/Garde-Ossements tombés -- réutilise le kind
+  -- "revive" généralisé (voir Game.resolve_enemy_action, move.revive_template_ids),
+  -- plus jamais câblé en dur sur "pousse" comme avant.
+  {
+    id = "pretre-dechu", name = "Prêtre Déchu", icon = "\u{1F9DF}", label = "PRE", hp_base = 16, cost = 13, target_mode = "random", biome = "catacombes",
+    choose_move = function(e, all, rng)
+      local any_dead = false
+      for _, o in ipairs(all) do
+        if o.id ~= e.id and (o.template_id == "squelette" or o.template_id == "garde-ossements") and o.hp <= 0 then
+          any_dead = true
+          break
+        end
+      end
+      if any_dead and rng:random() < 2 / 5 then
+        return { kind = "revive", name = "Rituel de Rappel", icon = "\u{1F480}", revive_template_ids = { "squelette", "garde-ossements" } }
+      end
+      return { kind = "dmg", name = "Toucher Flétrissant", icon = "\u{1F480}", dmg_type = "magic", amount = roll_scaled(4, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F480}", name = "Rituel de Rappel", text = "Relève tous les Squelette Archer/Garde-Ossements vaincus, s'il y en a" },
+        { icon = "\u{1F480}", name = "Toucher Flétrissant", text = range_text(4, level) .. " dégâts (sinon)" },
+      }
+    end,
+  },
+  {
+    id = "eclaireuse", name = "Éclaireuse des Sables", icon = "\u{1F3F9}", label = "ECL", hp_base = 13, cost = 10, target_mode = "lowest-hp", biome = "canyon",
+    choose_move = function(e, all, rng)
+      if rng:random() < 2 / 3 then
+        return { kind = "dmg", name = "Flèche Barbelée", icon = "\u{1F3F9}", dmg_type = "ranged", amount = roll_scaled(4, e.level, rng) }
+      end
+      return { kind = "dmg", name = "Tir Perçant", icon = "\u{1F3F9}", dmg_type = "ranged", amount = roll_scaled(7, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F3F9}", name = "Flèche Barbelée", text = range_text(4, level) .. ' dégâts, cible toujours le héros au moins de "PV" (fréquent)' },
+        { icon = "\u{1F3F9}", name = "Tir Perçant", text = range_text(7, level) .. ' dégâts, cible toujours le héros au moins de "PV" (rare)' },
+      }
+    end,
+  },
+  -- "Charge de groupe" recalculée à CHAQUE tirage (pas figée à l'instanciation) :
+  -- le nombre d'ennemis vivants change en cours de combat, +2 par autre ennemi
+  -- vivant (flat, pas mis à l'échelle du niveau) -- ex. seul = 7, avec 3
+  -- autres ennemis vivants = 13.
+  {
+    id = "chef-de-bande", name = "Chef de Bande", icon = "\u{1F452}", label = "CHF", hp_base = 22, cost = 14, shield_base = 1, target_mode = "lowest-hp", biome = "canyon",
+    choose_move = function(e, all, rng)
+      local others = 0
+      for _, o in ipairs(all) do
+        if o.id ~= e.id and o.hp > 0 then others = others + 1 end
+      end
+      return { kind = "dmg", name = "Charge de groupe", icon = "\u{2694}\u{FE0F}", dmg_type = "melee", amount = roll_scaled(7, e.level, rng) + 2 * others }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{2694}\u{FE0F}", name = "Charge de groupe", text = range_text(7, level) .. " dégâts + 2 par autre ennemi vivant sur le champ de bataille (toujours)" } }
+    end,
+  },
+  {
+    id = "tireuse", name = "Tireuse Embusquée", icon = "\u{1F3F9}", label = "TIR", hp_base = 11, cost = 7, target_mode = "lowest-hp", biome = "canyon",
+    choose_move = function(e, all, rng)
+      return { kind = "dmg", name = "Tir Ajusté", icon = "\u{1F3F9}", dmg_type = "ranged", amount = roll_scaled(5, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{1F3F9}", name = "Tir Ajusté", text = range_text(5, level) .. ' dégâts, cible toujours le héros au moins de "PV" (toujours)' } }
+    end,
+  },
+  {
+    id = "salamandre", name = "Salamandre de Lave", icon = "\u{1F98E}", label = "SAL", hp_base = 14, cost = 10, target_mode = "random", biome = "volcan",
+    choose_move = function(e, all, rng)
+      if rng:random() < 2 / 3 then
+        return { kind = "dmg", name = "Griffure Ardente", icon = "\u{1F525}", dmg_type = "melee", amount = roll_scaled(5, e.level, rng) }
+      end
+      return { kind = "buff-self", name = "Surchauffe", icon = "\u{1F525}", status_key = "puissance", amount = 2, log_text = "surchauffe et gagne en puissance" }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F525}", name = "Griffure Ardente", text = range_text(5, level) .. " dégâts (fréquent)" },
+        { icon = "\u{1F525}", name = "Surchauffe", text = 'Gagne "Puissance" 2, pas de dégât ce tour-là (rare) — ne redescend jamais seule' },
+      }
+    end,
+  },
+  {
+    id = "cracheur", name = "Cracheur de Braise", icon = "\u{1F32B}\u{FE0F}", label = "CRA", hp_base = 12, cost = 8, target_mode = "random", biome = "volcan",
+    choose_move = function(e, all, rng)
+      return { kind = "dmg", name = "Jet de Braise", icon = "\u{1F525}", dmg_type = "magic", amount = roll_scaled(3, e.level, rng), burn = roll_scaled(1, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return { { icon = "\u{1F525}", name = "Jet de Braise", text = range_text(3, level) .. ' dégâts + "Brûlure" ' .. range_text(1, level) .. " (toujours) — la Brûlure ne décroît jamais seule" } }
+    end,
+  },
+  {
+    id = "elementaire-cendre", name = "Élémentaire de Cendre", icon = "\u{1F32B}\u{FE0F}", label = "ELC", hp_base = 11, cost = 8, target_mode = "random", biome = "volcan",
+    choose_move = function(e, all, rng)
+      if rng:random() < 1 / 2 then
+        return {
+          kind = "debuff", name = "Souffle Étouffant", icon = "\u{1F32B}\u{FE0F}",
+          status_key = "vulnerabilite", amount = roll_scaled(2, e.level, rng),
+          status_key2 = "brulure", amount2 = roll_scaled(1, e.level, rng),
+        }
+      end
+      return { kind = "dmg", name = "Éclat Brûlant", icon = "\u{1F525}", dmg_type = "magic", amount = roll_scaled(4, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F32B}\u{FE0F}", name = "Souffle Étouffant", text = '"Vulnérabilité" ' .. range_text(2, level) .. ' + "Brûlure" ' .. range_text(1, level) .. ", pas de dégât direct (1/2)" },
+        { icon = "\u{1F525}", name = "Éclat Brûlant", text = range_text(4, level) .. " dégâts (1/2)" },
+      }
+    end,
+  },
+  {
+    id = "golem-magma", name = "Golem de Magma", icon = "\u{1FAA8}", label = "GOM", hp_base = 32, cost = 15, shield_base = 2, target_mode = "random", biome = "volcan",
+    choose_move = function(e, all, rng)
+      if rng:random() < 2 / 3 then
+        return { kind = "dmg", name = "Poing Incandescent", icon = "\u{1F525}", dmg_type = "melee", amount = roll_scaled(7, e.level, rng) }
+      end
+      return { kind = "buff-self", name = "Cœur en Fusion", icon = "\u{1F525}", status_key = "puissance", amount = 2, log_text = "voit son cœur de magma s'embraser" }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F525}", name = "Poing Incandescent", text = range_text(7, level) .. " dégâts (fréquent)" },
+        { icon = "\u{1F525}", name = "Cœur en Fusion", text = 'Gagne "Puissance" 2, pas de dégât ce tour-là (rare) — ne redescend jamais seule' },
+      }
+    end,
+  },
+  -- Ancre de la mécanique du Volcan ("Surchauffe" -- Puissance qui ne
+  -- redescend jamais seule) : Puissance garantie tous les 3 tours (pas
+  -- aléatoire, pour rester lisible sur cet ennemi) -- `e.vouivre_turn`,
+  -- compteur posé/incrémenté directement sur l'instance depuis choose_move,
+  -- même idiome que `e.defend_cycle` du Gobelourd.
+  {
+    id = "vouivre", name = "Vouivre des Cendres", icon = "\u{1F409}", label = "VOU", hp_base = 20, cost = 17, target_mode = "random", biome = "volcan",
+    choose_move = function(e, all, rng)
+      e.vouivre_turn = (e.vouivre_turn or 0) + 1
+      if e.vouivre_turn % 3 == 0 then
+        return { kind = "buff-self", name = "Montée en Cendres", icon = "\u{1F525}", status_key = "puissance", amount = 2, log_text = "monte en cendres" }
+      end
+      return { kind = "dmg", name = "Griffure de Braise", icon = "\u{1F525}", dmg_type = "melee", amount = roll_scaled(6, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F525}", name = "Griffure de Braise", text = range_text(6, level) .. " dégâts (2 tours sur 3)" },
+        { icon = "\u{1F525}", name = "Montée en Cendres", text = 'Gagne "Puissance" 2, automatique et garanti tous les 3 tours — ne redescend jamais seule' },
       }
     end,
   },
@@ -256,7 +472,7 @@ Enemies.templates = {
         end
       end
       if any_dead_pousse and rng:random() < 1 / 3 then
-        return { kind = "revive", name = "Renaissance Sylvestre", icon = "\u{1F331}" }
+        return { kind = "revive", name = "Renaissance Sylvestre", icon = "\u{1F331}", revive_template_ids = { "pousse" } }
       end
       if rng:random() < 1 / 2 then
         return { kind = "dmg", name = "Coup de Branche", icon = "\u{1F9B4}", dmg_type = "melee", amount = roll_scaled(8, e.level, rng) }
