@@ -90,6 +90,29 @@ BUILDERS.flup = function()
   end, 0.65)
 end
 
+-- "fluf" -- départ des pièces de l'écran de victoire (2026-09-02, demande
+-- explicite -- "un bruit de fluf au départ") : simple souffle de bruit très
+-- doux et court, DISTINCT de "woosh" (bien plus long/appuyé, pensé pour la
+-- chute du gros chiffre d'énergie) -- volume bas façon "hover", jamais un
+-- signal marquant, juste un souffle léger.
+BUILDERS.fluf = function()
+  return Chiptune.render(0.12, function(t)
+    return Chiptune.noise() * Chiptune.decay(t, 0.12, 2.2)
+  end, 0.25)
+end
+
+-- "cling" -- arrivée de CHAQUE pièce sur la bourse (2026-09-02, demande
+-- explicite -- "un bruit... de cling à l'arrivée") : DISTINCT de "shting"
+-- (BUILDERS.shield -- pensé pour un bouclier, plus grave/large) -- deux notes
+-- carrées très aiguës et brèves, plus métallique/cristallin, à l'échelle
+-- d'une seule pièce plutôt que d'un impact de bouclier.
+BUILDERS.cling = function()
+  return Chiptune.concat({
+    note(2200, 0.05, "square", 2.2, 0.35, 0.25),
+    note(2800, 0.07, "square", 1.8, 0.3, 0.2),
+  })
+end
+
 -- "hover" -- survol d'un aventurier à l'écran de choix d'équipe (2026-08-30,
 -- bug signalé -- "le son choisi pour le survol d'un aventurier est trop
 -- agressif, il faut en choisir un beaucoup plus étouffé, plus neutre, plus

@@ -88,7 +88,10 @@ end
 -- 250->270 (2026-08-31, passage 1280x720) : profite des 60px de hauteur en
 -- plus pour redonner un peu d'air entre la rangée d'ennemis et celle des
 -- aventuriers, plutôt que de garder le tassement forcé par l'ancien H=660.
-local HERO_ROW_Y = 270
+-- 270->284 (2026-09-02, demande explicite -- affichage des PO "sous Ta
+-- troupe") : +14 pour loger une 2ᵉ ligne (le HUD or) entre le label "Ta
+-- troupe" et la rangée de héros, voir draw_gold_display plus bas.
+local HERO_ROW_Y = 284
 
 function View.hero_rects(state)
   local rects = centered_row(#state.heroes, UNIT_W, UNIT_H, HERO_ROW_Y)
@@ -221,9 +224,13 @@ View.discard_pile_rect = { x = W - 20 - PILE_W, y = HAND_Y, w = PILE_W, h = PILE
 -- jamais chevauché, voir draw_deck_view/View.deck_view_cards pour le contenu.
 -- Moins large, plus haut, sur 2 lignes (2026-08-30, demande explicite) :
 -- 96x20 -> 64x40, texte "Voir le\ndeck" plutôt qu'une seule ligne large.
+-- Rebaptisé "Deck", 1 seule ligne, largeur alignée sur la pioche (2026-09-02,
+-- demande explicite) : `w = PILE_W` (au lieu de 64 fixe) -- tient sur 1
+-- ligne à cette largeur, hauteur réduite en conséquence (40 -> 24, plus
+-- besoin de place pour une 2ᵉ ligne).
 View.deck_view_button = {
   x = View.deck_pile_rect.x, y = View.deck_pile_rect.y + View.deck_pile_rect.h + 5,
-  w = 64, h = 40, label = "Voir le\ndeck",
+  w = PILE_W, h = 24, label = "Deck",
 }
 
 -- Fenêtre "voir le deck" elle-même (2026-08-30) : grand panneau centré,
@@ -248,6 +255,12 @@ View.energy_display_rect = {
   x = View.deck_pile_rect.x + View.deck_pile_rect.w + ENERGY_GAP, y = View.deck_pile_rect.y,
   w = 90, h = 90,
 }
+
+-- "PO" (or, 2026-09-02, demande explicite -- "indiquée au dessous 'Ta
+-- troupe'") : ligne compacte (icône + texte), PAS un cadre 90x90 comme
+-- View.energy_display_rect -- coincée entre le label "Ta troupe"
+-- (HERO_ROW_Y-28) et la rangée de héros (HERO_ROW_Y), 14px de haut seulement.
+View.gold_display_rect = { x = 20, y = HERO_ROW_Y - 14, w = 120, h = 14 }
 
 -- Rangée de boutons du bas ancrée sur la MAIN (2026-08-27) -- HAND_Y + CARD_H,
 -- PAS sur la pioche/défausse, qui ont été réduites de 50% : sans ce
@@ -303,6 +316,11 @@ View.end_turn_button = {
 
 View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
 
+-- Menu pause (2026-09-02, demande explicite -- ESC) : 2 options empilées,
+-- centrées -- même gabarit que View.back_button/l'écran Options.
+View.pause_menu_continue_button = { x = W / 2 - 100, y = H / 2 - 4, w = 200, h = 44, label = "Continuer" }
+View.pause_menu_return_button = { x = W / 2 - 100, y = H / 2 + 50, w = 200, h = 44, label = "Revenir au menu" }
+
 -- Menu principal (2026-08-21, demande explicite) : 5 boutons empilés,
 -- centrés -- même geste que les autres écrans à bouton unique (Rejouer,
 -- Forge/Temple) : un id sur chaque rect, lu par Input.mousepressed pour savoir
@@ -317,9 +335,14 @@ View.menu_buttons = {}
 do
   -- Ordre demandé explicitement (2026-08-30) : Jouer un run -> Mode infini ->
   -- Tester le boss -> Options -> Quitter (avant : boss en premier).
+  -- "Mode infini" retiré du menu (2026-09-02, demande explicite -- annoncé
+  -- comme "bientôt retiré" par le porteur de projet, voir
+  -- content/memory/project_mode-infini-retrait.md) : le code du mode
+  -- "infini" (Controller.run_mode == "infini", pool d'ennemis non filtré par
+  -- biome, etc.) reste intact, juste devenu inaccessible depuis l'UI --
+  -- retrait complet hors scope de cette demande.
   local defs = {
     { id = "run", label = "Jouer un run" },
-    { id = "infini", label = "Mode infini" },
     { id = "boss", label = "Tester le boss" },
     { id = "options", label = "Options" },
     { id = "quit", label = "Quitter" },
@@ -584,6 +607,17 @@ local TEAM_LAUNCH_W, TEAM_LAUNCH_H = 170, 110
 View.team_select_launch_button = {
   x = W - TEAM_LAUNCH_W - 30, y = TEAM_BOTTOM_Y, w = TEAM_LAUNCH_W, h = TEAM_LAUNCH_H,
   label = "Partir à\nl'aventure",
+}
+
+-- "Auto-fill" (2026-09-02, demande explicite -- "choisit immédiatement et
+-- aléatoirement 4 aventuriers et lance l'aventure") : juste au-dessus de
+-- "Partir à l'aventure", même largeur/même colonne -- toujours cliquable,
+-- contrairement au lancement normal qui exige 4 aventuriers déjà confirmés
+-- (voir Controller:team_select_autofill, qui ignore la sélection en cours).
+local TEAM_AUTOFILL_W, TEAM_AUTOFILL_H, TEAM_AUTOFILL_GAP = TEAM_LAUNCH_W, 36, 10
+View.team_select_autofill_button = {
+  x = W - TEAM_LAUNCH_W - 30, y = TEAM_BOTTOM_Y - TEAM_AUTOFILL_H - TEAM_AUTOFILL_GAP,
+  w = TEAM_AUTOFILL_W, h = TEAM_AUTOFILL_H, label = "Auto-fill",
 }
 
 -- "Deck" de l'écran de choix d'équipe (2026-08-30, demande explicite --
@@ -1782,6 +1816,20 @@ local function draw_energy_display(state)
   text(state.energy .. " / " .. Game.TURN_START_ENERGY, r.x, r.y + 52, r.w, 24, Theme.energy)
 end
 
+-- "PO" (or, 2026-09-02, demande explicite) : même esprit que
+-- draw_energy_display (icône + texte coloré) mais réduit à une ligne
+-- compacte de 14px -- voir View.gold_display_rect. Cible d'arrivée des
+-- pièces animées de l'écran de victoire (draw_coin_flights).
+local function draw_gold_display(state)
+  local r = View.gold_display_rect
+  local icon = Sprites.keyword("or")
+  if icon then
+    love.graphics.setColor(1, 1, 1, 1)
+    Sprites.draw_centered(icon, r.x + 7, r.y + 7, 7)
+  end
+  text(tostring(state.gold), r.x + 18, r.y, r.w - 18, r.h, Theme.gold, "left")
+end
+
 -- Gros chiffre d'énergie qui CHUTE sur sa pastille en début de tour
 -- (2026-08-21, redemandé explicitement -- la version précédente grossissait
 -- sur place, jugée pas assez marquante) : apparaît en très grand, tout en
@@ -1872,7 +1920,7 @@ local function draw_hand(controller)
     panel(db.x, db.y, db.w, db.h, Theme.panel_light)
     set(Theme.muted); love.graphics.setLineWidth(1)
     love.graphics.rectangle("line", db.x, db.y, db.w, db.h, 6, 6)
-    text(db.label, db.x, db.y + 8, db.w, 11, Theme.text, "center")
+    text(db.label, db.x, db.y + db.h / 2 - 5, db.w, 11, Theme.text, "center")
   end
 
   -- Mode "flèche" (2026-08-09) : la carte sélectionnée reste posée en avant
@@ -2349,6 +2397,29 @@ local function draw_card_flights(controller)
   end
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.setLineWidth(1)
+end
+
+-- Pièces d'or de l'écran de victoire (2026-09-02, demande explicite --
+-- "elles volent depuis cette indication jusqu'à la bourse de l'équipe") :
+-- même idiome que draw_card_flights ci-dessus (interpolation pure, aucune
+-- logique de jeu ici -- controller.coin_anims est peuplé par
+-- Controller:click_victory_gold), mais pas besoin de canvas -- une icône
+-- "or" simple (Sprites.draw_centered), pas une face de carte complète.
+local function draw_coin_flights(controller)
+  local icon = Sprites.keyword("or")
+  if not icon then return end
+  for _, a in ipairs(controller.coin_anims) do
+    if a.elapsed >= a.delay then
+      local p = math.min(1, (a.elapsed - a.delay) / a.duration)
+      local ease = 1 - (1 - p) ^ 2 -- easeOutQuad, même famille que le vol de carte
+      local fx, fy = a.from.x + a.from.w / 2, a.from.y + a.from.h / 2
+      local tx, ty = a.to.x + a.to.w / 2, a.to.y + a.to.h / 2
+      local x = fx + (tx - fx) * ease
+      local y = fy + (ty - fy) * ease
+      love.graphics.setColor(1, 1, 1, 1)
+      Sprites.draw_centered(icon, x, y, 12)
+    end
+  end
 end
 
 -- Nombre de dégâts/soin flottant (2026-08-09, party "amélioration des
@@ -3484,6 +3555,16 @@ local function draw_team_select(controller)
   -- décalage remis à l'échelle dans la même proportion (16 -> 24).
   text(lb.label, lb.x, lb.y + lb.h / 2 - 24, lb.w, 24, ready and Theme.bg or Theme.muted, "center")
 
+  -- "Auto-fill" (2026-09-02) : style plus discret que "Partir à l'aventure"
+  -- (toujours actif, pas de pulse "prêt") -- juste au-dessus.
+  local ab = View.team_select_autofill_button
+  set(Theme.panel_light)
+  love.graphics.rectangle("fill", ab.x, ab.y, ab.w, ab.h, 8, 8)
+  set(Theme.muted); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", ab.x, ab.y, ab.w, ab.h, 8, 8)
+  love.graphics.setLineWidth(1)
+  text(ab.label, ab.x, ab.y + ab.h / 2 - 7, ab.w, 14, Theme.text, "center")
+
   -- Infobulles (2026-08-30, bug signalé -- "il faut que les info bulles
   -- marchent sur les aventuriers... pareil pour les cartes") : draw_tooltip
   -- lit déjà controller.hover (mis à jour par Input.mousemoved, voir ses
@@ -3604,6 +3685,20 @@ local function draw_biome_intro(controller)
   draw_camp_entrance(controller, name, H / 2 - 20, function()
     text("Nouvelle zone…", 0, H / 2 + 14, W, 14, Theme.muted)
   end)
+end
+
+-- Menu pause (2026-09-02, demande explicite) : overlay par-dessus l'écran
+-- courant (jamais dessiné en dessous n'est effacé) -- réutilise
+-- draw_menu_style_button tel quel (même style que les boutons du menu
+-- principal/"Retour" de l'écran Options), ne fait rien si l'overlay n'est
+-- pas ouvert (voir Controller.pause_menu_open).
+local function draw_pause_menu(controller)
+  if not controller.pause_menu_open then return end
+  set(Theme.black, 0.75)
+  love.graphics.rectangle("fill", 0, 0, W, H)
+  text("Pause", 0, H / 2 - 60, W, 24, Theme.text)
+  draw_menu_style_button(View.pause_menu_continue_button)
+  draw_menu_style_button(View.pause_menu_return_button)
 end
 
 local function draw_boss_victory(controller)
@@ -3823,11 +3918,17 @@ local function draw_deck_view(controller)
 end
 
 function View.draw(controller)
-  if controller.screen == "menu" then draw_menu(controller); return end
-  if controller.screen == "options" then draw_options(controller); return end
-  if controller.screen == "bossVictory" then draw_boss_victory(controller); return end
-  if controller.screen == "biome_intro" then draw_biome_intro(controller); return end
-  if controller.screen == "team_select" then draw_team_select(controller); draw_deck_view(controller); return end
+  -- Menu pause (2026-09-02, demande explicite -- ESC depuis N'IMPORTE quel
+  -- écran, voir Controller:handle_escape) : `draw_pause_menu` vérifie
+  -- elle-même `controller.pause_menu_open` et ne fait rien sinon -- appelée à
+  -- chaque point de sortie de cette fonction, même schéma déjà en place pour
+  -- draw_deck_view (3 sites) juste en dessous, plutôt qu'une restructuration
+  -- de toute la fonction pour un seul appel final commun.
+  if controller.screen == "menu" then draw_menu(controller); draw_pause_menu(controller); return end
+  if controller.screen == "options" then draw_options(controller); draw_pause_menu(controller); return end
+  if controller.screen == "bossVictory" then draw_boss_victory(controller); draw_pause_menu(controller); return end
+  if controller.screen == "biome_intro" then draw_biome_intro(controller); draw_pause_menu(controller); return end
+  if controller.screen == "team_select" then draw_team_select(controller); draw_deck_view(controller); draw_pause_menu(controller); return end
 
   -- Écrans "camp" (2026-08-30, bug signalé -- "pendant le draft on voit
   -- encore les restes du combat, c'est une bonne chose. Par contre, quand on
@@ -3862,6 +3963,7 @@ function View.draw(controller)
       draw_tooltip(controller)
     end
     draw_deck_view(controller)
+    draw_pause_menu(controller)
     love.graphics.setColor(1, 1, 1, 1)
     return
   end
@@ -3907,7 +4009,10 @@ function View.draw(controller)
     end
   end
 
-  text("Ta troupe", 20, HERO_ROW_Y - 14, 200, 10, Theme.muted, "left")
+  -- Recalé de HERO_ROW_Y-14 à HERO_ROW_Y-28 (2026-09-02) : libère la ligne
+  -- HERO_ROW_Y-14 pour le HUD "PO" juste en dessous, voir draw_gold_display.
+  text("Ta troupe", 20, HERO_ROW_Y - 28, 200, 10, Theme.muted, "left")
+  draw_gold_display(state)
   for _, h in ipairs(state.heroes) do draw_hero(controller, h, View.hero_rects(state)[h.id]) end
 
   draw_enemy_target_arrows(controller)
@@ -3934,12 +4039,12 @@ function View.draw(controller)
     local b = View.overlay_restart_button
     set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
     set(Theme.bg); text(b.label, b.x, b.y + 9, b.w, 12, Theme.bg)
-  elseif controller.screen == "draft" and controller.draft_picks then
+  elseif controller.screen == "victory" then
     set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
 
     -- Titre "Victoire !" en zoom + bump (2026-08-08) : seul élément affiché
-    -- au tout début de l'écran de draft, avant même que les cartes existent
-    -- visuellement -- voir Controller:enter_draft_screen pour le séquencement.
+    -- au tout début de l'écran, avant même que les gains n'existent
+    -- visuellement -- voir Controller:enter_victory_screen pour le séquencement.
     local va = controller.victory_anim
     local title_scale = va and ease_out_back(va.t, controller.victory_title_duration) or 1
     love.graphics.push()
@@ -3949,9 +4054,50 @@ function View.draw(controller)
     text("Victoire !", 0, 60, W, 24, Theme.text)
     love.graphics.pop()
 
-    if controller.draft_cards_shown then
-      text("Combat " .. (state.run.combat_index) .. " remporté ! Choisis une carte à ajouter à ton deck.", 0, 92, W, 12, Theme.muted)
-      local rects = centered_row(#controller.draft_picks, 130, 190, 160, 24)
+    if controller.victory_gains_shown then
+      text("Combat " .. (state.run.combat_index) .. " remporté ! Récupère tes gains.", 0, 92, W, 12, Theme.muted)
+
+      -- Gain "PO" (2026-09-02, demande explicite) : cliquable tant que non
+      -- collecté -- voir Controller:click_victory_gold pour le vol de pièces
+      -- vers le HUD (draw_coin_flights, plus bas dans View.draw) et le
+      -- "fluf"/"cling" associés.
+      local gr = View.victory_gold_rect
+      panel(gr.x, gr.y, gr.w, gr.h, Theme.panel_light)
+      set(controller.victory_gold_collected and Theme.muted or Theme.gold)
+      love.graphics.setLineWidth(3)
+      love.graphics.rectangle("line", gr.x, gr.y, gr.w, gr.h, 10, 10)
+      love.graphics.setLineWidth(1)
+      if controller.victory_gold_collected then
+        text("Récupéré", gr.x, gr.y + gr.h / 2 - 6, gr.w, 12, Theme.muted, "center")
+      else
+        local coin_icon = Sprites.keyword("or")
+        if coin_icon then
+          love.graphics.setColor(1, 1, 1, 1)
+          Sprites.draw_centered(coin_icon, gr.x + gr.w / 2, gr.y + 46, 28)
+        end
+        text("+" .. controller.victory_gold_reward .. " PO", gr.x, gr.y + 92, gr.w, 16, Theme.gold, "center")
+      end
+
+      -- Gain "carte" (2026-09-02, demande explicite) : icône de carte avec un
+      -- "?", clic lance le draft existant -- voir Controller:click_victory_card.
+      local cr = View.victory_card_rect
+      panel(cr.x, cr.y, cr.w, cr.h, Theme.panel_light)
+      set(controller.victory_card_collected and Theme.muted or Theme.accent)
+      love.graphics.setLineWidth(3)
+      love.graphics.rectangle("line", cr.x, cr.y, cr.w, cr.h, 10, 10)
+      love.graphics.setLineWidth(1)
+      if controller.victory_card_collected then
+        text("Récupérée", cr.x, cr.y + cr.h / 2 - 6, cr.w, 12, Theme.muted, "center")
+      elseif controller.draft_picks then
+        text("Choisis une carte\nci-dessous…", cr.x, cr.y + cr.h / 2 - 14, cr.w, 22, Theme.muted, "center")
+      else
+        text("?", cr.x, cr.y + cr.h / 2 - 22, cr.w, 32, Theme.text, "center")
+        text("Nouvelle carte", cr.x, cr.y + cr.h - 26, cr.w, 12, Theme.muted, "center")
+      end
+    end
+
+    if controller.draft_picks and controller.draft_cards_shown then
+      local rects = View.draft_rects(controller)
       for i, def in ipairs(controller.draft_picks) do
         local r = rects[i]
         -- Retournement carte par carte (2026-08-08) : sans anim (draft_flip[i]
@@ -4029,34 +4175,74 @@ function View.draw(controller)
       love.graphics.setLineWidth(1)
       text(sb.label, sb.x, sb.y + 14, sb.w, 14, Theme.text, "center")
     end
+
+    if controller.victory_gains_shown then
+      -- "Continuer" (2026-09-02, demande explicite -- "un bouton continuer
+      -- grisé non clicable" jusqu'à récupération des 2 gains) : style actif
+      -- identique aux autres boutons pleins (Theme.accent, voir le bouton de
+      -- redémarrage de l'écran "Défaite" plus haut) une fois les 2 flags vrais,
+      -- sinon grisé (Theme.panel_light) -- voir Controller:victory_continue,
+      -- déjà lui-même un no-op tant que les 2 gains ne sont pas faits (défense
+      -- en profondeur, même si ce bouton grisé ne devrait jamais être cliqué).
+      local cb = View.victory_continue_button
+      local can_continue = controller.victory_gold_collected and controller.victory_card_collected
+      set(can_continue and Theme.accent or Theme.panel_light)
+      love.graphics.rectangle("fill", cb.x, cb.y, cb.w, cb.h, 8, 8)
+      set(Theme.muted); love.graphics.setLineWidth(2)
+      love.graphics.rectangle("line", cb.x, cb.y, cb.w, cb.h, 8, 8)
+      love.graphics.setLineWidth(1)
+      text(cb.label, cb.x, cb.y + 14, cb.w, 14, can_continue and Theme.bg or Theme.muted, "center")
+    end
   end
   -- campfire/refuge/forge/temple : dispatchés à part, tout en haut de cette
   -- fonction (return anticipé) -- jamais atteints ici.
 
   draw_targeting_arrow(controller)
   draw_card_flights(controller)
+  draw_coin_flights(controller)
   draw_particles(controller)
   draw_floaters(controller)
-  if controller.screen == "playing" or controller.screen == "draft" then
+  if controller.screen == "playing" or controller.screen == "victory" then
     draw_tooltip(controller)
   end
 
   draw_deck_view(controller)
+  draw_pause_menu(controller)
 
   love.graphics.setColor(1, 1, 1, 1)
 end
 
+-- y=160->320 (2026-09-02, demande explicite -- écran de victoire à gains
+-- détachés) : la rangée de 3 cartes du draft n'apparaît plus qu'APRÈS un
+-- clic explicite sur le gain "carte" (voir Controller:click_victory_card),
+-- sous la rangée des 2 gains (PO/carte, voir View.victory_gold_rect/
+-- View.victory_card_rect ci-dessous, y=130-290) -- décalée pour ne pas la
+-- recouvrir.
 function View.draft_rects(controller)
   if not controller.draft_picks or not controller.draft_cards_shown then return {} end
-  return centered_row(#controller.draft_picks, 130, 190, 160, 24)
+  return centered_row(#controller.draft_picks, 130, 190, 320, 24)
 end
 
 -- "Ne rien prendre" (2026-08-30, demande explicite) : sous la rangée de
--- cartes (y=140, hauteur 190, voir View.draft_rects ci-dessus) -- position
--- fixe, ne dépend pas du nombre de cartes proposées (toujours centrée).
--- y=140->160/370 (2026-08-31, passage 1280x720) : même léger surplus d'air
--- que les autres écrans, la rangée de cartes (voir View.draft_rects
--- ci-dessus) et ce bouton restent solidaires du même décalage de +20px.
-View.draft_skip_button = { x = W / 2 - 100, y = 370, w = 200, h = 44, label = "Ne rien prendre" }
+-- cartes (voir View.draft_rects ci-dessus) -- position fixe, ne dépend pas du
+-- nombre de cartes proposées (toujours centrée).
+-- y=370->530 (2026-09-02, suit le décalage de View.draft_rects ci-dessus).
+View.draft_skip_button = { x = W / 2 - 100, y = 530, w = 200, h = 44, label = "Ne rien prendre" }
+
+-- Écran de victoire à gains détachés (2026-09-02, demande explicite) : les 2
+-- gains (PO/carte) forment une paire fixe, l'un à côté de l'autre, QUEL QUE
+-- SOIT l'état de collecte de chacun (pas de réagencement au clic -- seul le
+-- CONTENU de chaque case change, voir le bloc screen == "victory" de
+-- View.draw) -- la case "carte" n'est qu'un "?" avant clic, la vraie rangée
+-- de 3 cartes du draft apparaît PLUS BAS (View.draft_rects, y=320).
+local victory_gain_rects = centered_row(2, 180, 160, 130, 40)
+View.victory_gold_rect = victory_gain_rects[1]
+View.victory_card_rect = victory_gain_rects[2]
+
+-- "Continuer" (2026-09-02, demande explicite -- "un bouton continuer grisé
+-- non clicable" jusqu'à ce que les 2 gains soient faits) : sous la rangée de
+-- cartes/le bouton "Ne rien prendre" (y<=574), avec de la marge -- voir le
+-- style grisé/actif dans le bloc screen == "victory" de View.draw.
+View.victory_continue_button = { x = W / 2 - 100, y = 610, w = 200, h = 44, label = "Continuer" }
 
 return View

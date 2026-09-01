@@ -13,6 +13,10 @@ local Glossary = {}
 
 Glossary.terms = {
   { key = "energie", icon = "\u{26A1}", label = "énergie", has_icon = true, related = "énergie", explain = "" },
+  -- "PO" (or, 2026-09-02, nouvelle ressource persistante -- voir state.gold
+  -- dans game.lua) : contrairement à l'énergie/le mana, jamais remise à 0 en
+  -- cours de run -- gagnée à chaque victoire (Game.compute_gold_reward).
+  { key = "or", icon = "\u{1FA99}", label = "or", has_icon = true, related = "or", explain = "Ressource persistante de l'équipe, gagnée à chaque victoire. Ne se réinitialise jamais en cours de run." },
   { key = "mana", icon = "\u{1F535}", label = "mana", has_icon = true, related = "mana", explain = "Ressource propre au Mage : ne se régénère jamais seule, seules des cartes peuvent l'augmenter." },
   { key = "epee", icon = "\u{2694}\u{FE0F}", label = "épée", has_icon = true, related = "dégats physique de mélée", explain = "" },
   { key = "arc", icon = "\u{1F3F9}", label = "arc", has_icon = true, related = "dégats physique à distance", explain = "" },

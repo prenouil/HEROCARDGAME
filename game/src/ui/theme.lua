@@ -25,6 +25,11 @@ local Theme = {
   -- indigo, jamais confondu avec Theme.energy (la réserve globale, cyan,
   -- partagée par tout le groupe).
   mana = hex("8a7bd8"),
+  -- "PO" (or, 2026-09-02) : ressource persistante d'équipe, jamais
+  -- Theme.accent (déjà réservé au signal "sélectionné/choisi", voir son
+  -- commentaire plus haut -- "jamais confondu") -- ambre plus chaud/orangé,
+  -- même famille "or" mais visuellement distinct au premier coup d'œil.
+  gold = hex("e0932e"),
   -- Ressource propre à l'Assassin (2026-08-24) : même principe que Theme.mana
   -- -- teinte reprise du liseré de ses cartes (Theme.card_class.assassin.border).
   discretion = hex("5cae6e"),

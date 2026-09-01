@@ -51,6 +51,10 @@ function love.wheelmoved(dx, dy)
   Input.wheelmoved(controller, dx, dy)
 end
 
+-- ESC (2026-09-02, demande explicite -- avant : quittait l'application
+-- directement) : ouvre/referme le menu pause plutôt que de fermer la
+-- fenêtre -- voir Controller:handle_escape, qui gère aussi la priorité avec
+-- la fenêtre "voir le deck" si elle est ouverte.
 function love.keypressed(key)
-  if key == "escape" then love.event.quit() end
+  if key == "escape" then controller:handle_escape() end
 end

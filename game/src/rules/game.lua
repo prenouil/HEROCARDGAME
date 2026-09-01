@@ -487,6 +487,12 @@ function Game.reset_run(state, seed, selected_ids, mode)
   state.deck = Deck.build_starting_deck(selected_ids, function() return Game.next_uid(state) end, state.rng.deck)
   state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.over = false; state.energy = 0
+  -- "PO" (or, 2026-09-02, demande explicite -- "un run commence avec 100 PO") :
+  -- posé UNIQUEMENT ici, jamais dans start_next_combat/start_boss_combat/
+  -- start_boss_test ni dans snapshot_combat/snapshot_turn -- persiste tout le
+  -- run, comme state.deck, contrairement à state.energy (qui repart à 0 à
+  -- CHAQUE combat, voir ces mêmes fonctions).
+  state.gold = 100
   state.log = {}
   Combat.log(state, "Run Infini — Combat 1 (budget " .. budget .. ") : " .. Encounter.summary(state.enemies), "sys")
   Game.snapshot_combat(state)
@@ -1299,6 +1305,26 @@ function Game.check_victory(state)
     return true
   end
   return false
+end
+
+-- "PO" gagnées à la victoire (2026-09-02, demande explicite -- "calculée en
+-- fonction des ennemis vaincus, nombre et niveaux") : réutilise le coût déjà
+-- calibré par ennemi (Enemies.cost_at_level, la même donnée qui pilote le
+-- budget de rencontre -- déjà "nombre × difficulté par niveau") plutôt qu'une
+-- formule séparée à recalibrer de zéro. Ratio 0.5 explicitement en
+-- placeholder à ajuster en playtest (même convention que
+-- Encounter.BUDGET_GROWTH/Enemies.LEVEL_GROWTH, déjà commentés ainsi).
+-- Appelée une fois la victoire acquise -- `state.enemies` contient encore
+-- les ennemis du combat qui vient d'être gagné (tous morts), pas encore
+-- écrasé par le prochain (voir Controller:enter_victory_screen, appelée
+-- avant tout Game.start_next_combat/start_boss_combat).
+function Game.compute_gold_reward(state)
+  local total = 0
+  for _, e in ipairs(state.enemies) do
+    local template = Enemies.by_id(e.template_id)
+    if template then total = total + Enemies.cost_at_level(template, e.level) end
+  end
+  return Enemies.round(total * 0.5)
 end
 
 --- Retourne true si la défaite vient d'être déclenchée par cet appel.

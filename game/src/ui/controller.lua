@@ -83,19 +83,31 @@ local RESHUFFLE_GHOST_STAGGER = 0.08
 local RESHUFFLE_GHOST_FLIGHT_DURATION = 0.42
 local RESHUFFLE_TOTAL_DURATION = (RESHUFFLE_GHOST_COUNT - 1) * RESHUFFLE_GHOST_STAGGER + RESHUFFLE_GHOST_FLIGHT_DURATION
 
--- Séquence d'entrée sur l'écran de draft (2026-08-08, demande explicite) :
+-- Séquence d'entrée sur l'écran de victoire (2026-08-08, demande explicite,
+-- restructurée 2026-09-02 -- gains détachés) :
 -- 1) titre "Victoire !" en zoom + bump (≤2s) -- rien d'autre à l'écran ;
--- 2) SEULEMENT ENSUITE, les 3 cartes apparaissent de dos, toutes ensemble ;
--- 3) 1s de pause cartes de dos ;
--- 4) retournement une par une, lentement, avant de laisser la main au joueur
---    (une carte n'est cliquable qu'une fois SON retournement terminé).
+-- 2) SEULEMENT ENSUITE, les 2 gains (PO/carte) apparaissent -- voir
+--    Controller:enter_victory_screen ;
+-- 3) le gain "carte" (cliqué explicitement, voir click_victory_card) fait
+--    apparaître les 3 cartes de dos, retournées une par une, lentement,
+--    avant de laisser la main au joueur (une carte n'est cliquable qu'une
+--    fois SON retournement terminé) -- plus de pause "cartes de dos" fixe
+--    ici (contrairement à l'ancien enchaînement automatique), le clic du
+--    joueur en tient déjà lieu.
 -- Durées exposées sur `self` (pas de constante dupliquée côté view.lua, qui
 -- n'a pas accès à ce module -- controller.lua dépend déjà de view.lua, jamais
 -- l'inverse, voir note d'architecture sur les animations de vol de carte).
 local VICTORY_TITLE_DURATION = 1.4
-local DRAFT_FACEDOWN_PAUSE = 1.0
 local DRAFT_FLIP_DURATION = 0.5
 local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début du suivant
+-- Pièces de la victoire (2026-09-02, demande explicite -- "elles volent...
+-- en faisant un bruit de fluf au départ et de cling à l'arrivée") : nombre
+-- fixe de pièces animées quel que soit le montant réel (purement visuel,
+-- jamais une pièce par PO -- un gros gain volerait sinon des dizaines de
+-- pièces d'un coup) -- voir Controller:click_victory_gold.
+local VICTORY_COIN_COUNT = 6
+local VICTORY_COIN_STAGGER = 0.06
+local VICTORY_COIN_FLIGHT_DURATION = 0.5
 local BOSS_VICTORY_HOLD_DURATION = 2.2 -- s -- temps où "Boss vaincu !" reste affiché avant le retour au menu
 -- Écran d'annonce de biome (2026-09-01, demande explicite -- "une petite
 -- fenêtre intermédiaire pour annoncer le lieu") : même idiome que
@@ -280,7 +292,7 @@ function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "menu" -- "menu" | "options" | "team_select" | "playing" | "draft" | "campfire" | "forge" | "temple" | "refuge" | "biome_intro" | "bossVictory" | "defeat"
+  self.screen = "menu" -- "menu" | "options" | "team_select" | "playing" | "victory" | "campfire" | "forge" | "temple" | "refuge" | "biome_intro" | "bossVictory" | "defeat"
   -- Mode de run choisi au menu (2026-08-21, demande explicite) : "infini"
   -- (illimité, l'ancien comportement par défaut), "bounded" (BOUNDED_COMBAT_COUNT
   -- combats -- 9, 2026-08-30, était 5 -- puis l'Homme Arbre, voir
@@ -297,6 +309,12 @@ function Controller.new()
   -- s'y refermer, voir Controller:open_deck_view/close_deck_view et
   -- View.deck_view_cards (calcule la liste à afficher selon l'écran courant).
   self.deck_view_open = false
+  -- Menu pause (2026-09-02, demande explicite -- "quand j'appuie sur ESC...
+  -- il faut que cela ouvre un menu") : même schéma que deck_view_open --
+  -- overlay par-dessus N'IMPORTE quel écran, voir Controller:open_pause_menu/
+  -- close_pause_menu, main.lua (love.keypressed) et View.draw (dessiné en
+  -- dernier, par-dessus tout).
+  self.pause_menu_open = false
   -- "deck"|"discard"|"all"|nil (2026-08-30, demande explicite -- "quand on
   -- clique sur Pioche, on ne voit que les cartes actuellement dans la
   -- pioche, et quand on clique sur la défausse, on ne voit que les cartes
@@ -373,8 +391,27 @@ function Controller.new()
   self.draft_cards_shown = false -- les 3 cartes (de dos) n'apparaissent qu'après le titre
   self.draft_flip = {} -- [index] = { t = elapsed } une fois le retournement démarré
   self.draft_flip_duration = DRAFT_FLIP_DURATION -- lu par view.lua pour l'easing
+  -- Écran de victoire à gains détachés (2026-09-02, demande explicite -- "on
+  -- indique la victoire en titre, puis on liste ses gains") : `victory_gains_shown`
+  -- rejoue le même délai que l'ancien `draft_cards_shown` (le titre "Victoire !"
+  -- reste seul à l'écran un instant avant que les gains n'apparaissent), voir
+  -- Controller:enter_victory_screen. Les 2 gains se collectent indépendamment
+  -- l'un de l'autre (voir click_victory_gold/click_victory_card) ; "Continuer"
+  -- (victory_continue) attend que les 2 booléens `_collected` soient vrais.
+  self.victory_gains_shown = false
+  self.victory_gold_reward = 0
+  self.victory_gold_collected = false
+  self.victory_gold_flying = false -- vrai pendant le vol des pièces, voir coin_anims
+  self.victory_card_collected = false
   self.anim = {} -- [unit_id] = { kind = "pulse-up"|"pulse-down"|"shake", t = elapsed }
   self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, def } -- voir View.draw
+  -- Pièces d'or en vol du gain PO vers View.gold_display_rect (2026-09-02) :
+  -- même forme que card_anims (from/to/elapsed/delay/duration), mais jamais de
+  -- `def` -- juste l'icône "or", voir draw_coin_flights (view.lua). Complétée
+  -- (pas juste retirée comme card_anims) par Controller:update -- c'est sa
+  -- liste qui se vide qui déclenche l'ajout réel à state.gold, voir
+  -- click_victory_gold.
+  self.coin_anims = {}
   -- [enemy_id] = { elapsed, delay, duration } (2026-08-30, descente des
   -- ennemis à l'entrée en combat) : voir Controller:play_enemy_entrance_sequence,
   -- lu par draw_enemy (view.lua) pour substituer un y hors-écran + fondu à la
@@ -497,6 +534,41 @@ end
 
 function Controller:close_deck_view()
   self.deck_view_open = false
+end
+
+-- ---------- menu pause ----------
+
+function Controller:close_pause_menu()
+  self.pause_menu_open = false
+end
+
+--- ESC (2026-09-02, demande explicite -- remplace l'ancien "ferme la
+-- fenêtre", voir main.lua/love.keypressed, seul appelant). Priorité à la
+-- fenêtre "voir le deck" si elle est ouverte -- la referme d'abord plutôt
+-- que d'empiler le menu pause par-dessus (un seul overlay affiché à la
+-- fois) ; sinon bascule le menu pause (rouvre/referme -- fait aussi office
+-- de "Continuer" au clavier, sans repasser par le bouton).
+function Controller:handle_escape()
+  if self.deck_view_open then
+    self:close_deck_view()
+    return
+  end
+  self.pause_menu_open = not self.pause_menu_open
+end
+
+--- "Revenir au menu" (2026-09-02, demande explicite -- "abandonnant tout ce
+-- qui est en cours") : referme l'overlay, purge toute l'animation/le
+-- séquenceur en attente (même fonction que reset_run/restart_combat, voir
+-- Controller:clear_animation_state -- son self.seq:clear() annule
+-- notamment toute callback encore programmée par l'écran/le combat
+-- abandonné) puis retombe sur l'écran "menu". Le run/combat en cours
+-- (self.state) n'est PAS explicitement remis à zéro ici -- sans intérêt tant
+-- que rien ne le relit plus (screen == "menu"), et Controller:reset_run le
+-- reconstruit de toute façon entièrement au prochain lancement.
+function Controller:pause_menu_return_to_menu()
+  self.pause_menu_open = false
+  self:clear_animation_state()
+  self:enter_menu()
 end
 
 --- Molette pendant que la fenêtre est ouverte (2026-08-30, voir
@@ -844,6 +916,30 @@ function Controller:team_select_launch()
   self:reset_run(mode, selected_ids)
 end
 
+--- "Auto-fill" (2026-09-02, demande explicite -- "choisit immédiatement et
+-- aléatoirement 4 aventuriers et lance l'aventure") : IGNORE la sélection en
+-- cours (`ts.selected_ids`/`ts.available_ids`) -- retire 4 ids au hasard
+-- directement du roster complet (`Heroes.defs`), sans passer par aucune des
+-- animations de l'écran (focus/vol de cartes/etc.), puis lance exactement
+-- comme Controller:team_select_launch ci-dessus. `math.random` (pas un flux
+-- state.rng dédié) : pur confort d'écran de menu, `state.rng` n'existe pas
+-- encore à ce stade (créé par Game.reset_run lui-même, juste après).
+function Controller:team_select_autofill()
+  local ts = self.team_select
+  if not ts then return end
+  local pool = {}
+  for _, def in ipairs(Heroes.defs) do pool[#pool + 1] = def.id end
+  local selected_ids = {}
+  for _ = 1, 4 do
+    local idx = math.random(#pool)
+    selected_ids[#selected_ids + 1] = table.remove(pool, idx)
+  end
+  Sfx.play("woosh")
+  local mode = ts.mode
+  self.team_select = nil
+  self:reset_run(mode, selected_ids)
+end
+
 function Controller:toggle_input_mode()
   self.input_mode = (self.input_mode == "arrow") and "tap" or "arrow"
   self.arrow_hand_hover_uid = nil
@@ -871,7 +967,7 @@ end
 -- factorisé -- avant, dupliqué à l'identique dans reset_run/restart_combat/
 -- restart_turn, et maintenant aussi start_boss_test). `self.screen` n'est PAS
 -- touché ici : chaque appelant sait mieux que cette fonction quel écran
--- vient ensuite (souvent "playing", mais enter_draft_screen peut encore
+-- vient ensuite (souvent "playing", mais enter_victory_screen peut encore
 -- s'appliquer juste après selon `state.over`).
 function Controller:clear_animation_state()
   self.draft_picks = nil
@@ -886,9 +982,14 @@ function Controller:clear_animation_state()
   self.victory_anim = nil
   self.draft_cards_shown = false
   self.draft_flip = {}
+  self.victory_gains_shown = false
+  self.victory_gold_collected = false
+  self.victory_gold_flying = false
+  self.victory_card_collected = false
   self.seq:clear()
   self.anim = {}
   self.card_anims = {}
+  self.coin_anims = {}
   self.enemy_entrance = {}
   self.floaters = {}
   self.particles = {}
@@ -1004,7 +1105,7 @@ end
 --- Outil de test (2026-08-08) : termine le combat en cours par une victoire
 -- immédiate (tous les ennemis à 0 PV), sans passer par la résolution réelle --
 -- réutilise le même chemin que la victoire normale (`Game.check_victory` +
--- `enter_draft_screen`) pour que l'écran de récompense se comporte à
+-- `enter_victory_screen`) pour que l'écran de récompense se comporte à
 -- l'identique, seule la façon d'y arriver diffère.
 function Controller:trigger_instant_victory()
   if self.screen ~= "playing" or self.state.over then return end
@@ -1604,6 +1705,24 @@ function Controller:update(dt)
     a.elapsed = a.elapsed + dt
     if a.elapsed >= a.delay + a.duration then table.remove(self.card_anims, i) end
   end
+  -- Pièces de la victoire (2026-09-02) : même idiome de purge que card_anims
+  -- ci-dessus, MAIS la liste qui se vide déclenche en plus l'ajout réel à
+  -- state.gold -- volontairement pas via self.seq (qui sert déjà à séquencer
+  -- le retournement des cartes de draft sur ce même écran "victory" -- un
+  -- vol de pièces concurrent y serait mis en file au lieu de tourner en
+  -- parallèle, voir Controller:click_victory_card).
+  if #self.coin_anims > 0 then
+    for i = #self.coin_anims, 1, -1 do
+      local a = self.coin_anims[i]
+      a.elapsed = a.elapsed + dt
+      if a.elapsed >= a.delay + a.duration then table.remove(self.coin_anims, i) end
+    end
+    if self.victory_gold_flying and #self.coin_anims == 0 then
+      self.state.gold = self.state.gold + self.victory_gold_reward
+      self.victory_gold_collected = true
+      self.victory_gold_flying = false
+    end
+  end
   -- Descente des ennemis (2026-08-30) : même idiome que card_anims ci-dessus --
   -- une fois l'entrée finie, l'ennemi est exactement à sa position de repos,
   -- draw_enemy (view.lua) reprend la main sans discontinuité, donc l'entrée
@@ -1957,8 +2076,8 @@ end
 -- Dispatch central de toute victoire de combat (2026-08-21, demande explicite --
 -- "il faut enlever le draft de carte et le feu de camp après le boss") : tous
 -- les appels de victoire du contrôleur passent par ici plutôt que d'appeler
--- enter_draft_screen directement, pour qu'un seul endroit décide entre le
--- chemin normal (draft -> feu de camp -> combat suivant) et le boss (aucun des
+-- enter_victory_screen directement, pour qu'un seul endroit décide entre le
+-- chemin normal (victoire -> gains -> feu de camp -> combat suivant) et le boss (aucun des
 -- deux, juste un bref titre puis retour au menu -- state.run.is_boss est posé
 -- par Game.start_boss_test/start_boss_combat, jamais par ce fichier).
 -- Différée (2026-08-30, demande explicite -- "quand le dernier ennemi est
@@ -1995,7 +2114,7 @@ function Controller:handle_combat_victory_now()
   if self.state.run.is_boss then
     self:enter_boss_victory()
   else
-    self:enter_draft_screen()
+    self:enter_victory_screen()
   end
 end
 
@@ -2029,16 +2148,68 @@ function Controller:enter_biome_intro_screen(biome_key, on_done)
   end)
 end
 
-function Controller:enter_draft_screen()
-  self.screen = "draft"
-  self.draft_picks = Draft.pick_cards(self.state)
+--- Écran de victoire à gains détachés (2026-09-02, demande explicite --
+-- "on indique la victoire en titre, puis on liste ses gains : la somme de
+-- PO... un gain de carte... un bouton continuer grisé non clicable") :
+-- remplace l'ancien enchaînement direct vers l'écran "draft" -- même titre
+-- "Victoire !" en zoom (self.victory_anim/VICTORY_TITLE_DURATION, réutilisés
+-- tels quels), mais les 2 gains n'apparaissent qu'ENSUITE et se collectent
+-- chacun par un clic explicite du joueur (voir click_victory_gold/
+-- click_victory_card ci-dessous), pas automatiquement.
+function Controller:enter_victory_screen()
+  self.screen = "victory"
+  self.victory_anim = { t = 0 }
+  self.victory_gains_shown = false
+  self.victory_gold_reward = Game.compute_gold_reward(self.state)
+  self.victory_gold_collected = false
+  self.victory_gold_flying = false
+  self.victory_card_collected = false
+  self.draft_picks = nil
   self.draft_cards_shown = false
   self.draft_flip = {}
-  self.victory_anim = { t = 0 }
+  self.card_anims = {}
+  self.coin_anims = {}
   Sfx.play("victory")
   local self_ = self
   self.seq:push(function() end, VICTORY_TITLE_DURATION)
-  self.seq:push(function() self_.draft_cards_shown = true end, DRAFT_FACEDOWN_PAUSE)
+  self.seq:push(function() self_.victory_gains_shown = true end)
+end
+
+--- Gain "PO" (2026-09-02, demande explicite -- "quand le joueur clique sur
+-- les pièces, elles volent depuis cette indication jusqu'à la bourse de
+-- l'équipe en faisant un bruit de fluf au départ et de cling à l'arrivée") :
+-- un nombre fixe de pièces (VICTORY_COIN_COUNT), échelonnées, volent de
+-- View.victory_gold_rect vers View.gold_display_rect -- state.gold n'est
+-- réellement incrémenté qu'à l'arrivée de la DERNIÈRE (voir le bloc
+-- coin_anims de Controller:update), jamais au clic lui-même.
+function Controller:click_victory_gold()
+  if self.screen ~= "victory" or not self.victory_gains_shown
+    or self.victory_gold_collected or self.victory_gold_flying then return end
+  self.victory_gold_flying = true
+  Sfx.play("fluf")
+  local from, to = View.victory_gold_rect, View.gold_display_rect
+  for i = 1, VICTORY_COIN_COUNT do
+    local delay = (i - 1) * VICTORY_COIN_STAGGER
+    self.coin_anims[#self.coin_anims + 1] = {
+      from = from, to = to, elapsed = 0, delay = delay, duration = VICTORY_COIN_FLIGHT_DURATION,
+    }
+    self:schedule_sfx("cling", delay + VICTORY_COIN_FLIGHT_DURATION)
+  end
+end
+
+--- Gain "carte" (2026-09-02, demande explicite -- "un gain de carte,
+-- matérialisée par une icone de carte avec un '?', qui lance le draft") :
+-- réutilise EXACTEMENT le retournement une-par-une existant (draft_flip/
+-- DRAFT_FLIP_DURATION/DRAFT_FLIP_GAP), mais sans rejouer le titre "Victoire !"
+-- ni aucune pause face cachée fixe -- déjà affiché/inutile ici, le joueur
+-- vient de cliquer explicitement sur le gain.
+function Controller:click_victory_card()
+  if self.screen ~= "victory" or not self.victory_gains_shown
+    or self.draft_picks or self.victory_card_collected then return end
+  self.draft_picks = Draft.pick_cards(self.state)
+  self.draft_cards_shown = true
+  self.draft_flip = {}
+  local self_ = self
   for i = 1, #self.draft_picks do
     local idx = i
     -- "flush" (même son que la pioche, demandé identique) au retournement de
@@ -2056,7 +2227,7 @@ function Controller:draft_card_ready(index)
 end
 
 function Controller:choose_draft_card(index)
-  if self.screen ~= "draft" or not self.draft_picks or not self:draft_card_ready(index) then return end
+  if self.screen ~= "victory" or not self.draft_picks or not self:draft_card_ready(index) then return end
   local def = self.draft_picks[index]
   local uid = Game.next_uid(self.state)
   self.state.deck[#self.state.deck + 1] = { uid = uid, def = def }
@@ -2065,8 +2236,9 @@ function Controller:choose_draft_card(index)
   self.last_drafted_uid = uid
   Combat.log(self.state, def.name .. " ajoutée au deck.", "sys")
   self.draft_picks = nil
-  self.card_anims = {}
-  self:enter_post_combat_sequence()
+  self.draft_cards_shown = false
+  self.draft_flip = {}
+  self.victory_card_collected = true
 end
 
 --- "Ne rien prendre" (2026-08-30, demande explicite -- "si le joueur ne veut
@@ -2078,11 +2250,22 @@ end
 -- suit (voir Controller:enter_forge_screen) -- seule "la carte tout juste
 -- gagnée" doit jamais être exclue, pas "la dernière jamais gagnée".
 function Controller:skip_draft()
-  if self.screen ~= "draft" or not self.draft_picks then return end
+  if self.screen ~= "victory" or not self.draft_picks then return end
   Combat.log(self.state, "Aucune carte gagnée.", "sys")
   self.draft_picks = nil
   self.last_drafted_uid = nil
-  self.card_anims = {}
+  self.draft_cards_shown = false
+  self.draft_flip = {}
+  self.victory_card_collected = true
+end
+
+--- "Quand le joueur a récupéré ses PO et sa carte, le bouton continuer
+-- devient clicable, passant à l'évènement suivant" (2026-09-02, demande
+-- explicite) : no-op tant que les 2 gains ne sont pas faits -- en aval,
+-- inchangé (enter_post_combat_sequence gère déjà le passage de biome/le
+-- choix d'évènement "camp"/le Refuge).
+function Controller:victory_continue()
+  if self.screen ~= "victory" or not (self.victory_gold_collected and self.victory_card_collected) then return end
   self:enter_post_combat_sequence()
 end
 

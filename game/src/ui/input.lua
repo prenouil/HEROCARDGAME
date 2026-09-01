@@ -14,6 +14,25 @@ local function find_rect(rects_by_id, x, y)
   return nil
 end
 
+--- Menu pause (2026-09-02, demande explicite) : passe AVANT tout le reste,
+-- même "voir le deck" -- c'est l'overlay le plus "extérieur" (dessiné en
+-- dernier, voir View.draw). Un clic hors des 2 boutons ne fait rien --
+-- contrairement à la fenêtre "voir le deck", qui se ferme au clic extérieur,
+-- ESC (Controller:handle_escape) reste le seul raccourci pour la refermer
+-- sans choisir une des 2 options.
+local function pause_menu_click(controller, x, y)
+  if not controller.pause_menu_open then return false end
+  if View.point_in(View.pause_menu_continue_button, x, y) then controller:close_pause_menu()
+  elseif View.point_in(View.pause_menu_return_button, x, y) then controller:pause_menu_return_to_menu()
+  end
+  return true
+end
+
+local function pause_menu_hovering(controller, x, y)
+  if not controller.pause_menu_open then return false end
+  return View.point_in(View.pause_menu_continue_button, x, y) or View.point_in(View.pause_menu_return_button, x, y)
+end
+
 --- Fenêtre "voir le deck" (2026-08-30, demande explicite) : passe AVANT tout
 -- le reste (menu_click compris) tant qu'elle est ouverte -- un clic sur
 -- "Fermer" OU en dehors du panneau la referme, un clic À L'INTÉRIEUR (sur une
@@ -46,7 +65,6 @@ local function menu_click(controller, x, y)
       if View.point_in(b, x, y) then
         if b.id == "boss" then controller:start_boss_test()
         elseif b.id == "run" then controller:enter_team_select("bounded")
-        elseif b.id == "infini" then controller:enter_team_select("infini")
         elseif b.id == "options" then controller:enter_options()
         elseif b.id == "quit" then love.event.quit()
         end
@@ -186,6 +204,11 @@ local function team_select_click(controller, x, y)
     return true
   end
 
+  if View.point_in(View.team_select_autofill_button, x, y) then
+    controller:team_select_autofill()
+    return true
+  end
+
   return true
 end
 
@@ -202,6 +225,7 @@ end
 
 local function mousepressed_tap(controller, x, y, button)
   if button ~= 1 then return end
+  if pause_menu_click(controller, x, y) then return end
   if deck_view_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
@@ -213,14 +237,33 @@ local function mousepressed_tap(controller, x, y, button)
     return
   end
 
-  if controller.screen == "draft" then
-    local rects = View.draft_rects(controller)
-    for i, r in ipairs(rects) do
-      if View.point_in(r, x, y) and controller:draft_card_ready(i) then controller:choose_draft_card(i); return end
-    end
-    -- "Ne rien prendre" (2026-08-30, demande explicite) : voir View.draft_skip_button.
-    if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then
-      controller:skip_draft()
+  -- Écran de victoire à gains détachés (2026-09-02, demande explicite) : 2
+  -- gains cliquables indépendamment (PO/carte, voir Controller:click_victory_
+  -- gold/click_victory_card) plus la rangée de draft classique une fois la
+  -- carte "?" cliquée (inchangée -- même View.draft_rects/draft_skip_button
+  -- qu'avant, juste repositionnés, voir view.lua) et "Continuer" (actif
+  -- seulement une fois les 2 gains faits, guard redondant avec
+  -- Controller:victory_continue -- même schéma défensif que draft_card_ready
+  -- ci-dessous).
+  if controller.screen == "victory" then
+    if controller.victory_gains_shown then
+      if not controller.victory_gold_collected and not controller.victory_gold_flying
+        and View.point_in(View.victory_gold_rect, x, y) then
+        controller:click_victory_gold(); return
+      end
+      if not controller.draft_picks and not controller.victory_card_collected
+        and View.point_in(View.victory_card_rect, x, y) then
+        controller:click_victory_card(); return
+      end
+      local rects = View.draft_rects(controller)
+      for i, r in ipairs(rects) do
+        if View.point_in(r, x, y) and controller:draft_card_ready(i) then controller:choose_draft_card(i); return end
+      end
+      -- "Ne rien prendre" (2026-08-30, demande explicite) : voir View.draft_skip_button.
+      if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then
+        controller:skip_draft(); return
+      end
+      if View.point_in(View.victory_continue_button, x, y) then controller:victory_continue() end
     end
     return
   end
@@ -288,6 +331,7 @@ end
 -- d'un cran.
 local function mousepressed_arrow(controller, x, y, button)
   if button ~= 1 then return end
+  if pause_menu_click(controller, x, y) then return end
   if deck_view_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
@@ -299,14 +343,33 @@ local function mousepressed_arrow(controller, x, y, button)
     return
   end
 
-  if controller.screen == "draft" then
-    local rects = View.draft_rects(controller)
-    for i, r in ipairs(rects) do
-      if View.point_in(r, x, y) and controller:draft_card_ready(i) then controller:choose_draft_card(i); return end
-    end
-    -- "Ne rien prendre" (2026-08-30, demande explicite) : voir View.draft_skip_button.
-    if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then
-      controller:skip_draft()
+  -- Écran de victoire à gains détachés (2026-09-02, demande explicite) : 2
+  -- gains cliquables indépendamment (PO/carte, voir Controller:click_victory_
+  -- gold/click_victory_card) plus la rangée de draft classique une fois la
+  -- carte "?" cliquée (inchangée -- même View.draft_rects/draft_skip_button
+  -- qu'avant, juste repositionnés, voir view.lua) et "Continuer" (actif
+  -- seulement une fois les 2 gains faits, guard redondant avec
+  -- Controller:victory_continue -- même schéma défensif que draft_card_ready
+  -- ci-dessous).
+  if controller.screen == "victory" then
+    if controller.victory_gains_shown then
+      if not controller.victory_gold_collected and not controller.victory_gold_flying
+        and View.point_in(View.victory_gold_rect, x, y) then
+        controller:click_victory_gold(); return
+      end
+      if not controller.draft_picks and not controller.victory_card_collected
+        and View.point_in(View.victory_card_rect, x, y) then
+        controller:click_victory_card(); return
+      end
+      local rects = View.draft_rects(controller)
+      for i, r in ipairs(rects) do
+        if View.point_in(r, x, y) and controller:draft_card_ready(i) then controller:choose_draft_card(i); return end
+      end
+      -- "Ne rien prendre" (2026-08-30, demande explicite) : voir View.draft_skip_button.
+      if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then
+        controller:skip_draft(); return
+      end
+      if View.point_in(View.victory_continue_button, x, y) then controller:victory_continue() end
     end
     return
   end
@@ -437,10 +500,12 @@ local function team_select_hovering(controller, x, y)
   local party_id = find_rect(View.team_select_party_rects(controller), x, y)
   if party_id and controller:team_select_hero_interactive(party_id) then return true end
   if #ts.selected_ids == 4 and View.point_in(View.team_select_launch_button, x, y) then return true end
+  if View.point_in(View.team_select_autofill_button, x, y) then return true end
   return false
 end
 
 local function is_hovering_clickable_tap(controller, x, y)
+  if controller.pause_menu_open then return pause_menu_hovering(controller, x, y) end
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
   if controller.screen == "menu" or controller.screen == "options" then
     return menu_hovering(controller, x, y)
@@ -453,12 +518,19 @@ local function is_hovering_clickable_tap(controller, x, y)
     return View.point_in(View.overlay_restart_button, x, y)
   end
 
-  if controller.screen == "draft" then
+  if controller.screen == "victory" then
+    if not controller.victory_gains_shown then return false end
+    if not controller.victory_gold_collected and not controller.victory_gold_flying
+      and View.point_in(View.victory_gold_rect, x, y) then return true end
+    if not controller.draft_picks and not controller.victory_card_collected
+      and View.point_in(View.victory_card_rect, x, y) then return true end
     local rects = View.draft_rects(controller)
     for i, r in ipairs(rects) do
       if View.point_in(r, x, y) and controller:draft_card_ready(i) then return true end
     end
     if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then return true end
+    if controller.victory_gold_collected and controller.victory_card_collected
+      and View.point_in(View.victory_continue_button, x, y) then return true end
     return false
   end
 
@@ -493,6 +565,7 @@ end
 -- mousepressed_arrow) -- mais on ne l'annonce pas comme "cliquable" au survol
 -- (curseur main), le curseur ne réagit qu'aux vraies opportunités d'action.
 local function is_hovering_clickable_arrow(controller, x, y)
+  if controller.pause_menu_open then return pause_menu_hovering(controller, x, y) end
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
   if controller.screen == "menu" or controller.screen == "options" then
     return menu_hovering(controller, x, y)
@@ -505,12 +578,19 @@ local function is_hovering_clickable_arrow(controller, x, y)
     return View.point_in(View.overlay_restart_button, x, y)
   end
 
-  if controller.screen == "draft" then
+  if controller.screen == "victory" then
+    if not controller.victory_gains_shown then return false end
+    if not controller.victory_gold_collected and not controller.victory_gold_flying
+      and View.point_in(View.victory_gold_rect, x, y) then return true end
+    if not controller.draft_picks and not controller.victory_card_collected
+      and View.point_in(View.victory_card_rect, x, y) then return true end
     local rects = View.draft_rects(controller)
     for i, r in ipairs(rects) do
       if View.point_in(r, x, y) and controller:draft_card_ready(i) then return true end
     end
     if controller.draft_cards_shown and View.point_in(View.draft_skip_button, x, y) then return true end
+    if controller.victory_gold_collected and controller.victory_card_collected
+      and View.point_in(View.victory_continue_button, x, y) then return true end
     return false
   end
 
@@ -547,6 +627,7 @@ function Input.is_hovering_clickable(controller, x, y)
 end
 
 function Input.mousemoved(controller, x, y)
+  if controller.pause_menu_open then controller:set_hover(nil, nil); return end
   if controller.deck_view_open then controller:set_hover(nil, nil); return end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
     controller:set_hover(nil, nil)
@@ -604,7 +685,7 @@ function Input.mousemoved(controller, x, y)
   -- 3 cartes de loot, parce que cette fonction s'arrêtait net hors "playing".
   -- Gardé par draft_card_ready comme le clic -- pas de survol tant que la carte
   -- est encore de dos.
-  if controller.screen == "draft" then
+  if controller.screen == "victory" then
     local rects = View.draft_rects(controller)
     for i, r in ipairs(rects) do
       if View.point_in(r, x, y) and controller:draft_card_ready(i) then

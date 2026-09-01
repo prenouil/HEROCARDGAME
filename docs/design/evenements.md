@@ -7,8 +7,8 @@ Couvre 4 évènements : Feu de camp, la Forge, le Temple et le Refuge. Le Temple
 ## Séquence complète après un combat gagné
 
 1. **Draft** (`Controller:enter_draft_screen`) : le joueur choisit 1 carte parmi 3 à ajouter au deck (ou "Ne rien prendre"). Pas détaillé ici (hors périmètre de cet onglet), mais nécessaire pour comprendre où s'insère la suite.
-2. **1 seul évènement "camp"** est ensuite déclenché — Feu de camp, Forge OU Temple, jamais plus d'un par combat, jamais 2 fois le même type d'affilée (sauf l'exception du Refuge forcé, voir plus bas).
-3. Le combat suivant démarre (ou le Boss, si c'était le 9ᵉ et dernier combat d'un run "bounded").
+2. **1 seul évènement "camp"** est ensuite déclenché — Feu de camp, Forge OU Temple, jamais plus d'un par combat, jamais 2 fois le même type d'affilée (sauf l'exception du Refuge forcé, voir plus bas). Après le 4ᵉ combat classique d'un run "bounded" (mi-parcours), un écran d'annonce du 2ᵉ biome (`biome_intro`) s'intercale avant ce choix — voir `docs/design/bestiaire.md` (système de biomes), non détaillé ici.
+3. Le combat suivant démarre (ou le Boss, si c'était le 8ᵉ et dernier combat classique d'un run "bounded").
 
 ## Sélection de l'évènement "camp" (Feu de camp / Forge / Temple)
 
@@ -48,7 +48,7 @@ Ce tirage ne concerne JAMAIS Le Refuge, qui n'en fait jamais partie (voir plus b
 
 ## Le Refuge
 
-- **Déclenchement** : jamais issu du tirage "camp" ci-dessus — **SEUL et unique chemin** : `Controller:enter_post_combat_sequence` force Le Refuge, sans exception, quand ce combat vient d'être le **9ᵉ et dernier combat classique** d'un run borné (`run_mode == "bounded"`, `BOUNDED_COMBAT_COUNT = 9`) — juste avant le Boss. Cette garantie ("reposé juste avant le Boss") prime même sur la règle "jamais 2 fois de suite" : si Le Refuge était déjà le dernier évènement tiré, il revient quand même.
+- **Déclenchement** : jamais issu du tirage "camp" ci-dessus — **SEUL et unique chemin** : `Controller:enter_post_combat_sequence` force Le Refuge, sans exception, quand ce combat vient d'être le **8ᵉ et dernier combat classique** d'un run borné (`run_mode == "bounded"`, `BOUNDED_COMBAT_COUNT = 8` — était 9 avant la refonte du système de biomes du 2026-09-01, voir `docs/design/bestiaire.md`) — juste avant le Boss. Cette garantie ("reposé juste avant le Boss") prime même sur la règle "jamais 2 fois de suite" : si Le Refuge était déjà le dernier évènement tiré, il revient quand même.
 - **Effet** : soigne **tous les aventuriers d'un coup** de **30% de leurs PV max** chacun (`REFUGE_HEAL_FRACTION = 0.30`, même fraction que le Feu de camp, mais appliquée à toute l'équipe et sans aucun choix). Un clic sur le bouton "Se reposer" déclenche le soin (action requise — avant une correction, le soin s'appliquait automatiquement à l'entrée sur l'écran, avant même que le joueur ne voie ses PV réels).
 - Ne peut **jamais** sortir en dehors de ce chemin forcé.
 

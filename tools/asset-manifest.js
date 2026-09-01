@@ -90,6 +90,9 @@ module.exports = [
   // ---- Icônes de mots-clés (icon, 32x32) ----
   { id: 'energie', grid: 'icon', out: 'game/assets/icons/keywords/energie.png',
     subject: 'a lightning bolt icon, energy symbol' },
+  // "PO" (or, 2026-09-02, demande explicite -- nouvelle ressource persistante).
+  { id: 'or', grid: 'icon', out: 'game/assets/icons/keywords/or.png',
+    subject: 'a gold coin icon, single object' },
   { id: 'epee', grid: 'icon', out: 'game/assets/icons/keywords/epee.png',
     subject: 'a straight medieval sword icon, single object' },
   { id: 'arc', grid: 'icon', out: 'game/assets/icons/keywords/arc.png',

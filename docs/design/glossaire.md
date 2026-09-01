@@ -1,6 +1,6 @@
 # Glossaire
 
-Reconstruit depuis le code le 2026-08-30, **corrigé le même jour sur le rendu des icônes**, puis **mis à jour le 2026-08-30 (mana)** — voir encadrés ci-dessous. Source : `game/src/data/glossary.lua`, 25 entrées. Tout mot-clé cité entre guillemets dans le texte d'une carte (`docs/design/cartes.md`), d'un effet des Statues de Temple (`docs/design/temple.md`) ou d'une description de classe (`docs/design/classes.md`) est reconnu depuis cette liste — c'est elle qui alimente l'infobulle explicative affichée au survol en jeu.
+Reconstruit depuis le code le 2026-08-30, **corrigé le même jour sur le rendu des icônes**, puis **mis à jour le 2026-08-30 (mana)**, puis **mis à jour le 2026-09-01 (Brûlure, nouveau statut du Volcan — voir `docs/design/bestiaire.md`)** — voir encadrés ci-dessous. Source : `game/src/data/glossary.lua`, 34 entrées (le chiffre "25" cité par une version antérieure de ce document était déjà inexact avant l'ajout de Brûlure — corrigé au passage). Tout mot-clé cité entre guillemets dans le texte d'une carte (`docs/design/cartes.md`), d'un effet des Statues de Temple (`docs/design/temple.md`) ou d'une description de classe (`docs/design/classes.md`) est reconnu depuis cette liste — c'est elle qui alimente l'infobulle explicative affichée au survol en jeu.
 
 Deux familles : les termes "à icône" (`has_icon = true`, remplacés par un pictogramme + un mot court dans l'interface — épée, arc, feu...) et les statuts/mécaniques "texte" (`has_icon = false`, affichés en toutes lettres — la majorité des vrais effets de gameplay).
 
@@ -44,6 +44,7 @@ Les 17 termes "à icône" ont chacun un PNG dédié dans `game/assets/icons/keyw
 | Camouflé | Ne peut pas être ciblé par un ennemi. Reste tant qu'un allié est en vie et jusqu'à jouer une carte. |
 | Puissance | Les attaques physiques gagnent +25% par stack, -1 Puissance au début de chaque tour. |
 | Vol | Les dégâts de type "épée" (physique) sont réduits à 0. Ne décroît PAS tout seul — seule "Charge en Piqué" (Aigle Géant) le retire. |
+| Brûlure | Inflige X dégâts brut à la fin du tour. Comme Vol, ne décroît JAMAIS tout seule (contrairement à Saignement, -1/tour) — reste à sa valeur tant que rien ne la retire explicitement. Posée par plusieurs ennemis du Volcan (Cracheur de Braise, Élémentaire de Cendre, Élémentaire de Feu) — voir `docs/design/bestiaire.md`. |
 | Discrétion | Ressource propre à l'Assassin (0 à 10) : +1 quand un autre héros joue une carte, +5 s'il termine le tour sans en avoir joué. À 10, devient Camouflé. Repart à 0 dès que l'Assassin joue une carte non-Furtif, ou dès qu'il reçoit des dégâts. |
 | Furtif | Ne fait pas perdre de Discrétion en la jouant. Donne 2 Discrétion si défaussée sans avoir été jouée. |
 | Provocation | Le personnage a +50% de chances d'être ciblé par les ennemis. -1 Provocation au début de chaque tour. |
@@ -61,4 +62,4 @@ Les 17 termes "à icône" ont chacun un PNG dédié dans `game/assets/icons/keyw
 
 ## Écart avec les anciens documents
 
-Ni le Google Doc ni le GDD BMAD ne documentent ce glossaire sous cette forme (23 termes à l'origine côté prototype, 25 aujourd'hui avec Vol/Nécrose ajoutés pour l'Aigle Géant et le Nécromancien) — le GDD BMAD ne connaît ni Discrétion/Camouflé, ni Corruption, ni Inspiration/Encore, ni Vol : ces mécaniques sont postérieures à sa rédaction (2026-08-04). À traiter comme une lacune de couverture, pas une contradiction ligne à ligne.
+Ni le Google Doc ni le GDD BMAD ne documentent ce glossaire sous cette forme (23 termes à l'origine côté prototype, 34 aujourd'hui avec Vol/Nécrose/Brûlure ajoutés pour l'Aigle Géant, le Nécromancien et le biome Volcan) — le GDD BMAD ne connaît ni Discrétion/Camouflé, ni Corruption, ni Inspiration/Encore, ni Vol/Brûlure : ces mécaniques sont postérieures à sa rédaction (2026-08-04). À traiter comme une lacune de couverture, pas une contradiction ligne à ligne.
