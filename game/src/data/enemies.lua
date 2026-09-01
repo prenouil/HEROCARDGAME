@@ -430,12 +430,15 @@ Enemies.templates = {
   },
 
   -- ---------- Boss (2026-08-21, demande explicite) ----------
-  -- `boss_only = true` (les 2 templates ci-dessous) : jamais tirés par le
-  -- budget aléatoire du mode Infini -- voir Encounter.generate_encounter, qui
-  -- filtre ce champ hors de son pool. Rencontre fixe assemblée à part par
-  -- Encounter.boss_encounter (1 Homme Arbre + 4 Pousses d'Arbre), déclenchée
-  -- depuis "Tester le boss" au menu ou en fin d'un run borné à 5 combats --
-  -- jamais mêlée à la génération normale.
+  -- `boss_only = true` (tous les templates de cette section) : jamais tirés
+  -- par le budget aléatoire du mode Infini -- voir Encounter.generate_encounter,
+  -- qui filtre ce champ hors de son pool. Rencontre fixe assemblée à part par
+  -- Encounter.boss_encounter, déclenchée depuis "Tester le boss" au menu (tirage
+  -- aléatoire parmi les 4) ou en fin d'un run borné (2026-09-01, demande
+  -- explicite -- CHOISI par le dernier biome traversé, plus un simple 50/50) :
+  -- foret -> Homme Arbre, canyon -> Aigle Géant, catacombes -> Roi Squelette,
+  -- volcan -> Élémentaire de Feu. Voir la table de correspondance dans
+  -- Encounter.boss_encounter (encounter.lua).
   {
     id = "pousse", name = "Pousse d'Arbre", icon = "\u{1F331}", label = "POU", hp_base = 3, cost = 3, target_mode = "random", boss_only = true,
     choose_move = function(e, all, rng)
@@ -530,6 +533,71 @@ Enemies.templates = {
         { icon = "\u{1F985}", name = "Serres Tranchantes", text = range_text(9, level) .. " dégâts à un aventurier" },
         { icon = "\u{1FA76}", name = "Envol", text = 'Prend son envol : gagne "Vol" + ' .. range_text(2, level) .. ' dégâts à tous les aventuriers -- sa prochaine attaque devient obligatoirement Charge en Piqué' },
         { icon = "\u{1F985}", name = "Charge en Piqué", text = range_text(14, level) .. ' dégâts à un aventurier -- le ramène au sol (perd "Vol")' },
+      }
+    end,
+  },
+  -- Boss des Catacombes (2026-09-01, demande explicite -- "un boss choisi en
+  -- rapport avec le dernier biome rencontré... pour les catacombes : roi
+  -- squelette") : reprend la mécanique du biome à l'échelle du boss --
+  -- comme le Prêtre Déchu (voir plus haut) relève Squelette Archer/Garde-
+  -- Ossements, le Roi Squelette relève ses propres Squelette Archer tombés
+  -- (mêmes instances que le template commun, PAS un nouveau minion dédié --
+  -- voir Encounter.roi_squelette_encounter, même structure "1 boss + sbires
+  -- déjà existants" que Homme Arbre + Pousses d'Arbre). `revive_template_ids`
+  -- réutilise le kind "revive" généralisé (voir Game.resolve_enemy_action).
+  {
+    id = "roi-squelette", name = "Roi Squelette", icon = "\u{1F480}", label = "ROI", hp_base = 75, cost = 58, target_mode = "random", boss_only = true,
+    choose_move = function(e, all, rng)
+      local any_dead_squelette = false
+      for _, o in ipairs(all) do
+        if o.id ~= e.id and o.template_id == "squelette" and o.hp <= 0 then
+          any_dead_squelette = true
+          break
+        end
+      end
+      if any_dead_squelette and rng:random() < 1 / 3 then
+        return { kind = "revive", name = "Rituel de Réveil", icon = "\u{1F480}", revive_template_ids = { "squelette" } }
+      end
+      if rng:random() < 1 / 2 then
+        return { kind = "dmg", name = "Coup Royal", icon = "\u{2694}\u{FE0F}", dmg_type = "melee", amount = roll_scaled(9, e.level, rng) }
+      end
+      return { kind = "dmg-all", name = "Décret Funeste", icon = "\u{1F480}", dmg_type = "magic", amount = roll_scaled(3, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{2694}\u{FE0F}", name = "Coup Royal", text = range_text(9, level) .. " dégâts à un aventurier" },
+        { icon = "\u{1F480}", name = "Décret Funeste", text = range_text(3, level) .. " dégâts à tous les aventuriers" },
+        { icon = "\u{1F480}", name = "Rituel de Réveil", text = "Relève tous les Squelette Archer vaincus, s'il y en a" },
+      }
+    end,
+  },
+  -- Boss du Volcan (2026-09-01, demande explicite -- "élémentaire de feu") :
+  -- même mécanique "Surchauffe" que le reste du biome (Puissance qui ne
+  -- redescend jamais seule, voir combat.lua/game.lua) portée à l'échelle du
+  -- boss -- "Montée en Puissance" ci-dessous, ET "Souffle Incandescent" pose
+  -- "Brûlure" (nouveau statut du biome, lui non plus jamais décroissant),
+  -- les 2 mécaniques du Volcan réunies sur ce seul boss. Seul (aucun sbire,
+  -- comme l'Aigle Géant -- voir Encounter.elementaire_feu_encounter).
+  {
+    id = "elementaire-feu", name = "Élémentaire de Feu", icon = "\u{1F525}", label = "ELF", hp_base = 95, cost = 66, target_mode = "random", boss_only = true,
+    choose_move = function(e, all, rng)
+      if rng:random() < 0.25 then
+        return { kind = "buff-self", name = "Montée en Puissance", icon = "\u{1F525}", status_key = "puissance", amount = 2, log_text = "s'embrase et gagne en puissance" }
+      end
+      if rng:random() < 0.25 then
+        return { kind = "dmg-all", name = "Éruption", icon = "\u{1F30B}", dmg_type = "magic", amount = roll_scaled(3, e.level, rng) }
+      end
+      if rng:random() < 0.5 then
+        return { kind = "dmg", name = "Griffe Ardente", icon = "\u{1F525}", dmg_type = "melee", amount = roll_scaled(7, e.level, rng) }
+      end
+      return { kind = "dmg", name = "Souffle Incandescent", icon = "\u{1F525}", dmg_type = "magic", amount = roll_scaled(5, e.level, rng), burn = roll_scaled(2, e.level, rng) }
+    end,
+    moves_info = function(level)
+      return {
+        { icon = "\u{1F525}", name = "Griffe Ardente", text = range_text(7, level) .. " dégâts à un aventurier" },
+        { icon = "\u{1F525}", name = "Souffle Incandescent", text = range_text(5, level) .. ' dégâts + "Brûlure" ' .. range_text(2, level) .. " à un aventurier" },
+        { icon = "\u{1F30B}", name = "Éruption", text = range_text(3, level) .. " dégâts à tous les aventuriers" },
+        { icon = "\u{1F525}", name = "Montée en Puissance", text = 'Gagne "Puissance" 2, pas de dégât ce tour-là -- ne redescend jamais seule' },
       }
     end,
   },

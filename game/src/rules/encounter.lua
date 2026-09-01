@@ -112,18 +112,27 @@ function Encounter.promote_to_elite(e)
 end
 
 --- Rencontre fixe du boss (2026-08-21, demande explicite -- ÉTENDUE le
--- 2026-08-30, "il faudrait un deuxième boss : un aigle géant") : tire au sort
--- ENTRE les 2 boss disponibles à chaque appel (même `rng` que le reste de la
--- rencontre, state.rng.encounter -- voir Game.start_boss_test/
--- start_boss_combat, donc reproductible à l'identique pour un seed de run
--- donné, comme tout le reste ici) -- jamais mêlée à la génération normale du
--- mode Infini (voir "boss_only" sur ces templates dans enemies.lua, filtré
--- hors du pool de Encounter.generate_encounter par random_pool ci-dessus).
-function Encounter.boss_encounter(uid_gen, rng)
-  if rng:random() < 0.5 then
-    return Encounter.homme_arbre_encounter(uid_gen, rng)
-  end
-  return Encounter.aigle_encounter(uid_gen, rng)
+-- 2026-08-30 pour un 2ᵉ boss, puis le 2026-09-01 aux 4 boss/biomes) :
+-- `biome` (optionnel, "foret"|"catacombes"|"canyon"|"volcan") CHOISIT le
+-- boss -- demande explicite "le boss final doit être choisi en rapport avec
+-- le dernier biome rencontré". Un run "bounded" passe toujours
+-- `Game.current_biome(state)` ici (qui résout au 2ᵉ biome du run pour tout
+-- combat au-delà du 4ᵉ, boss compris -- voir son commentaire dans game.lua,
+-- aucun cas particulier à gérer ici). `biome` absent (nil) -- "Tester le
+-- boss" au menu, qui n'a pas de state.run.biomes -- retombe sur un tirage
+-- aléatoire uniforme parmi les 4, comme avant cette demande (chaque boss
+-- restant testable indépendamment). `rng` = state.rng.encounter, comme le
+-- reste de la rencontre -- reproductible à l'identique pour un seed de run
+-- donné. Jamais mêlée à la génération normale du mode Infini (voir
+-- "boss_only" sur ces templates dans enemies.lua, filtré hors du pool de
+-- Encounter.generate_encounter par random_pool ci-dessus).
+function Encounter.boss_encounter(uid_gen, rng, biome)
+  if biome == "foret" then return Encounter.homme_arbre_encounter(uid_gen, rng) end
+  if biome == "canyon" then return Encounter.aigle_encounter(uid_gen, rng) end
+  if biome == "catacombes" then return Encounter.roi_squelette_encounter(uid_gen, rng) end
+  if biome == "volcan" then return Encounter.elementaire_feu_encounter(uid_gen, rng) end
+  local pool = { "foret", "canyon", "catacombes", "volcan" }
+  return Encounter.boss_encounter(uid_gen, rng, pool[rng:random(#pool)])
 end
 
 --- 1 Homme Arbre + 4 Pousses d'Arbre, toujours niveau 1 -- voir le
@@ -154,6 +163,33 @@ end
 function Encounter.aigle_encounter(uid_gen, rng)
   local aigle = Enemies.by_id("aigle")
   return { Encounter.instantiate_enemy(aigle, 1, uid_gen, rng) }
+end
+
+--- Boss des Catacombes (2026-09-01, demande explicite -- "roi squelette") :
+-- même structure que Encounter.homme_arbre_encounter ci-dessus (1 boss + des
+-- sbires déjà existants au début du combat) -- mais réutilise le template
+-- COMMUN "squelette" (Squelette Archer) comme sbires plutôt qu'un minion
+-- dédié, pour que la mécanique "relève ses sbires tombés" du Roi Squelette
+-- (voir enemies.lua) fasse directement écho au Prêtre Déchu du même biome.
+function Encounter.roi_squelette_encounter(uid_gen, rng)
+  local roi = Enemies.by_id("roi-squelette")
+  local squelette = Enemies.by_id("squelette")
+  local instances = {}
+  for _ = 1, 2 do
+    instances[#instances + 1] = Encounter.instantiate_enemy(squelette, 1, uid_gen, rng)
+  end
+  instances[#instances + 1] = Encounter.instantiate_enemy(roi, 1, uid_gen, rng)
+  for _ = 1, 2 do
+    instances[#instances + 1] = Encounter.instantiate_enemy(squelette, 1, uid_gen, rng)
+  end
+  return instances
+end
+
+--- Boss du Volcan (2026-09-01, demande explicite -- "élémentaire de feu") :
+-- seul, comme l'Aigle Géant -- voir son commentaire ci-dessus.
+function Encounter.elementaire_feu_encounter(uid_gen, rng)
+  local elementaire = Enemies.by_id("elementaire-feu")
+  return { Encounter.instantiate_enemy(elementaire, 1, uid_gen, rng) }
 end
 
 function Encounter.summary(enemies)

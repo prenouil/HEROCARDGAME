@@ -60,6 +60,13 @@ local DRAW_FLIGHT_SINGLE_DURATION = 0.85 -- s -- vol plus long, MÊME courbe (ea
 local ENEMY_ENTRANCE_DURATION = 0.55 -- s -- chute d'1 ennemi depuis le haut de l'écran jusqu'à sa position
 local ENEMY_ENTRANCE_STAGGER = 0.18 -- s entre 2 ennemis qui descendent -- "un décalage... pour qu'ils n'arrivent pas de façon totalement synchronisée"
 local ENEMY_ENTRANCE_BOSS_LEAD = 0.55 -- s d'avance du boss sur son 1er sbire -- "c'est lui qui arrive en premier, puis les sbires ensuite"
+-- Identifie explicitement "le boss" par template_id (2026-09-01) -- l'ancienne
+-- convention "tout ce qui n'est pas 'pousse'" ne suffit plus depuis le Roi
+-- Squelette, qui réutilise le template COMMUN "squelette" comme sbires (pas
+-- un minion dédié comme Pousse d'Arbre pour l'Homme Arbre) -- avec l'ancienne
+-- règle, ses 4 sbires auraient chacun été traités comme "le boss" ici. Les 4
+-- boss possibles (voir Encounter.boss_encounter) sont listés une fois ici.
+local BOSS_TEMPLATE_IDS = { ["homme-arbre"] = true, aigle = true, ["roi-squelette"] = true, ["elementaire-feu"] = true }
 local HERO_READY_STAGGER = 0.15 -- s entre le saut "prêt" de chaque aventurier vivant, gauche à droite
 local END_TURN_DISCARD_STAGGER = 0.09 -- s entre deux cartes défaussées en FIN DE TOUR -- plus lent que l'ancien DISCARD_STAGGER
 local END_TURN_DISCARD_FLIGHT_DURATION = 0.48 -- s -- vol de défausse de fin de tour, plus lent que FLIGHT_DURATION
@@ -1401,10 +1408,9 @@ end
 -- (view.lua) pour substituer un y hors-écran + fondu à la position de repos
 -- tant que l'entrée n'est pas finie -- et programme 1 son PAR ennemi via
 -- schedule_sfx (jamais un seul son pour tout le lot, même idiome que
--- Controller:animate_draw). Boss (state.run.is_boss) : le boss (tout ce qui
--- n'est pas "pousse", même convention que Encounter.boss_encounter/
--- enemies.lua pour distinguer boss et sbires) descend seul en premier, ses
--- sbires décalés seulement APRÈS lui (ENEMY_ENTRANCE_BOSS_LEAD) -- combat
+-- Controller:animate_draw). Boss (state.run.is_boss) : le boss (identifié
+-- par BOSS_TEMPLATE_IDS ci-dessus) descend seul en premier, ses sbires
+-- décalés seulement APRÈS lui (ENEMY_ENTRANCE_BOSS_LEAD) -- combat
 -- normal : simple échelonnement gauche à droite dans l'ordre de state.enemies
 -- (celui déjà utilisé par View.enemy_rects), aucune notion de priorité.
 -- Renvoie la durée totale, même contrat que consume_drawn_animation/
@@ -1429,7 +1435,7 @@ function Controller:play_enemy_entrance_sequence()
   local max_delay = 0
   for _, e in ipairs(enemies) do
     local delay
-    if is_boss and e.template_id ~= "pousse" then
+    if is_boss and BOSS_TEMPLATE_IDS[e.template_id] then
       delay = 0
     else
       delay = (is_boss and ENEMY_ENTRANCE_BOSS_LEAD or 0) + minion_index * ENEMY_ENTRANCE_STAGGER

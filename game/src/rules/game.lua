@@ -564,7 +564,13 @@ function Game.start_boss_combat(state)
   local heroes = {}
   for i, h in ipairs(state.heroes) do heroes[i] = carried_hero(h) end
   state.heroes = heroes
-  state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter)
+  -- Boss choisi par le dernier biome traversé (2026-09-01, demande explicite) :
+  -- Game.current_biome résout au 2ᵉ biome du run pour tout combat_index > 4,
+  -- boss (déjà incrémenté ci-dessus) compris -- aucun cas particulier requis
+  -- ici. nil pour un run sans biomes (ne devrait pas arriver pour un run
+  -- "bounded" réel, mais Encounter.boss_encounter retombe alors sur un
+  -- tirage aléatoire par sécurité, jamais une erreur).
+  state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter, Game.current_biome(state))
   local reclaimed = {}
   for _, c in ipairs(state.deck) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.hand) do reclaimed[#reclaimed + 1] = c end

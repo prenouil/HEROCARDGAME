@@ -80,6 +80,13 @@ module.exports = [
   { id: 'vouivre', grid: 'character', out: 'game/assets/characters/enemies/vouivre.png',
     subject: 'an ash wyvern enemy character, small dragon with wings, no human-like posture, no hands, no held weapon, viewed from the front' },
 
+  // Boss choisis par biome (2026-09-02) : Roi Squelette (Catacombes), Élémentaire
+  // de Feu (Volcan) -- voir enemies.lua/Encounter.boss_encounter.
+  { id: 'roi-squelette', grid: 'character', out: 'game/assets/characters/enemies/roi-squelette.png',
+    subject: 'an undead skeleton king enemy character, wearing a crown, holding a sword, royal tattered robe, standing pose' },
+  { id: 'elementaire-feu', grid: 'character', out: 'game/assets/characters/enemies/elementaire-feu.png',
+    subject: 'a fire elemental enemy character, humanoid body made of flames and embers, glowing, no clothing, standing pose' },
+
   // ---- Icônes de mots-clés (icon, 32x32) ----
   { id: 'energie', grid: 'icon', out: 'game/assets/icons/keywords/energie.png',
     subject: 'a lightning bolt icon, energy symbol' },
