@@ -6,7 +6,7 @@ Couvre 4 évènements : Feu de camp, la Forge, le Temple et le Refuge. Le Temple
 
 ## Séquence complète après un combat gagné
 
-1. **Draft** (`Controller:enter_draft_screen`) : le joueur choisit 1 carte parmi 3 à ajouter au deck (ou "Ne rien prendre"). Pas détaillé ici (hors périmètre de cet onglet), mais nécessaire pour comprendre où s'insère la suite.
+1. **Écran de victoire** (`Controller:enter_victory_screen`, restructuré le 2026-09-02 — remplace l'ancien enchaînement direct vers un écran "Draft") : titre "Victoire !" en zoom, puis **2 gains à récupérer indépendamment**, chacun par un clic explicite du joueur — les **PO** gagnées (`Game.compute_gold_reward`, voir `docs/design/glossaire.md`) qui volent jusqu'à la bourse de l'équipe, ET une **carte de draft** (1 parmi 3, ou "Ne rien prendre") dont le clic lance le retournement des 3 propositions une par une. Le bouton "Continuer" reste inactif tant que les 2 gains n'ont pas été collectés. Pas détaillé davantage ici (hors périmètre de cet onglet), mais nécessaire pour comprendre où s'insère la suite.
 2. **1 seul évènement "camp"** est ensuite déclenché — Feu de camp, Forge OU Temple, jamais plus d'un par combat, jamais 2 fois le même type d'affilée (sauf l'exception du Refuge forcé, voir plus bas). Après le 4ᵉ combat classique d'un run "bounded" (mi-parcours), un écran d'annonce du 2ᵉ biome (`biome_intro`) s'intercale avant ce choix — voir `docs/design/bestiaire.md` (système de biomes), non détaillé ici.
 3. Le combat suivant démarre (ou le Boss, si c'était le 8ᵉ et dernier combat classique d'un run "bounded").
 

@@ -108,6 +108,23 @@ local DRAFT_FLIP_GAP = 0.2 -- pause entre la fin d'un retournement et le début 
 local VICTORY_COIN_COUNT = 6
 local VICTORY_COIN_STAGGER = 0.06
 local VICTORY_COIN_FLIGHT_DURATION = 0.5
+-- Bourse en overlay (2026-09-02, demande explicite) : durée du fondu APRÈS
+-- l'arrivée de la dernière pièce, et du bond à CHAQUE arrivée -- voir
+-- draw_gold_purse_overlay (view.lua), copiées dans `gold_purse_overlay.
+-- fade_duration`/`pop_duration` à la création (Controller:click_victory_gold)
+-- pour que view.lua les lise sans dépendre de ce module.
+local GOLD_PURSE_FADE_DURATION = 0.6
+local GOLD_PURSE_POP_DURATION = 0.25
+-- Choix d'une carte de draft (2026-09-02, demande explicite -- "les autres
+-- disparaissent doucement, puis la carte choisie rejoint la pioche dans un
+-- mouvement ample") : `other_fade_duration` (fondu des 2 cartes NON
+-- choisies) tourne PLUS VITE que `duration` (vol complet de la carte
+-- choisie) -- les autres doivent avoir disparu bien avant que l'oeil ne
+-- suive la carte choisie jusqu'à la pioche, pas continuer de traîner en
+-- arrière-plan pendant tout le vol. Voir Controller:choose_draft_card/
+-- draw_draft_choice_flight (view.lua, via DraftFx.flight).
+local DRAFT_CHOICE_FLIGHT_DURATION = 0.6
+local DRAFT_CHOICE_OTHER_FADE_DURATION = 0.3
 local BOSS_VICTORY_HOLD_DURATION = 2.2 -- s -- temps où "Boss vaincu !" reste affiché avant le retour au menu
 -- Écran d'annonce de biome (2026-09-01, demande explicite -- "une petite
 -- fenêtre intermédiaire pour annoncer le lieu") : même idiome que
@@ -286,7 +303,7 @@ local FURTIF_SPARKLE_COUNT = 5
 -- "brulure" (2026-09-01, nouveau statut, Volcan) : même raison que "vol"
 -- ci-dessus -- décrit ailleurs (Game.tick_burn), jamais ajouté à
 -- Game.decay_end_of_turn_statuses, jamais de décroissance automatique.
-local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "camoufle", "provocation", "vol", "brulure" }
+local STATUS_KEYS = { "defense", "esquive", "saignements", "incapacite", "vulnerabilite", "puissance", "incandescence", "camoufle", "provocation", "vol", "brulure" }
 
 function Controller.new()
   local self = setmetatable({}, Controller)
@@ -403,6 +420,17 @@ function Controller.new()
   self.victory_gold_collected = false
   self.victory_gold_flying = false -- vrai pendant le vol des pièces, voir coin_anims
   self.victory_card_collected = false
+  -- { pop_t, fade_t, fade_duration, pop_duration } | nil (2026-09-02, voir
+  -- Controller:click_victory_gold/draw_gold_purse_overlay dans view.lua) --
+  -- réaffichage de la bourse PAR-DESSUS le voile noir pendant le vol des
+  -- pièces, avec un bond à chaque arrivée puis un fondu.
+  self.gold_purse_overlay = nil
+  -- { chosen_index, t, duration, other_fade_duration } | nil (2026-09-02, voir
+  -- Controller:choose_draft_card/draw_draft_choice_flight dans view.lua) --
+  -- `draft_picks` reste peuplé tant que ceci est actif (la carte choisie vole,
+  -- les 2 autres s'estompent) ; Controller:update finalise (vide draft_picks,
+  -- pose victory_card_collected) une fois `t >= duration`.
+  self.draft_choice_anim = nil
   self.anim = {} -- [unit_id] = { kind = "pulse-up"|"pulse-down"|"shake", t = elapsed }
   self.card_anims = {} -- liste de { from, to, elapsed, delay, duration, fade_in, def } -- voir View.draw
   -- Pièces d'or en vol du gain PO vers View.gold_display_rect (2026-09-02) :
@@ -986,6 +1014,8 @@ function Controller:clear_animation_state()
   self.victory_gold_collected = false
   self.victory_gold_flying = false
   self.victory_card_collected = false
+  self.gold_purse_overlay = nil
+  self.draft_choice_anim = nil
   self.seq:clear()
   self.anim = {}
   self.card_anims = {}
@@ -1715,12 +1745,46 @@ function Controller:update(dt)
     for i = #self.coin_anims, 1, -1 do
       local a = self.coin_anims[i]
       a.elapsed = a.elapsed + dt
-      if a.elapsed >= a.delay + a.duration then table.remove(self.coin_anims, i) end
+      if a.elapsed >= a.delay + a.duration then
+        table.remove(self.coin_anims, i)
+        -- Bourse en overlay : rejoue le bond à CHAQUE arrivée (2026-09-02,
+        -- demande explicite -- "saute à chaque pièce qui arrive dedans"),
+        -- pas seulement à la fin -- voir draw_gold_purse_overlay (view.lua).
+        if self.gold_purse_overlay then self.gold_purse_overlay.pop_t = 0 end
+      end
     end
     if self.victory_gold_flying and #self.coin_anims == 0 then
       self.state.gold = self.state.gold + self.victory_gold_reward
       self.victory_gold_collected = true
       self.victory_gold_flying = false
+      -- Dernière pièce arrivée : lance le fondu de la bourse en overlay
+      -- (2026-09-02, "puis fade quand c'est fini") -- draw_gold_purse_overlay
+      -- se retire elle-même une fois le fondu terminé, voir plus bas.
+      if self.gold_purse_overlay then self.gold_purse_overlay.fade_t = 0 end
+    end
+  end
+  if self.gold_purse_overlay then
+    self.gold_purse_overlay.pop_t = self.gold_purse_overlay.pop_t + dt
+    if self.gold_purse_overlay.fade_t then
+      self.gold_purse_overlay.fade_t = self.gold_purse_overlay.fade_t + dt
+      if self.gold_purse_overlay.fade_t >= GOLD_PURSE_FADE_DURATION then
+        self.gold_purse_overlay = nil
+      end
+    end
+  end
+  -- Choix d'une carte de draft (2026-09-02) : finalise APRÈS le vol complet
+  -- de la carte choisie (pas après le fondu des autres, plus court -- voir
+  -- DRAFT_CHOICE_OTHER_FADE_DURATION/DRAFT_CHOICE_FLIGHT_DURATION) -- c'est
+  -- SEULEMENT ici que draft_picks se vide et que victory_card_collected
+  -- passe à vrai, voir Controller:choose_draft_card.
+  if self.draft_choice_anim then
+    self.draft_choice_anim.t = self.draft_choice_anim.t + dt
+    if self.draft_choice_anim.t >= self.draft_choice_anim.duration then
+      self.draft_choice_anim = nil
+      self.draft_picks = nil
+      self.draft_cards_shown = false
+      self.draft_flip = {}
+      self.victory_card_collected = true
     end
   end
   -- Descente des ennemis (2026-08-30) : même idiome que card_anims ci-dessus --
@@ -2169,6 +2233,8 @@ function Controller:enter_victory_screen()
   self.draft_flip = {}
   self.card_anims = {}
   self.coin_anims = {}
+  self.gold_purse_overlay = nil
+  self.draft_choice_anim = nil
   Sfx.play("victory")
   local self_ = self
   self.seq:push(function() end, VICTORY_TITLE_DURATION)
@@ -2186,6 +2252,16 @@ function Controller:click_victory_gold()
   if self.screen ~= "victory" or not self.victory_gains_shown
     or self.victory_gold_collected or self.victory_gold_flying then return end
   self.victory_gold_flying = true
+  -- Bourse en overlay (2026-09-02, demande explicite -- "j'aimerais que la
+  -- bourse apparaisse AUSSI par dessus et saute à chaque pièce qui arrive
+  -- dedans, puis fade quand c'est fini") : créée ici, `pop_t` remis à 0 à
+  -- CHAQUE arrivée de pièce (voir le bloc coin_anims de Controller:update,
+  -- pas ici) pour rejouer le bond à chaque fois, `fade_t` posé seulement une
+  -- fois la DERNIÈRE arrivée passée -- voir draw_gold_purse_overlay (view.lua).
+  self.gold_purse_overlay = {
+    pop_t = 0, fade_t = nil,
+    fade_duration = GOLD_PURSE_FADE_DURATION, pop_duration = GOLD_PURSE_POP_DURATION,
+  }
   Sfx.play("fluf")
   local from, to = View.victory_gold_rect, View.gold_display_rect
   for i = 1, VICTORY_COIN_COUNT do
@@ -2226,8 +2302,18 @@ function Controller:draft_card_ready(index)
   return f ~= nil and f.t >= DRAFT_FLIP_DURATION
 end
 
+--- Choix d'une carte de draft (2026-09-02, demande explicite -- "quand le
+-- joueur choisit une carte, les autres disparaissent doucement, puis la
+-- carte choisie rejoint la pioche dans un mouvement ample") : l'ajout au
+-- deck/le log restent IMMÉDIATS (c'est déjà fait, irréversible), mais
+-- `draft_picks` reste peuplé pendant toute l'animation -- voir
+-- draft_choice_anim ci-dessous, seul `Controller:update` la finalise
+-- vraiment (vide draft_picks/pose victory_card_collected) une fois le vol
+-- terminé. Voir aussi draw_draft_choice_flight/DraftFx.fading (view.lua)
+-- pour le rendu réel des 3 cartes pendant ce délai.
 function Controller:choose_draft_card(index)
-  if self.screen ~= "victory" or not self.draft_picks or not self:draft_card_ready(index) then return end
+  if self.screen ~= "victory" or not self.draft_picks or not self:draft_card_ready(index)
+    or self.draft_choice_anim then return end
   local def = self.draft_picks[index]
   local uid = Game.next_uid(self.state)
   self.state.deck[#self.state.deck + 1] = { uid = uid, def = def }
@@ -2235,10 +2321,14 @@ function Controller:choose_draft_card(index)
   -- commentaire) -- avant le log, sans effet sur celui-ci.
   self.last_drafted_uid = uid
   Combat.log(self.state, def.name .. " ajoutée au deck.", "sys")
-  self.draft_picks = nil
-  self.draft_cards_shown = false
-  self.draft_flip = {}
-  self.victory_card_collected = true
+  self.draft_choice_anim = {
+    chosen_index = index, t = 0,
+    duration = DRAFT_CHOICE_FLIGHT_DURATION, other_fade_duration = DRAFT_CHOICE_OTHER_FADE_DURATION,
+  }
+  -- "flush" retiré (le retournement est déjà fini) -- "flup" (même son que
+  -- tout déplacement de cartes entre piles, voir son commentaire dans
+  -- sfx.lua) marque le départ du vol vers la pioche.
+  Sfx.play("flup")
 end
 
 --- "Ne rien prendre" (2026-08-30, demande explicite -- "si le joueur ne veut
@@ -2250,7 +2340,7 @@ end
 -- suit (voir Controller:enter_forge_screen) -- seule "la carte tout juste
 -- gagnée" doit jamais être exclue, pas "la dernière jamais gagnée".
 function Controller:skip_draft()
-  if self.screen ~= "victory" or not self.draft_picks then return end
+  if self.screen ~= "victory" or not self.draft_picks or self.draft_choice_anim then return end
   Combat.log(self.state, "Aucune carte gagnée.", "sys")
   self.draft_picks = nil
   self.last_drafted_uid = nil

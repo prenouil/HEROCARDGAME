@@ -4,6 +4,8 @@
 
 Toutes les valeurs ci-dessous sont celles de **niveau 1**. Chaque ennemi scale avec son niveau (voir Scaling, en bas de page) : les PV et les montants de coups affichés en jeu sont donc plus élevés dans un combat avancé.
 
+> **Mise à jour du 2026-09-02 — "Puissance" renommée "Incandescence" sur les 4 coups du Volcan concernés.** Les 4 coups qui posaient auparavant "Puissance" sur Salamandre de Lave (Surchauffe), Golem de Magma (Cœur en Fusion), Vouivre des Cendres (Montée en Cendres) et le boss Élémentaire de Feu (coup renommé "Montée en Incandescence", ex-"Montée en Puissance") posent désormais un statut distinct, "Incandescence" — voir le paragraphe Volcan ci-dessous et le Glossaire pour le détail du mécanisme (bonus flat, pas +25%/stack). Aucun ennemi de ce document ne porte plus la vraie Puissance.
+
 ## Le système de biomes
 
 Un run "bounded" (celui joué normalement, voir plus bas) tire **2 des 4 biomes sans remise** (`foret`/`catacombes`/`canyon`/`volcan`, `pick_run_biomes` dans `game.lua`) au tout début du run. Chaque combat commun est désormais **confiné à un seul biome** (`Encounter.generate_encounter(budget, rng, biome)`, filtré via `random_pool` dans `encounter.lua`) — fini le pool plat unique d'avant.
@@ -13,7 +15,7 @@ Chaque biome porte **une mécanique de gameplay lisible**, pas seulement un thè
 - **Forêt Sauvage** — biome du Saignement : 3 de ses 5 ennemis (Loup, Araignée, Gobelourd en mode agressif) posent du "Saignement", punissant les combats qui traînent plutôt que les gros coups ponctuels. Le Troll est le seul ennemi du jeu à pouvoir se soigner (Régénération), mais perd cette option **définitivement** dès qu'il subit ne serait-ce qu'un seul point de dégâts "feu" au cours du combat (`e.fire_touched_ever`, posé une fois pour toutes dans `Combat.deal_damage`, jamais réinitialisé) — apporter une source de feu neutralise durablement sa seule capacité de sustain.
 - **Catacombes** — biome de la résurrection : le Prêtre Déchu relève les Squelette Archer/Garde-Ossements tombés au combat (`kind = "revive"`, généralisé via `move.revive_template_ids`, résolu dans `Game.resolve_enemy_action`) — laisser un squelette "mort" sur le champ ne suffit pas, il faut soit l'achever pour de bon en abattant le Prêtre en premier, soit accepter qu'il revienne. Le Golem de Pierre y ajoute une mécanique de soutien à part (voir encadré ci-dessous).
 - **Canyon des Brigands** — biome du focus-fire : 4 de ses 5 ennemis (Bandit, Éclaireuse, Chef de Bande, Tireuse) ciblent systématiquement le héros au moins de PV (`target_mode = "lowest-hp"`, déterministe) plutôt que le tirage pondéré aléatoire des autres biomes — un héros déjà blessé y reste une cible prioritaire tant qu'il n'est pas soigné ou Camouflé, et Provocation/Discrétion n'y ont aucune prise sur ces 4 ennemis (elles ne jouent qu'en mode "random").
-- **Volcan** — biome de l'escalade : plusieurs ennemis (Salamandre, Golem de Magma, Vouivre, et le boss) gagnent régulièrement "Puissance" (`kind = "buff-self"`), qui **ne redescend jamais toute seule côté ennemi** (`Game.decay_end_of_turn_statuses` ne décrémente Puissance que côté héros — rien côté ennemi) ; Cracheur de Braise et Élémentaire de Cendre posent en plus "Brûlure" (voir Glossaire), qui elle non plus ne décroît jamais seule. Un combat de Volcan qui s'éternise devient strictement plus dangereux à chaque tour — biome qui punit la lenteur, contrairement à la Forêt qui punit surtout l'absence de soin.
+- **Volcan** — biome de l'escalade : plusieurs ennemis (Salamandre, Golem de Magma, Vouivre, et le boss) gagnent régulièrement "Incandescence" (`kind = "buff-self"`, `status_key = "incandescence"`) — un statut **distinct de Puissance** (2026-09-02, renommé depuis un ancien détournement de Puissance sur ces 4 mêmes coups) : bonus **flat** (+X dégâts physiques, X = valeur actuelle, additionné avant tout multiplicateur — voir Glossaire), pas +25%/stack multiplicatif comme Puissance, et qui **ne redescend jamais tout seule** (même famille que Vol/Brûlure, volontairement absente de `Game.decay_end_of_turn_statuses`) — contrairement à Puissance elle-même, qui décroît désormais de 1 en fin de tour, symétriquement côté héros et côté ennemi. Cracheur de Braise et Élémentaire de Cendre posent en plus "Brûlure" (voir Glossaire), qui elle non plus ne décroît jamais seule. Un combat de Volcan qui s'éternise devient strictement plus dangereux à chaque tour — biome qui punit la lenteur, contrairement à la Forêt qui punit surtout l'absence de soin.
 
 Le mode "Infini" (hors périmètre de la mécanique de biomes, signalé dans le code comme "bientôt retiré du jeu") et "Tester le boss" au menu continuent d'utiliser le pool complet non filtré par biome — voir Composition de rencontre plus bas.
 
@@ -59,11 +61,11 @@ Charge de groupe du Chef de Bande n'est **pas** mise à l'échelle du niveau sur
 
 | Ennemi | Icône | PV (Nv.1) | Coût (budget) | Ciblage | Coups |
 |---|---|---|---|---|---|
-| Salamandre de Lave | 🦎 | 14 | 10 | Aléatoire | Griffure Ardente (feu, 5 dégâts, fréquent ~2/3) · Surchauffe (gagne "Puissance" 2, aucun dégât, rare ~1/3 — ne redescend jamais seule) |
+| Salamandre de Lave | 🦎 | 14 | 10 | Aléatoire | Griffure Ardente (feu, 5 dégâts, fréquent ~2/3) · Surchauffe (gagne "Incandescence" 2, aucun dégât, rare ~1/3 — ne redescend jamais seule) |
 | Cracheur de Braise | 🌫️ | 12 | 8 | Aléatoire | Jet de Braise (magique, 3 dégâts + "Brûlure" 1, toujours — la Brûlure ne décroît jamais seule) |
 | Élémentaire de Cendre | 🌫️ | 11 | 8 | Aléatoire | Souffle Étouffant ("Vulnérabilité" 2 + "Brûlure" 1, aucun dégât direct, 1/2) · Éclat Brûlant (magique, 4 dégâts, 1/2) |
-| Golem de Magma | 🪨 | 32 | 15 | Aléatoire | Poing Incandescent (feu, 7 dégâts, fréquent ~2/3) · Cœur en Fusion (gagne "Puissance" 2, aucun dégât, rare ~1/3 — ne redescend jamais seule). 2 bouclier passif permanent. |
-| Vouivre des Cendres | 🐉 | 20 | 17 | Aléatoire | Griffure de Braise (feu, 6 dégâts, 2 tours sur 3) · Montée en Cendres (gagne "Puissance" 2, aucun dégât — **garanti, automatique tous les 3 tours**, pas aléatoire — ne redescend jamais seule) |
+| Golem de Magma | 🪨 | 32 | 15 | Aléatoire | Poing Incandescent (feu, 7 dégâts, fréquent ~2/3) · Cœur en Fusion (gagne "Incandescence" 2, aucun dégât, rare ~1/3 — ne redescend jamais seule). 2 bouclier passif permanent. |
+| Vouivre des Cendres | 🐉 | 20 | 17 | Aléatoire | Griffure de Braise (feu, 6 dégâts, 2 tours sur 3) · Montée en Cendres (gagne "Incandescence" 2, aucun dégât — **garanti, automatique tous les 3 tours**, pas aléatoire — ne redescend jamais seule) |
 
 ## Mécanique transversale : Élite
 
@@ -72,7 +74,7 @@ N'importe quel ennemi commun ou boss peut être tiré comme variante **Élite** 
 - **×1.6** sur PV max et bouclier passif.
 - **×1.3** sur tout montant porté par un coup une fois télégraphié : dégâts, saignement, brûlure, dégâts-à-tous, 2ᵉ statut d'une debuff double, gain de bouclier ponctuel.
 - **Gratuit dans le budget de rencontre** — `Enemies.cost_at_level` ne lit jamais le flag `elite`, la promotion se fait sur une instance déjà créée, après que le budget a déjà été calculé.
-- Visuel : cadre doré scintillant, ~+18% de taille de rendu (zone cliquable inchangée), nom entouré de 2 étoiles (★) au survol.
+- Visuel (revu le 2026-09-02, revirement explicite — "le cadre doré et scintillant... n'est pas bon, il ne faut pas mettre de cadre, comme pour un ennemi normal") : cadre strictement identique à un ennemi normal, ~+18% de taille de rendu inchangé (zone cliquable inchangée) — le signal "doré et scintillant" se lit désormais sur la **barre de PV elle-même**. Nom entouré de 2 étoiles au survol (icône vectorielle dédiée depuis le 2026-09-02 — le caractère Unicode "★" utilisé avant ne s'affichait jamais, absent de la police pixel-art du jeu).
 
 **Déclenchement** : un ennemi tiré au hasard parmi ceux du combat devient Élite au **4ᵉ combat de chaque biome** — `combat_index == 4` (fin du 1ᵉʳ biome) et `combat_index == 8` (fin du 2ᵉ, juste avant le Refuge puis le Boss), uniquement en mode "bounded". Jamais en mode "Infini", jamais sur un Boss (le tirage se fait sur `enemies[]` du combat courant, jamais appliqué dans `Encounter.boss_encounter`).
 
@@ -133,7 +135,7 @@ Même mécanique que le Prêtre Déchu (Catacombes), portée à l'échelle du bo
 Seul, comme l'Aigle Géant — aucun sbire.
 
 **Élémentaire de Feu** — 95 PV, coût 66, ciblage aléatoire. Réunit les 2 mécaniques du Volcan sur un seul ennemi :
-- Montée en Puissance (🔥, gagne "Puissance" 2, aucun dégât — ~25% de chance, ne redescend jamais seule)
+- Montée en Incandescence (🔥, gagne "Incandescence" 2, aucun dégât — ~25% de chance, ne redescend jamais seule — coup renommé depuis "Montée en Puissance" le 2026-09-02, même mécanique du Volcan renommée pour tout le biome)
 - Éruption (🌋, magique, 3 dégâts à tous les aventuriers — ~19% de chance)
 - Griffe Ardente (🔥, épée, 7 dégâts à un aventurier — ~28% de chance)
 - Souffle Incandescent (🔥, magique, 5 dégâts + "Brûlure" 2 à un aventurier — ~28% de chance)
@@ -164,3 +166,4 @@ Tous les 20 ennemis communs et les 4 boss ont désormais une illustration réell
 
 - Le bestiaire précédemment reconstruit par ce document (2026-08-30 : 10 ennemis "Run Infini" sans biome + 2 boss tirés 50/50) est **entièrement obsolète** — refonte complète du 2026-09-01, pas une simple mise à jour incrémentale.
 - Le système de biomes (4 biomes, 20 ennemis, 4 boss choisis par biome, mécanique Élite) ne figure dans AUCUN des deux anciens documents de référence (Google Doc, GDD BMAD) — absence totale, ce système a été construit bien après leur rédaction.
+- "Incandescence" (2026-09-02) : ce document lui-même documentait à tort "Puissance" sur les 4 coups du Volcan concernés jusqu'à cette passe — corrigé, voir encadré en tête de page.

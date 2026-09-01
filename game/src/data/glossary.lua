@@ -41,7 +41,30 @@ Glossary.terms = {
   { key = "incapacite", icon = nil, has_icon = false, related = "", explain = "Inflige -25% de dégâts, -1 Incapacité au début de chaque tour." },
   { key = "vulnerabilite", icon = nil, has_icon = false, related = "", explain = "Reçoit +25% de dégâts, -1 Vulnérabilité au début de chaque tour." },
   { key = "camoufle", icon = nil, has_icon = false, related = "", explain = "Ne peut pas être ciblé par un ennemi. Reste tant qu'un allié est en vie et jusqu'à jouer une carte." },
-  { key = "puissance", icon = nil, has_icon = false, related = "", explain = "Les attaques physiques gagnent +25%, -1 Puissance au début de chaque tour." },
+  -- "-1 Puissance au début de chaque tour, aventurier seulement" (2026-09-02,
+  -- 1ère correction -- contredisait la description de "Cœur en Fusion"/
+  -- "Surchauffe"/etc., "ne redescend jamais seule") : reformulé pour ne plus
+  -- affirmer une règle universelle qui n'était pas vraie à l'époque (seuls
+  -- les aventuriers décroissaient alors, voir l'ancien Game.start_turn).
+  -- 2ᵉ correction, MÊME JOUR (demande explicite -- "la puissance descend à la
+  -- fin de chaque tour, que ce soit pour les aventuriers ou les ennemis") :
+  -- cette 1ère reformulation elle-même n'a jamais été remise à jour après ce
+  -- changement de règle -- Puissance décroît désormais en FIN de tour, de
+  -- façon SYMÉTRIQUE (voir Game.decay_end_of_turn_statuses, SEUL endroit du
+  -- code qui la décrémente maintenant) -- la mention "certains ennemis n'en
+  -- perdent jamais seuls" décrit en réalité Incandescence (voir son entrée
+  -- ci-dessous), plus Puissance, qui n'a plus cette exception.
+  { key = "puissance", icon = nil, has_icon = false, related = "", explain = "Les attaques physiques gagnent +25% par charge. -1 en fin de tour, pour les aventuriers comme pour les ennemis." },
+  -- "Incandescence" (2026-09-02, demande explicite -- remplace l'ancien
+  -- détournement de Puissance sur les ennemis du Volcan, "marche comme la
+  -- puissance sauf qu'elle ne descend pas") : REVIREMENT le même jour --
+  -- "plutôt que +25% de dégâts, donne +X aux dégâts, X étant la valeur
+  -- d'Incandescence actuelle" -- bonus FLAT (voir Combat.incandescence_flat),
+  -- pas multiplicatif comme Puissance, additionné AVANT tout multiplicateur
+  -- (même étage que Inspiration, voir Combat.deal_damage) -- ne décroît
+  -- JAMAIS toute seule, ça, en revanche, inchangé -- même famille que
+  -- Vol/Brûlure.
+  { key = "incandescence", icon = nil, has_icon = false, related = "", explain = "Les attaques physiques gagnent +X dégâts, X étant la valeur actuelle. Ne perd jamais de charge automatiquement." },
   -- "Vol" (2026-08-30, second boss -- l'Aigle Géant, voir enemies.lua) : ne
   -- décroît PAS tout seul (contrairement à Incapacité/Vulnérabilité
   -- ci-dessus) -- seule "Charge en Piqué" le retire, voir Game.resolve_enemy_action.

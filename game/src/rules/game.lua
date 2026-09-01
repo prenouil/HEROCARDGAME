@@ -75,7 +75,11 @@ local function fresh_hero(def)
   return {
     id = def.id, class_id = def.class_id, name = def.name, icon = def.icon, label = def.label, max_hp = def.max_hp,
     hp = def.max_hp, defense = 0, esquive = 0, camoufle = 0,
-    incapacite = 0, vulnerabilite = 0, puissance = 0, saignements = 0, brulure = 0,
+    -- Incandescence (2026-09-02, "marche comme la Puissance sauf qu'elle ne
+    -- descend pas" -- statut Volcan, côté ennemi surtout, mais initialisé ici
+    -- comme les autres champs de statut par cohérence si jamais un futur
+    -- effet l'accordait à un héros).
+    incapacite = 0, vulnerabilite = 0, puissance = 0, incandescence = 0, saignements = 0, brulure = 0,
     -- Provocation (2026-08-28, statut propre au Paladin, clarifié après coup --
     -- "+50% de chances d'être ciblé par les ennemis, puis diminue de 1") : un
     -- statut de combat comme les autres (voir STATUS_KEYS/STATUS_TOOLTIP_FIELDS
@@ -195,7 +199,7 @@ local function carried_hero(h)
   -- rien à faire de spécial ici pour ces 2 champs.
   local n = shallow_copy(h)
   n.defense = 0; n.esquive = 0; n.camoufle = 0
-  n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.saignements = 0; n.brulure = 0
+  n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.incandescence = 0; n.saignements = 0; n.brulure = 0
   n.provocation = 0; n.scheduled_shields = {}
   n.played_card_this_turn = false
   -- Inspiration/Encore/Bouclier programmé de Servant d'os (2026-08-29) : des
@@ -705,7 +709,12 @@ function Game.start_turn(state)
     if h.hp > 0 then
       h.defense = 0
       h.played_card_this_turn = false
-      if h.puissance > 0 then h.puissance = h.puissance - 1 end
+      -- Puissance ne décroît plus ICI (2026-09-02, demande explicite -- "la
+      -- puissance descend à la fin de chaque tour, que ce soit pour les
+      -- aventuriers ou les ennemis") : déplacée en FIN de tour, aux côtés
+      -- d'Incapacité/Vulnérabilité, voir Game.decay_end_of_turn_statuses --
+      -- et désormais symétrique héros/ennemis (avant : seuls les héros la
+      -- perdaient, et en DÉBUT de tour, jamais les ennemis).
       -- "Le Protecteur" (2026-08-29, bénédiction -- hero.turn_start_shield) :
       -- APRÈS la remise à 0 de la Défense juste au-dessus, sinon le gain
       -- serait effacé aussitôt -- chaque DÉBUT DE TOUR, pas seulement à
@@ -1272,10 +1281,19 @@ end
 -- décrit comme "-1 au début de chaque tour" sans distinction héros/ennemi ;
 -- resté invisible jusqu'ici faute d'un move ennemi qui la posait sur un héros
 -- -- voir Malédiction du Nécromancien Novice, seul cas qui l'exerçait).
+-- Puissance rejoint ce groupe (2026-09-02, demande explicite -- "la puissance
+-- descend à la fin de chaque tour, que ce soit pour les aventuriers ou les
+-- ennemis") : avant, seuls les héros la perdaient, et en DÉBUT de tour (voir
+-- Game.start_turn) -- désormais symétrique aux deux côtés et à la même étape
+-- qu'Incapacité/Vulnérabilité. Incandescence (nouveau statut, Volcan, "marche
+-- comme la Puissance sauf qu'elle ne descend pas") reste VOLONTAIREMENT
+-- absente d'ici, même traitement que Vol/Brûlure -- jamais décrémentée
+-- automatiquement, seul un effet explicite peut la retirer.
 function Game.decay_end_of_turn_statuses(state)
   for _, h in ipairs(state.heroes) do
     if (h.incapacite or 0) > 0 then h.incapacite = math.max(0, h.incapacite - 1) end
     if (h.vulnerabilite or 0) > 0 then h.vulnerabilite = math.max(0, h.vulnerabilite - 1) end
+    if (h.puissance or 0) > 0 then h.puissance = math.max(0, h.puissance - 1) end
     -- Inspiration (2026-08-29, Barde) : -1 automatique en fin de tour, EN PLUS
     -- de la consommation à l'usage (consume_inspiration, combat.lua) --
     -- "Dernier rappel" protège cette décroissance auto pour N tours
@@ -1293,6 +1311,7 @@ function Game.decay_end_of_turn_statuses(state)
   for _, e in ipairs(state.enemies) do
     if (e.incapacite or 0) > 0 then e.incapacite = math.max(0, e.incapacite - 1) end
     if (e.vulnerabilite or 0) > 0 then e.vulnerabilite = math.max(0, e.vulnerabilite - 1) end
+    if (e.puissance or 0) > 0 then e.puissance = math.max(0, e.puissance - 1) end
   end
 end
 

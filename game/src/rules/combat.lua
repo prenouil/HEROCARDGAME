@@ -90,6 +90,23 @@ local function consume_inspiration(amount, ctx)
   return amount
 end
 
+--- Incandescence (2026-09-02, revirement explicite -- "plutôt que +25% de
+-- dégâts, donne +X aux dégâts, X étant la valeur d'Incandescence actuelle...
+-- les bonus flat comme incandescence s'additionnent avant tout
+-- multiplicateur") : additif comme Inspiration ci-dessus (même étage du
+-- calcul, voir Combat.deal_damage), PAS multiplicatif comme Puissance (donc
+-- SORTIE de Combat.damage_multiplier, où elle vivait avant ce correctif).
+-- Contrairement à consume_inspiration, jamais consommée -- elle ne redescend
+-- jamais (voir Game.decay_end_of_turn_statuses) -- donc pure, pas de `ctx` :
+-- réutilisable telle quelle par Combat.deal_damage ET par l'aperçu au survol
+-- (view.lua), sans le détour que nécessite Inspiration (effet de bord).
+function Combat.incandescence_flat(source_unit, dmg_type)
+  if dmg_type == "physique" and source_unit and (source_unit.incandescence or 0) > 0 then
+    return source_unit.incandescence
+  end
+  return 0
+end
+
 --- Multiplicateur total de dégâts pour un coup donné : Puissance/Incapacité de
 -- l'unité qui frappe, Vulnérabilité de l'unité qui encaisse. TOUS les
 -- pourcentages sont additionnés D'ABORD puis appliqués une seule fois --
@@ -168,13 +185,14 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
   end
   -- Additif AVANT multiplicatif (2026-08-30, demande explicite -- "les bonus
   -- en addition, comme l'inspiration, doivent être appliqués AVANT les bonus
-  -- en multiplication, comme la vulnérabilité") : Inspiration (+6 flat)
-  -- grossit d'abord `base`, la Vulnérabilité/Puissance/Incapacité (toutes
+  -- en multiplication, comme la vulnérabilité") : Inspiration (+6 flat) et
+  -- Incandescence (+X flat, 2026-09-02, même règle réaffirmée explicitement)
+  -- grossissent d'abord `base`, la Vulnérabilité/Puissance/Incapacité (toutes
   -- multiplicatives, voir Combat.damage_multiplier) s'appliquent ENSUITE sur
   -- ce total -- l'ordre inverse (avant ce correctif) laissait le bonus flat
   -- d'Inspiration hors de portée du multiplicateur. Même ordre repris côté
   -- aperçu (voir preview_desc, view.lua), pour ne jamais diverger.
-  local amount = consume_inspiration(base, ctx)
+  local amount = consume_inspiration(base, ctx) + Combat.incandescence_flat(source_unit, dmg_type)
   amount = round(amount * Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire))
   -- Filet de sécurité final pour "Vol" (2026-08-30) : la mise à 0 vit déjà
   -- dans Combat.damage_multiplier (pour que l'aperçu de dégâts affiche 0 lui

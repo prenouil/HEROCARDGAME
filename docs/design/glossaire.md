@@ -1,8 +1,15 @@
 # Glossaire
 
-Reconstruit depuis le code le 2026-08-30, **corrigé le même jour sur le rendu des icônes**, puis **mis à jour le 2026-08-30 (mana)**, puis **mis à jour le 2026-09-01 (Brûlure, nouveau statut du Volcan — voir `docs/design/bestiaire.md`)** — voir encadrés ci-dessous. Source : `game/src/data/glossary.lua`, 34 entrées (le chiffre "25" cité par une version antérieure de ce document était déjà inexact avant l'ajout de Brûlure — corrigé au passage). Tout mot-clé cité entre guillemets dans le texte d'une carte (`docs/design/cartes.md`), d'un effet des Statues de Temple (`docs/design/temple.md`) ou d'une description de classe (`docs/design/classes.md`) est reconnu depuis cette liste — c'est elle qui alimente l'infobulle explicative affichée au survol en jeu.
+Reconstruit depuis le code le 2026-08-30, **corrigé le même jour sur le rendu des icônes**, puis **mis à jour le 2026-08-30 (mana)**, puis **mis à jour le 2026-09-01 (Brûlure, nouveau statut du Volcan — voir `docs/design/bestiaire.md`)**, puis **mis à jour le 2026-09-02 ("or", "Puissance" corrigée, "Incandescence")** — voir encadrés ci-dessous. Source : `game/src/data/glossary.lua`, 36 entrées (le chiffre "25" cité par une version antérieure de ce document était déjà inexact avant l'ajout de Brûlure — corrigé au passage). Tout mot-clé cité entre guillemets dans le texte d'une carte (`docs/design/cartes.md`), d'un effet des Statues de Temple (`docs/design/temple.md`) ou d'une description de classe (`docs/design/classes.md`) est reconnu depuis cette liste — c'est elle qui alimente l'infobulle explicative affichée au survol en jeu.
 
 Deux familles : les termes "à icône" (`has_icon = true`, remplacés par un pictogramme + un mot court dans l'interface — épée, arc, feu...) et les statuts/mécaniques "texte" (`has_icon = false`, affichés en toutes lettres — la majorité des vrais effets de gameplay).
+
+> **Mise à jour du 2026-09-02 — "or" (PO), "Puissance" corrigée, "Incandescence".** Trois changements de règles/contenu côté code, aucun des trois documenté avant cette passe :
+> 1. **"or" (PO)** : nouvelle ressource persistante de l'équipe (`state.gold`, `game/src/rules/game.lua`) — un run démarre à 100 PO (`Game.reset_run`), jamais remise à 0 en cours de run (contrairement à l'énergie, remise à 0 à chaque combat), gagnée à la victoire via `Game.compute_gold_reward` (somme du coût de budget de chaque ennemi vaincu × 0.5, ratio explicitement en placeholder à ajuster en playtest). A désormais son propre PNG (`or.png`), pas de statut d'exception comme "mana" en a eu un temps.
+> 2. **"Puissance" — bug de décroissance corrigé** : avant, seuls les héros perdaient 1 Puissance, et en DÉBUT de tour (`Game.start_turn`) — les ennemis ne la perdaient jamais automatiquement. Désormais, Puissance décroît de 1 en **FIN** de tour (`Game.decay_end_of_turn_statuses`), **symétriquement** pour les héros ET les ennemis — c'est la seule règle de décroissance restante, `Game.start_turn` ne touche plus du tout à Puissance. Le texte "Puissance" ci-dessous a été corrigé en conséquence.
+> 3. **"Incandescence" (nouveau statut)** : remplace l'ancien détournement de Puissance sur 4 coups du biome Volcan (voir `docs/design/bestiaire.md`) — bonus **flat** (+X dégâts physiques, X = valeur actuelle), pas +25%/stack multiplicatif comme Puissance, appliqué **avant** tout multiplicateur (même étage de calcul qu'Inspiration). Ne décroît **jamais** automatiquement, quel que soit le côté qui la porte (même famille que Vol/Brûlure).
+>
+> **Écart interne au code, signalé pour mémoire :** le champ `explain` de l'entrée `puissance` dans `glossary.lua` (celui qui alimente l'infobulle en jeu) est resté sur une formulation intermédiaire ("Un aventurier en perd 1 au début de chaque tour ; certains ennemis n'en perdent jamais seuls.") — une étape de correction antérieure au fix final ci-dessus, jamais mise à jour après. Ce document décrit le comportement **réellement implémenté aujourd'hui** dans `game.lua` (fin de tour, symétrique), pas ce texte d'infobulle actuellement affiché en jeu, qui est donc lui-même obsolète.
 
 > **Correction du 2026-08-30 — le champ `icon` de `glossary.lua` n'est PAS ce qui s'affiche en jeu.** Ma première passe recopiait tel quel le champ `icon` (des emoji Unicode, ex. "⚔️" pour épée, "🔵" pour mana) comme si c'était l'icône réellement visible en jeu. Ce n'est pas le cas : le rendu réel du texte des cartes (`RichText.draw` dans `game/src/ui/richtext.lua`, via `Sprites.keyword` dans `game/src/ui/sprites.lua`) charge un **PNG pixel-art dédié** dans `game/assets/icons/keywords/<clé>.png` — un fichier par mot-clé, jamais l'emoji. Le champ `icon` de `glossary.lua` est une métadonnée de design ancienne, jamais consommée par ce chemin de rendu (le commentaire en tête du fichier le confirme : `label` est le vrai repli texte utilisé par la UI LÖVE, `icon` n'est qu'une "vraie donnée de design ... pour une police/un rendu capable de les afficher plus tard"). Le tableau ci-dessous a été corrigé pour citer le fichier PNG réel plutôt que l'emoji.
 
@@ -10,11 +17,12 @@ Deux familles : les termes "à icône" (`has_icon = true`, remplacés par un pic
 
 ## Termes à icône (cosmétiques ou nature de dégâts)
 
-Les 17 termes "à icône" ont chacun un PNG dédié dans `game/assets/icons/keywords/` (chargement paresseux, `Sprites.load`).
+Les 18 termes "à icône" ont chacun un PNG dédié dans `game/assets/icons/keywords/` (chargement paresseux, `Sprites.load`).
 
 | Terme | Icône en jeu (`assets/icons/keywords/…`) | Explication |
 |---|---|---|
 | énergie | `energie.png` | Ressource d'équipe partagée, dépensée pour jouer une carte (voir `docs/design/classes.md`). |
+| or | `or.png` | Ressource **persistante** de l'équipe (PO) : 100 au départ d'un run, ne se réinitialise jamais en cours de run (contrairement à l'énergie). Gagnée à chaque victoire (`Game.compute_gold_reward`, voir encadré ci-dessus). |
 | mana | `mana.png` | Ressource propre au Mage : ne se régénère jamais seule, seules des cartes peuvent l'augmenter. |
 | épée | `epee.png` | Dégâts physique de mêlée (cosmétique — même mécanique que "arc", `dmg_type = "physique"`). |
 | arc | `arc.png` | Dégâts physique à distance (cosmétique, `dmg_type = "physique"`). |
@@ -42,7 +50,8 @@ Les 17 termes "à icône" ont chacun un PNG dédié dans `game/assets/icons/keyw
 | Incapacité | Inflige -25% de dégâts (flat, peu importe le nombre de stacks), -1 Incapacité au début de chaque tour. |
 | Vulnérabilité | Reçoit +25% de dégâts (flat, peu importe le nombre de stacks), -1 Vulnérabilité au début de chaque tour. |
 | Camouflé | Ne peut pas être ciblé par un ennemi. Reste tant qu'un allié est en vie et jusqu'à jouer une carte. |
-| Puissance | Les attaques physiques gagnent +25% par stack, -1 Puissance au début de chaque tour. |
+| Puissance | Les attaques physiques gagnent +25% par stack (multiplicatif). -1 Puissance en **fin** de tour, **symétriquement** pour les aventuriers ET les ennemis (seule règle de décroissance, `Game.decay_end_of_turn_statuses`). |
+| Incandescence | Les attaques physiques gagnent +X dégâts (**flat**, X = valeur actuelle), additionné avant tout multiplicateur — pas +25%/stack comme Puissance. Ne décroît **jamais** automatiquement, quel que soit le porteur. Posée par plusieurs ennemis du Volcan (Salamandre de Lave, Golem de Magma, Vouivre des Cendres, Élémentaire de Feu) — voir `docs/design/bestiaire.md`. |
 | Vol | Les dégâts de type "épée" (physique) sont réduits à 0. Ne décroît PAS tout seul — seule "Charge en Piqué" (Aigle Géant) le retire. |
 | Brûlure | Inflige X dégâts brut à la fin du tour. Comme Vol, ne décroît JAMAIS tout seule (contrairement à Saignement, -1/tour) — reste à sa valeur tant que rien ne la retire explicitement. Posée par plusieurs ennemis du Volcan (Cracheur de Braise, Élémentaire de Cendre, Élémentaire de Feu) — voir `docs/design/bestiaire.md`. |
 | Discrétion | Ressource propre à l'Assassin (0 à 10) : +1 quand un autre héros joue une carte, +5 s'il termine le tour sans en avoir joué. À 10, devient Camouflé. Repart à 0 dès que l'Assassin joue une carte non-Furtif, ou dès qu'il reçoit des dégâts. |
@@ -56,10 +65,10 @@ Les 17 termes "à icône" ont chacun un PNG dédié dans `game/assets/icons/keyw
 
 ## Notes
 
-- "Vulnérabilité"/"Incapacité"/"Puissance" sont tous les trois des bonus **flat** (+25%/-25%/+25% par stack pour Puissance uniquement), jamais composés en pourcentage multiplicatif entre eux — voir l'ordre de calcul documenté dans `Combat.deal_damage` : les bonus additifs (Inspiration) s'appliquent d'abord sur le montant de base, puis les multiplicateurs (Vulnérabilité/Puissance/Incapacité/sensibilité au feu) s'appliquent en une seule fois sur ce total.
+- "Vulnérabilité"/"Incapacité"/"Puissance" sont tous les trois des bonus **multiplicatifs** (+25%/-25%/+25% par stack pour Puissance uniquement), jamais composés en pourcentage entre eux — voir l'ordre de calcul documenté dans `Combat.deal_damage` : les bonus **additifs** (Inspiration +6, Incandescence +X) s'appliquent d'abord sur le montant de base, puis les multiplicateurs (Vulnérabilité/Puissance/Incapacité/sensibilité au feu) s'appliquent en une seule fois sur ce total.
 - "Vol" est le seul statut de la liste qui court-circuite entièrement ce calcul : contre un porteur de Vol, tout dégât de type physique est ramené à 0, avant même d'appliquer les autres multiplicateurs.
 - Convention d'accord : toujours au pluriel dans le texte des cartes ("Saignements"), jamais de parenthèse "(s)" — accord fautif accepté à X=1 plutôt que la parenthèse.
 
 ## Écart avec les anciens documents
 
-Ni le Google Doc ni le GDD BMAD ne documentent ce glossaire sous cette forme (23 termes à l'origine côté prototype, 34 aujourd'hui avec Vol/Nécrose/Brûlure ajoutés pour l'Aigle Géant, le Nécromancien et le biome Volcan) — le GDD BMAD ne connaît ni Discrétion/Camouflé, ni Corruption, ni Inspiration/Encore, ni Vol/Brûlure : ces mécaniques sont postérieures à sa rédaction (2026-08-04). À traiter comme une lacune de couverture, pas une contradiction ligne à ligne.
+Ni le Google Doc ni le GDD BMAD ne documentent ce glossaire sous cette forme (23 termes à l'origine côté prototype, 36 aujourd'hui avec Vol/Nécrose/Brûlure/or/Incandescence ajoutés pour l'Aigle Géant, le Nécromancien, le biome Volcan et la ressource PO) — le GDD BMAD ne connaît ni Discrétion/Camouflé, ni Corruption, ni Inspiration/Encore, ni Vol/Brûlure/Incandescence, ni "or" : ces mécaniques sont postérieures à sa rédaction (2026-08-04). À traiter comme une lacune de couverture, pas une contradiction ligne à ligne.

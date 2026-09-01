@@ -332,6 +332,40 @@ local function draw_status_puissance(cx, cy, r, color, alpha)
   love.graphics.polygon("fill", cx, cy - r * 0.75, cx - r * 0.55, cy + r * 0.35, cx + r * 0.55, cy + r * 0.35)
 end
 
+--- Incandescence (2026-09-02, "marche comme la Puissance sauf qu'elle ne
+-- descend pas" -- statut Volcan, remplace l'ancien détournement de Puissance
+-- sur ces ennemis ; revirement le même jour -- +X dégâts FLAT, pas +25% par
+-- charge, voir Combat.incandescence_flat) : MÊME triangle que Puissance
+-- ci-dessus (même famille visuelle, "bonus aux dégâts physiques"), légèrement
+-- réduit et surmonté d'une petite braise (cercle plein) -- doit rester
+-- distinct au premier coup d'œil d'un badge Puissance normal (même rangée
+-- possible en théorie) ET de la flamme pleine de Brûlure (draw_status_brulure,
+-- silhouette très différente).
+local function draw_status_incandescence(cx, cy, r, color, alpha)
+  set(color, alpha)
+  love.graphics.polygon("fill", cx, cy - r * 0.55, cx - r * 0.5, cy + r * 0.45, cx + r * 0.5, cy + r * 0.45)
+  love.graphics.circle("fill", cx, cy - r * 0.85, r * 0.22)
+end
+
+--- Étoile pleine, 5 branches (2026-09-02, bug signalé -- "il manque l'icone de
+-- l'étoile" : le titre d'infobulle d'un ennemi Élite encadrait son nom du
+-- caractère Unicode "\u{2605}" directement dans une chaîne de texte -- la
+-- police pixel-art custom de ce jeu ne contient PAS ce glyphe (même souci de
+-- fond que les emoji du glossaire, voir le commentaire en tête de
+-- glossary.lua) et ne dessinait donc RIEN. Vraie icône vectorielle désormais,
+-- dessinée à part par draw_tooltip (view.lua) plutôt qu'insérée dans le texte.
+local function draw_status_elite(cx, cy, r, color, alpha)
+  set(color, alpha)
+  local points = {}
+  for i = 0, 9 do
+    local angle = -math.pi / 2 + i * math.pi / 5
+    local rad = (i % 2 == 0) and r or r * 0.42
+    points[#points + 1] = cx + math.cos(angle) * rad
+    points[#points + 1] = cy + math.sin(angle) * rad
+  end
+  love.graphics.polygon("fill", points)
+end
+
 local function draw_status_saignements(cx, cy, r, color, alpha)
   set(color, alpha)
   love.graphics.polygon("fill", cx, cy - r * 0.75, cx - r * 0.45, cy + r * 0.2, cx, cy + r * 0.55, cx + r * 0.45, cy + r * 0.2)
@@ -509,6 +543,7 @@ local DRAW_BY_STATUS = {
   esquive = draw_status_esquive,
   camoufle = draw_status_camouflage,
   puissance = draw_status_puissance,
+  incandescence = draw_status_incandescence,
   saignements = draw_status_saignements,
   incapacite = draw_status_incapacite,
   vulnerabilite = draw_status_vulnerabilite,
@@ -523,6 +558,7 @@ local DRAW_BY_STATUS = {
   inspiration = draw_status_inspiration,
   encore = draw_status_encore,
   vol = draw_status_vol,
+  elite = draw_status_elite,
 }
 
 --- Dessine l'icône d'un statut (clé Lua, ex. "defense", "esquive"...) centrée

@@ -59,6 +59,13 @@ local BOUNDED_COMBAT_COUNT = 8
 -- portrait agrandi sans tasser le reste (badges, nom en bas côté héros).
 local UNIT_W, UNIT_H = 150, 168
 local CARD_W, CARD_H = 92, 138
+-- Taille/rendu des cartes de draft (écran de victoire) : voir DraftFx,
+-- regroupé sous UNE SEULE locale de chunk (au lieu d'une poignée éparses --
+-- W/H, canvas de fondu, fonctions front/fading/flight) -- ce fichier flirtait
+-- déjà avec la limite dure de Lua (200 locales par chunk, voir LUAI_MAXVARS)
+-- avant même ces ajouts du 2026-09-02 ("Syntax error: main function has more
+-- than 200 local variables" à l'ajout séparé) ; les regrouper en table est le
+-- seul moyen d'ajouter ces 3 fonctions sans dépasser la limite.
 -- 12->16 (2026-08-31, passage 1280x720) : léger surplus d'air horizontal entre
 -- portraits/cartes en rangée, sans forcer UNIT_W/CARD_W à grandir eux-mêmes
 -- (le fond animé -- voir Background.draw, déjà paramétrique sur W/H -- occupe
@@ -1144,8 +1151,20 @@ local function draw_hero(controller, h, r)
   -- Mana (2026-08-20, ressource propre au Mage, voir hero.mana dans game.lua) :
   -- dans son propre cadre, juste sous sa jauge de PV -- seul le Mage a ce
   -- champ non-nil, les 3 autres classes ne dessinent jamais cette ligne.
+  -- Icône plutôt que le mot en toutes lettres (2026-09-02, bug signalé --
+  -- "le mana est indiqué en toute lettre... au lieu d'indiquer l'icone") :
+  -- même icône que le glossaire/le HUD "PO" (Sprites.keyword("mana"), voir
+  -- draw_gold_display) -- repli texte gardé si jamais l'icône manquait
+  -- (silencieux, voir Sprites.keyword) plutôt qu'une ligne vide.
   if h.mana ~= nil then
-    text("MANA " .. tostring(h.mana), 0, 81, r.w, 9, Theme.mana)
+    local mana_icon = Sprites.keyword("mana")
+    if mana_icon then
+      love.graphics.setColor(1, 1, 1, 1)
+      Sprites.draw_centered(mana_icon, r.w / 2 - 8, 85, 7)
+      text(tostring(h.mana), r.w / 2 + 2, 80, r.w / 2 - 2, 11, Theme.mana, "left")
+    else
+      text("MANA " .. tostring(h.mana), 0, 81, r.w, 9, Theme.mana)
+    end
   end
   -- Discrétion (2026-08-24, ressource propre à l'Assassin, voir hero.discretion
   -- dans game.lua) : même traitement que MANA ci-dessus -- un seul des deux
@@ -1155,11 +1174,15 @@ local function draw_hero(controller, h, r)
   -- il faut indiqué en toute lettre 'CAMOUFLE' juste en dessous") : remplace
   -- le compteur plutôt que de s'y ajouter, puisqu'à 10/10 le compteur lui-même
   -- n'apporte plus rien (déjà au plafond) -- voir aussi le voile plus bas.
+  -- "DISCR" -> "DISCRÉTION" en toutes lettres (2026-09-02, demande explicite) :
+  -- même mot que "CAMOUFLÉ" ci-dessus, jamais abrégé -- juste le préfixe qui
+  -- change, contrairement à MANA qui est passé à une icône (Discrétion n'a
+  -- pas d'icône dédiée en jeu, contrairement à Mana/PO).
   if h.discretion ~= nil then
     if (h.camoufle or 0) > 0 then
       text("CAMOUFLÉ", 0, 81, r.w, 9, Theme.discretion)
     else
-      text("DISCR " .. tostring(h.discretion), 0, 81, r.w, 9, Theme.discretion)
+      text("DISCRÉTION " .. tostring(h.discretion), 0, 81, r.w, 9, Theme.discretion)
     end
   end
   -- Corruption (2026-08-29, ressource propre au Nécromancien, voir
@@ -1183,6 +1206,10 @@ local function draw_hero(controller, h, r)
   -- graduelle), plus un statut à empiler -- "CAM" seul, jamais "CAM N".
   if (h.camoufle or 0) > 0 then badges[#badges + 1] = { key = "camoufle", abbr = "CAM" } end
   if (h.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = h.puissance } end
+  -- Incandescence (2026-09-02, statut Volcan, "marche comme la Puissance sauf
+  -- qu'elle ne descend pas" -- voir combat.lua/game.lua) : même traitement
+  -- que Puissance ci-dessus, abréviation distincte (PUI est déjà pris).
+  if (h.incandescence or 0) > 0 then badges[#badges + 1] = { key = "incandescence", abbr = "INCA", value = h.incandescence } end
   if (h.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = h.saignements } end
   if (h.brulure or 0) > 0 then badges[#badges + 1] = { key = "brulure", abbr = "BRU", value = h.brulure } end
   -- Incapacité/Vulnérabilité (bug signalé, 2026-08-24) : oubliées ici alors que
@@ -1279,8 +1306,13 @@ local function enemy_telegraph_parts(state, e)
   local target = e.target_hero_id and Combat.hero_by_id(state, e.target_hero_id)
   local target_name = target and target.name or nil
   local target_class = target and target.class_id or nil
+  -- Incandescence (2026-09-02, additive, voir Combat.incandescence_flat --
+  -- même règle qu'Inspiration côté héros : appliquée AVANT le multiplicateur,
+  -- jamais dedans, pour ne jamais diverger de Combat.deal_damage) : ajoutée
+  -- ICI, pas dans Combat.damage_multiplier, sur les 3 usages de ce module
+  -- (adjusted ci-dessous + les 2 usages inline plus bas, "dmg-all"/"buff-self").
   local function adjusted(amount)
-    return Combat.round(amount * Combat.damage_multiplier(e, target, "physique"))
+    return Combat.round((amount + Combat.incandescence_flat(e, "physique")) * Combat.damage_multiplier(e, target, "physique"))
   end
   if move.kind == "dmg" then
     return {
@@ -1314,7 +1346,7 @@ local function enemy_telegraph_parts(state, e)
     -- format "X à tous" que le kind "dmg-all" plus bas -- ajustés côté
     -- attaquant seulement (Puissance/Incapacité de l'Aigle), jamais une
     -- Vulnérabilité par héros (héros multiples, comme dmg-all).
-    local body = move.dmg_all_amount and (Combat.round(move.dmg_all_amount * Combat.damage_multiplier(e, nil, "physique")) .. " à tous") or nil
+    local body = move.dmg_all_amount and (Combat.round((move.dmg_all_amount + Combat.incandescence_flat(e, "physique")) * Combat.damage_multiplier(e, nil, "physique")) .. " à tous") or nil
     return { title = move.name, body = body, icon_source = "status", icon_key = move.status_key or "bonus" }
   elseif move.kind == "conditional-retaliate" then
     -- Bug signalé (2026-08-09) : contrairement à dmg/debuff juste au-dessus,
@@ -1339,7 +1371,7 @@ local function enemy_telegraph_parts(state, e)
     -- (Puissance/Incapacité), jamais de la Vulnérabilité d'un héros précis
     -- (chacun peut différer), comme heal-self/heal-ally juste au-dessus.
     return {
-      title = move.name, body = Combat.round(move.amount * Combat.damage_multiplier(e, nil, "physique")) .. " à tous",
+      title = move.name, body = Combat.round((move.amount + Combat.incandescence_flat(e, "physique")) * Combat.damage_multiplier(e, nil, "physique")) .. " à tous",
       icon_source = "keyword", icon_key = DMG_TYPE_ICON[move.dmg_type] or "etincelle",
     }
   end
@@ -1493,32 +1525,14 @@ local function draw_enemy(controller, e, r)
   -- ennemi -- ne reste plus qu'un très léger voile, le contour (ligne
   -- ci-dessous) et les éléments dessinés par-dessus (barre de PV, portrait,
   -- badges) suffisent déjà à délimiter la zone.
-  -- Élite : halo doré scintillant DERRIÈRE le cadre (2026-09-01, demande
-  -- explicite -- "leur cadre est doré et scintillant") -- même idiome de
-  -- pulse que le glow du bouton "Partir à l'aventure" (voir
-  -- draw_team_select), Theme.accent réutilisé tel quel (déjà la teinte "or"
-  -- du reste de l'UI). Dessiné AVANT le panneau ci-dessous (fond plein), qui
-  -- recouvre l'intérieur et ne laisse dépasser qu'un halo sur les bords.
-  if e.elite then
-    local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 4)
-    set(Theme.accent, 0.35 + 0.35 * pulse)
-    love.graphics.rectangle("fill", -6, -6, r.w + 12, r.h + 12, 14, 14)
-  end
+  -- Élite : PLUS de cadre doré/halo scintillant (2026-09-02, revirement
+  -- explicite -- "le cadre doré et scintillant que j'ai demandé n'est pas
+  -- bon... il ne faut pas mettre de cadre, comme pour un ennemi normal") :
+  -- cadre strictement identique à un ennemi normal désormais -- le signal
+  -- "doré et scintillant" se déplace sur la barre de PV elle-même (voir plus
+  -- bas, hp_color) ; le halo/contour dorés d'origine sont retirés d'ici.
   set(Theme.panel, trail_dead and 0.06 or 0.12)
   love.graphics.rectangle("fill", 0, 0, r.w, r.h, 10, 10)
-  -- Contour retiré au repos (2026-08-30, demande explicite -- "il faut aussi
-  -- enlever le bord du cadre") : ne reste que le bleu de ciblage
-  -- (awaiting_enemy_target), signal fonctionnel, jamais un simple liseré
-  -- décoratif -- cohérent avec le fond déjà rendu quasi imperceptible juste
-  -- au-dessus. Élite ajoute son propre contour plein, doré, APRÈS le fond
-  -- (sinon recouvert) -- si l'ennemi est AUSSI une cible valide ce tour-ci,
-  -- le bleu de ciblage se dessine par-dessus juste après et prime (signal
-  -- fonctionnel avant signal cosmétique).
-  if e.elite then
-    set(Theme.accent, 0.9); love.graphics.setLineWidth(2)
-    love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
-    love.graphics.setLineWidth(1)
-  end
   if awaiting_enemy_target then
     set(Theme.energy)
     love.graphics.setLineWidth(3)
@@ -1535,7 +1549,20 @@ local function draw_enemy(controller, e, r)
   -- rattraper 0, même si `e.hp` est déjà tombé à 0/négatif.
   set(Theme.text, trail_dead and 0.45 or 1)
   if not trail_dead then
-    hp_bar(8, 4, r.w - 16, 16, e.hp / e.max_hp, trail / e.max_hp, Theme.hp)
+    -- Élite : la barre de PV elle-même est dorée et scintillante (2026-09-02,
+    -- demande explicite, remplace l'ancien cadre doré retiré plus haut) --
+    -- oscille entre Theme.accent et un or plus clair (jamais un simple flat
+    -- Theme.accent, sinon "scintillant" ne se lirait pas).
+    local hp_color = Theme.hp
+    if e.elite then
+      local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 4)
+      hp_color = {
+        Theme.accent[1] + (1 - Theme.accent[1]) * pulse * 0.5,
+        Theme.accent[2] + (1 - Theme.accent[2]) * pulse * 0.5,
+        Theme.accent[3] + (1 - Theme.accent[3]) * pulse * 0.5,
+      }
+    end
+    hp_bar(8, 4, r.w - 16, 16, e.hp / e.max_hp, trail / e.max_hp, hp_color)
     text_v_centered(math.max(0, e.hp) .. "/" .. e.max_hp .. " PV", 0, 4, r.w, 16, 10, Theme.text)
   end
   -- Portrait agrandi (2026-08-27, demande explicite -- "toutes les images des
@@ -1576,6 +1603,12 @@ local function draw_enemy(controller, e, r)
     -- gros, voir draw_defense_badge_big appelé plus haut près du portrait.
     if e.template_id == "homme-arbre" then badges[#badges + 1] = { key = "fireweak", abbr = "FEU" } end
     if (e.vol or 0) > 0 then badges[#badges + 1] = { key = "vol", abbr = "VOL" } end
+    -- Puissance/Incandescence (2026-09-02, bug signalé -- absentes de cette
+    -- rangée jusqu'ici : un ennemi qui en gagnait n'affichait AUCUN badge sur
+    -- son propre cadre, contrairement à un héros -- seule l'infobulle le
+    -- révélait) : même traitement que côté héros (draw_hero ci-dessus).
+    if (e.puissance or 0) > 0 then badges[#badges + 1] = { key = "puissance", abbr = "PUI", value = e.puissance } end
+    if (e.incandescence or 0) > 0 then badges[#badges + 1] = { key = "incandescence", abbr = "INCA", value = e.incandescence } end
     if (e.saignements or 0) > 0 then badges[#badges + 1] = { key = "saignements", abbr = "SAI", value = e.saignements } end
     if (e.brulure or 0) > 0 then badges[#badges + 1] = { key = "brulure", abbr = "BRU", value = e.brulure } end
     if (e.incapacite or 0) > 0 then badges[#badges + 1] = { key = "incapacite", abbr = "INC", value = e.incapacite } end
@@ -2102,6 +2135,9 @@ local STATUS_TOOLTIP_FIELDS = {
   { field = "esquive", glossary_key = "esquive" },
   { field = "camoufle", glossary_key = "camoufle", hide_value = true },
   { field = "puissance", glossary_key = "puissance" },
+  -- Incandescence (2026-09-02, statut Volcan) : même mécanisme que Puissance
+  -- ci-dessus, sa propre entrée de glossaire (voir glossary.lua).
+  { field = "incandescence", glossary_key = "incandescence", label = "Incandescence" },
   { field = "saignements", glossary_key = "saignement" },
   { field = "brulure", glossary_key = "brulure", label = "Brûlure" },
   { field = "incapacite", glossary_key = "incapacite" },
@@ -2243,10 +2279,12 @@ local function tooltip_lines(controller)
     lines[#lines + 1] = "PV max " .. e.max_hp
     -- Élite (2026-09-01, demande explicite -- "nom entouré de 2 étoiles") :
     -- les ennemis n'ont pas de plaque-nom permanente sur leur cadre (voir
-    -- draw_enemy) -- confirmé au survol via ce titre de tooltip, le halo
-    -- doré + la taille augmentée restant les 2 signaux visibles en permanence.
-    local title = e.elite and ("\u{2605} " .. e.name .. " \u{2605}") or e.name
-    return title .. " Nv." .. e.level, lines
+    -- draw_enemy) -- confirmé au survol via ce titre de tooltip. Plus de
+    -- caractère "\u{2605}" inséré dans le texte (2026-09-02, bug signalé --
+    -- ne s'affichait jamais, la police custom de ce jeu ne contient pas ce
+    -- glyphe) : draw_tooltip dessine désormais une vraie icône vectorielle
+    -- (Icons.draw_status("elite", ...)) de part et d'autre du titre.
+    return e.name .. " Nv." .. e.level, lines
   elseif h.kind == "card" then
     local def = h.target
     local terms = Glossary.keywords_present(def.desc)
@@ -2399,6 +2437,112 @@ local function draw_card_flights(controller)
   love.graphics.setLineWidth(1)
 end
 
+-- Rendu des cartes de draft (écran de victoire), REGROUPÉ (2026-09-02) sous
+-- une seule locale de chunk `DraftFx` -- voir le commentaire sur la limite
+-- des 200 locales près de CARD_W/CARD_H plus haut. `DraftFx.front(def)` :
+-- extrait du rendu jusque-là inline de l'écran de victoire, réutilisé par
+-- `.fading` (cartes non choisies, "disparaissent doucement") ET `.flight`
+-- (carte choisie, "rejoint la pioche dans un mouvement ample") -- toutes
+-- deux ont besoin de dessiner CETTE face à un endroit/une échelle/une
+-- opacité qui ne sont plus ceux de la grille de repos (voir View.draw). Même
+-- origine que draw_card_face (centrage/agrandissement 2026-08-24, remontage
+-- anti-liseré-mangé) : taille différente (W/H ci-dessous, pas CARD_W/CARD_H),
+-- donc dupliqué plutôt que réutilisé.
+local DraftFx
+do
+  local W, H = 130, 190
+  local fade_canvas
+
+  local function front(def)
+    local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
+    panel(0, 0, W, H, palette.bg)
+    set(def.tier == "avance" and Theme.accent or Theme.black)
+    love.graphics.setLineWidth(def.tier == "avance" and 3 or 2)
+    love.graphics.rectangle("line", 0, 0, W, H, 10, 10)
+    set(palette.border)
+    love.graphics.setLineWidth(1)
+    love.graphics.rectangle("line", 3, 3, W - 6, H - 6, 8, 8)
+    love.graphics.setLineWidth(1)
+    set(Theme.energy); love.graphics.circle("fill", 16, 14, 10)
+    set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), 6, 7, 20, "center")
+    if def.mana_cost then
+      set(Theme.mana); love.graphics.circle("fill", 38, 14, 9)
+      set(Theme.bg); love.graphics.setFont(Fonts.get(11))
+      love.graphics.printf(tostring(def.mana_cost), 30, 9, 16, "center")
+    end
+    if def.corruption_cost_cap then
+      set(Theme.corruption); love.graphics.ellipse("fill", 46, 14, 20, 10)
+      set(Theme.bg); love.graphics.setFont(Fonts.get(10))
+      love.graphics.printf("X(0-" .. def.corruption_cost_cap .. ")", 26, 9, 40, "center")
+    end
+    name_badge(def.name, 4, 26, W - 8, 16, palette.border, Theme.bg, 2, 2)
+    RichText.draw(def.desc, 4, 50, W - 8, 11, Theme.muted)
+    local hero_name = Heroes.class_name[def.class_id]
+    if hero_name then
+      set(Theme.black, 0.55)
+      love.graphics.rectangle("fill", 0, H - 20, W, 16)
+      text(hero_name, 0, H - 18, W, 12, palette.border, "center")
+    end
+  end
+
+  -- Fondu d'une carte NON choisie (2026-09-02, demande explicite -- "les
+  -- autres disparaissent doucement") : même contrainte que draw_card_flights
+  -- (set() ne peut pas multiplier un alpha global sur tous les tracés de
+  -- `front`) -- rendue sur un canvas dédié pour appliquer le fondu d'un coup,
+  -- canvas séparé de card_flight_canvas (taille différente, W/H plutôt que
+  -- CARD_W/CARD_H).
+  local function fading(def, r, alpha)
+    if alpha <= 0 then return end
+    fade_canvas = fade_canvas or love.graphics.newCanvas(W, H)
+    love.graphics.push()
+    love.graphics.origin()
+    local prev_canvas = love.graphics.getCanvas()
+    love.graphics.setCanvas(fade_canvas)
+    love.graphics.clear(0, 0, 0, 0)
+    front(def)
+    love.graphics.setCanvas(prev_canvas)
+    love.graphics.pop()
+    love.graphics.setColor(1, 1, 1, alpha)
+    love.graphics.draw(fade_canvas, r.x, r.y, 0, r.w / W, r.h / H)
+    love.graphics.setColor(1, 1, 1, 1)
+  end
+
+  -- Vol "ample" de la carte CHOISIE vers la pioche (2026-09-02, demande
+  -- explicite -- "la carte choisie rejoint la pioche dans un mouvement
+  -- ample") : arc de Bézier quadratique (maths reprises telles quelles de
+  -- quad_bezier plus bas dans ce fichier -- inlinées ici plutôt qu'appelées,
+  -- ce bloc `do` doit rester utilisable AVANT que ce chunk atteigne sa
+  -- déclaration) plutôt qu'une ligne droite -- point de contrôle remonté
+  -- nettement au-dessus du segment départ->arrivée pour un vrai arc "ample",
+  -- pas un simple glissement. Rétrécit en même temps jusqu'à la taille de la
+  -- pioche (View.deck_pile_rect) -- alpha JAMAIS réduit (contrairement à
+  -- `fading` ci-dessus) : elle reste pleinement visible tout le vol, elle
+  -- REJOINT la pioche, elle ne s'efface pas.
+  local ARC_HEIGHT = 140
+  local function flight(def, from, anim)
+    local p = math.min(1, anim.t / anim.duration)
+    local ease = 1 - (1 - p) * (1 - p) -- easeOutQuad
+    local to = View.deck_pile_rect
+    local x0, y0 = from.x + from.w / 2, from.y + from.h / 2
+    local x1, y1 = to.x + to.w / 2, to.y + to.h / 2
+    local cx = (x0 + x1) / 2
+    local cy = math.min(y0, y1) - ARC_HEIGHT
+    local mt = 1 - ease
+    local x = mt * mt * x0 + 2 * mt * ease * cx + ease * ease * x1
+    local y = mt * mt * y0 + 2 * mt * ease * cy + ease * ease * y1
+    local w = from.w + (to.w - from.w) * ease
+    local h = from.h + (to.h - from.h) * ease
+    love.graphics.push()
+    love.graphics.translate(x, y)
+    love.graphics.scale(w / W, h / H)
+    love.graphics.translate(-W / 2, -H / 2)
+    front(def)
+    love.graphics.pop()
+  end
+
+  DraftFx = { w = W, h = H, front = front, fading = fading, flight = flight }
+end
+
 -- Pièces d'or de l'écran de victoire (2026-09-02, demande explicite --
 -- "elles volent depuis cette indication jusqu'à la bourse de l'équipe") :
 -- même idiome que draw_card_flights ci-dessus (interpolation pure, aucune
@@ -2422,13 +2566,52 @@ local function draw_coin_flights(controller)
   end
 end
 
+-- Bourse rejouée PAR-DESSUS le voile noir de l'écran de victoire (2026-09-02,
+-- demande explicite -- "la bourse est actuellement dessous le voile noir (et
+-- c'est normal). Pourtant, quand les pièces volent... j'aimerais que la
+-- bourse apparaisse AUSSI par dessus et saute à chaque pièce qui arrive
+-- dedans, puis fade quand c'est fini") : draw_gold_display (dessinée plus
+-- haut, sous le voile) reste TELLE QUELLE -- ceci est un second rendu,
+-- indépendant, au MÊME endroit (View.gold_display_rect), déclenché par
+-- controller.gold_purse_overlay (voir Controller:click_victory_gold/
+-- Controller:update). `pop_t` (remis à 0 à chaque arrivée de pièce) pilote un
+-- bond d'échelle qui se calme (même famille de courbe que status_badge) ;
+-- `fade_t` (posé seulement après la DERNIÈRE pièce) pilote le fondu final.
+local function draw_gold_purse_overlay(controller)
+  local a = controller.gold_purse_overlay
+  if not a then return end
+  local r = View.gold_display_rect
+  local pop_p = math.min(1, a.pop_t / a.pop_duration)
+  local scale = 1 + 0.4 * (1 - pop_p)
+  local alpha = a.fade_t and math.max(0, 1 - a.fade_t / a.fade_duration) or 1
+  local cx, cy = r.x + r.w / 2, r.y + r.h / 2
+
+  set(Theme.gold, 0.3 * alpha)
+  love.graphics.circle("fill", r.x + 7, cy, 20 * scale)
+
+  love.graphics.push()
+  love.graphics.translate(cx, cy)
+  love.graphics.scale(scale, scale)
+  love.graphics.translate(-cx, -cy)
+  local icon = Sprites.keyword("or")
+  if icon then
+    love.graphics.setColor(1, 1, 1, alpha)
+    Sprites.draw_centered(icon, r.x + 7, r.y + 7, 7)
+  end
+  love.graphics.setFont(Fonts.get(9))
+  set(Theme.gold, alpha)
+  love.graphics.printf(tostring(controller.state.gold), r.x + 18, r.y, r.w - 18, "left")
+  love.graphics.pop()
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
 -- Nombre de dégâts/soin flottant (2026-08-09, party "amélioration des
 -- visuels") : monte et s'estompe depuis Controller:spawn_floater, couleur
 -- selon le sens (dégâts/soin) -- pas de logique de jeu ici, juste l'interpolation.
 local FLOATER_RISE = 34
 -- "discretion" (2026-08-28, demande explicite) : même famille visuelle que
 -- "heal" (traitement par défaut, voir draw_floaters plus bas), juste une
--- teinte propre (Theme.discretion, déjà celle du texte "DISCR N" sous le
+-- teinte propre (Theme.discretion, déjà celle du texte "DISCRÉTION N" sous le
 -- portrait) pour qu'un flottant de Discrétion ne se confonde jamais avec un
 -- vrai soin.
 -- "decay" (2026-08-30, demande explicite -- décroissance de fin de tour,
@@ -2585,7 +2768,18 @@ local function draw_tooltip(controller)
   panel(x, y, w, h, Theme.panel_light)
   set(Theme.status); love.graphics.setLineWidth(1)
   love.graphics.rectangle("line", x, y, w, h, 8, 8)
-  text(title, x + 8, y + 6, w - 16, 10, Theme.status, "left")
+  -- Élite (2026-09-02, correctif -- voir Icons.draw_status("elite",...) et
+  -- son commentaire pour le pourquoi) : étoiles vectorielles de part et
+  -- d'autre du titre, remplace le "\u{2605}" texte qui ne s'affichait jamais.
+  local hover_enemy = hover.kind == "enemy" and Combat.enemy_by_id(controller.state, hover.target)
+  if hover_enemy and hover_enemy.elite then
+    love.graphics.setColor(1, 1, 1, 1)
+    Icons.draw_status("elite", x + 14, y + 11, 7, Theme.accent)
+    Icons.draw_status("elite", x + w - 14, y + 11, 7, Theme.accent)
+    text(title, x + 22, y + 6, w - 44, 10, Theme.status, "center")
+  else
+    text(title, x + 8, y + 6, w - 16, 10, Theme.status, "left")
+  end
   local ly = y + 20
   for i, line in ipairs(lines) do
     if type(line) == "table" then
@@ -4098,92 +4292,74 @@ function View.draw(controller)
 
     if controller.draft_picks and controller.draft_cards_shown then
       local rects = View.draft_rects(controller)
+      local choice_anim = controller.draft_choice_anim
       for i, def in ipairs(controller.draft_picks) do
         local r = rects[i]
-        -- Retournement carte par carte (2026-08-08) : sans anim (draft_flip[i]
-        -- absent), la carte reste face cachée, identique à l'ancien affichage
-        -- statique -- une fois démarrée, on l'aplatit horizontalement (jamais
-        -- de facteur négatif, donc jamais de miroir) et on bascule le contenu
-        -- dos/face exactement à mi-course (la carte "sur la tranche").
-        local f = controller.draft_flip[i]
-        local sx = f and flip_scale_x(f.t, controller.draft_flip_duration) or 1
-        local show_front = f and (f.t / controller.draft_flip_duration) >= 0.5
-        love.graphics.push()
-        love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2)
-        love.graphics.scale(sx, 1)
-        love.graphics.translate(-r.w / 2, -r.h / 2)
-        if show_front then
-          -- Même identité de classe que la main (2026-08-10, voir Theme.card_class) --
-          -- bordure dorée sur les cartes "Avancé" (2026-08-09) conservée sur le contour
-          -- extérieur, exactement comme le contour "sélectionné" de la main.
-          local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
-          panel(0, 0, r.w, r.h, palette.bg)
-          set(def.tier == "avance" and Theme.accent or Theme.black)
-          love.graphics.setLineWidth(def.tier == "avance" and 3 or 2)
-          love.graphics.rectangle("line", 0, 0, r.w, r.h, 10, 10)
-          set(palette.border)
-          love.graphics.setLineWidth(1)
-          love.graphics.rectangle("line", 3, 3, r.w - 6, r.h - 6, 8, 8)
-          love.graphics.setLineWidth(1)
-          set(Theme.energy); love.graphics.circle("fill", 16, 14, 10)
-          set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), 6, 7, 20, "center")
-          -- Pastilles mana/Corruption (2026-08-30, bug signalé -- absentes de
-          -- ce bloc, jamais mises à jour depuis leur ajout à draw_card_face :
-          -- une carte du Mage/du Nécromancien proposée au draft n'affichait ni
-          -- son coût en mana ni son plafond de Corruption). Mêmes règles,
-          -- juste repositionnées/agrandies pour cette carte 130x190 (au lieu
-          -- de CARD_W/CARD_H) -- voir le commentaire plus haut sur pourquoi ce
-          -- bloc reste dupliqué plutôt que réutiliser draw_card_face.
-          if def.mana_cost then
-            set(Theme.mana); love.graphics.circle("fill", 38, 14, 9)
-            set(Theme.bg); love.graphics.setFont(Fonts.get(11))
-            love.graphics.printf(tostring(def.mana_cost), 30, 9, 16, "center")
-          end
-          if def.corruption_cost_cap then
-            set(Theme.corruption); love.graphics.ellipse("fill", 46, 14, 20, 10)
-            set(Theme.bg); love.graphics.setFont(Fonts.get(10))
-            love.graphics.printf("X(0-" .. def.corruption_cost_cap .. ")", 26, 9, 40, "center")
-          end
-          name_badge(def.name, 4, 26, r.w - 8, 16, palette.border, Theme.bg, 2, 2)
-          RichText.draw(def.desc, 4, 50, r.w - 8, 11, Theme.muted)
-          -- Même origine que draw_card_face (voir plus haut, y compris le
-          -- centrage/agrandissement 2026-08-24 et le remontage anti-liseré-
-          -- mangé) : ce bloc dessine les cartes de draft à une taille
-          -- différente (130x190, pas CARD_W/CARD_H), donc dupliqué ici plutôt
-          -- que réutilisé.
-          local hero_name = Heroes.class_name[def.class_id]
-          if hero_name then
-            set(Theme.black, 0.55)
-            love.graphics.rectangle("fill", 0, r.h - 20, r.w, 16)
-            text(hero_name, 0, r.h - 18, r.w, 12, palette.border, "center")
-          end
+        if choice_anim and choice_anim.chosen_index == i then
+          -- Carte choisie (2026-09-02, demande explicite -- "la carte
+          -- choisie rejoint la pioche dans un mouvement ample") : dessinée à
+          -- part, voir DraftFx.flight -- ni le retournement ni le fondu
+          -- ci-dessous ne s'appliquent à elle.
+          DraftFx.flight(def, r, choice_anim)
+        elseif choice_anim then
+          -- Cartes NON choisies (2026-09-02, demande explicite -- "les
+          -- autres disparaissent doucement") : fondu, voir DraftFx.fading --
+          -- restent immobiles à leur rect de repos, seule leur opacité change.
+          local fp = math.min(1, choice_anim.t / choice_anim.other_fade_duration)
+          DraftFx.fading(def, r, 1 - fp)
         else
-          panel(0, 0, r.w, r.h, Theme.panel_light)
-          text("?", 0, r.h / 2 - 12, r.w, 26, Theme.muted)
+          -- Retournement carte par carte (2026-08-08) : sans anim (draft_flip[i]
+          -- absent), la carte reste face cachée, identique à l'ancien affichage
+          -- statique -- une fois démarrée, on l'aplatit horizontalement (jamais
+          -- de facteur négatif, donc jamais de miroir) et on bascule le contenu
+          -- dos/face exactement à mi-course (la carte "sur la tranche").
+          local f = controller.draft_flip[i]
+          local sx = f and flip_scale_x(f.t, controller.draft_flip_duration) or 1
+          local show_front = f and (f.t / controller.draft_flip_duration) >= 0.5
+          love.graphics.push()
+          love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2)
+          love.graphics.scale(sx, 1)
+          love.graphics.translate(-r.w / 2, -r.h / 2)
+          if show_front then
+            DraftFx.front(def)
+          else
+            panel(0, 0, r.w, r.h, Theme.panel_light)
+            text("?", 0, r.h / 2 - 12, r.w, 26, Theme.muted)
+          end
+          love.graphics.pop()
         end
-        love.graphics.pop()
       end
 
       -- "Ne rien prendre" (2026-08-30, demande explicite -- "si le joueur ne
       -- veut gagner aucune des cartes proposées, il peut cliquer sur le
       -- bouton... à la place de cliquer sur une carte") : sous la rangée de
-      -- cartes, voir View.draft_skip_button/Controller:skip_draft.
-      local sb = View.draft_skip_button
-      set(Theme.panel_light); love.graphics.rectangle("fill", sb.x, sb.y, sb.w, sb.h, 8, 8)
-      set(Theme.muted); love.graphics.setLineWidth(2)
-      love.graphics.rectangle("line", sb.x, sb.y, sb.w, sb.h, 8, 8)
-      love.graphics.setLineWidth(1)
-      text(sb.label, sb.x, sb.y + 14, sb.w, 14, Theme.text, "center")
+      -- cartes, voir View.draft_skip_button/Controller:skip_draft. Masqué
+      -- pendant le vol de la carte choisie (2026-09-02) : un choix est déjà
+      -- fait, "Ne rien prendre" n'a plus de sens tant que l'animation joue.
+      if not choice_anim then
+        local sb = View.draft_skip_button
+        set(Theme.panel_light); love.graphics.rectangle("fill", sb.x, sb.y, sb.w, sb.h, 8, 8)
+        set(Theme.muted); love.graphics.setLineWidth(2)
+        love.graphics.rectangle("line", sb.x, sb.y, sb.w, sb.h, 8, 8)
+        love.graphics.setLineWidth(1)
+        text(sb.label, sb.x, sb.y + 14, sb.w, 14, Theme.text, "center")
+      end
     end
 
+    -- "Continuer" (2026-09-02, demande explicite -- "un bouton continuer
+    -- grisé non clicable" jusqu'à récupération des 2 gains) : SIBLING du bloc
+    -- draft_picks ci-dessus, PAS nichée dedans (bug signalé -- "le bouton
+    -- Continuer disparaît une fois la carte choisie récupérée" : une fois
+    -- l'animation de choix finie, Controller:update vide draft_picks, ce qui
+    -- rendait tout ce bloc -- Continuer compris -- inatteignable) : doit
+    -- rester visible/actif que draft_picks soit peuplé ou non, tant que
+    -- victory_gains_shown est vrai. Style actif identique aux autres boutons
+    -- pleins (Theme.accent, voir le bouton de redémarrage de l'écran
+    -- "Défaite" plus haut) une fois les 2 flags vrais, sinon grisé
+    -- (Theme.panel_light) -- voir Controller:victory_continue, déjà lui-même
+    -- un no-op tant que les 2 gains ne sont pas faits (défense en profondeur,
+    -- même si ce bouton grisé ne devrait jamais être cliqué).
     if controller.victory_gains_shown then
-      -- "Continuer" (2026-09-02, demande explicite -- "un bouton continuer
-      -- grisé non clicable" jusqu'à récupération des 2 gains) : style actif
-      -- identique aux autres boutons pleins (Theme.accent, voir le bouton de
-      -- redémarrage de l'écran "Défaite" plus haut) une fois les 2 flags vrais,
-      -- sinon grisé (Theme.panel_light) -- voir Controller:victory_continue,
-      -- déjà lui-même un no-op tant que les 2 gains ne sont pas faits (défense
-      -- en profondeur, même si ce bouton grisé ne devrait jamais être cliqué).
       local cb = View.victory_continue_button
       local can_continue = controller.victory_gold_collected and controller.victory_card_collected
       set(can_continue and Theme.accent or Theme.panel_light)
@@ -4200,6 +4376,7 @@ function View.draw(controller)
   draw_targeting_arrow(controller)
   draw_card_flights(controller)
   draw_coin_flights(controller)
+  draw_gold_purse_overlay(controller)
   draw_particles(controller)
   draw_floaters(controller)
   if controller.screen == "playing" or controller.screen == "victory" then
@@ -4220,7 +4397,7 @@ end
 -- recouvrir.
 function View.draft_rects(controller)
   if not controller.draft_picks or not controller.draft_cards_shown then return {} end
-  return centered_row(#controller.draft_picks, 130, 190, 320, 24)
+  return centered_row(#controller.draft_picks, DraftFx.w, DraftFx.h, 320, 24)
 end
 
 -- "Ne rien prendre" (2026-08-30, demande explicite) : sous la rangée de

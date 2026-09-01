@@ -90,6 +90,12 @@ module.exports = [
   // ---- Icônes de mots-clés (icon, 32x32) ----
   { id: 'energie', grid: 'icon', out: 'game/assets/icons/keywords/energie.png',
     subject: 'a lightning bolt icon, energy symbol' },
+  // Absente du manifeste jusqu'ici (2026-09-02, bug signalé -- "l'icone de
+  // mana est sur fond blanc") : la 1ʳᵉ génération n'était pas passée par ce
+  // pipeline (fond blanc opaque intact, jamais détouré par stripBackground,
+  // voir tools/lib/gen-core.js) -- régénérée via cette même entrée.
+  { id: 'mana', grid: 'icon', out: 'game/assets/icons/keywords/mana.png',
+    subject: 'a blue mana drop icon, single object' },
   // "PO" (or, 2026-09-02, demande explicite -- nouvelle ressource persistante).
   { id: 'or', grid: 'icon', out: 'game/assets/icons/keywords/or.png',
     subject: 'a gold coin icon, single object' },

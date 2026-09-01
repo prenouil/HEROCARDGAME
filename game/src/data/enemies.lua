@@ -355,12 +355,12 @@ Enemies.templates = {
       if rng:random() < 2 / 3 then
         return { kind = "dmg", name = "Griffure Ardente", icon = "\u{1F525}", dmg_type = "melee", amount = roll_scaled(5, e.level, rng) }
       end
-      return { kind = "buff-self", name = "Surchauffe", icon = "\u{1F525}", status_key = "puissance", amount = 2, log_text = "surchauffe et gagne en puissance" }
+      return { kind = "buff-self", name = "Surchauffe", icon = "\u{1F525}", status_key = "incandescence", amount = 2, log_text = "surchauffe et gagne en incandescence" }
     end,
     moves_info = function(level)
       return {
         { icon = "\u{1F525}", name = "Griffure Ardente", text = range_text(5, level) .. " dégâts (fréquent)" },
-        { icon = "\u{1F525}", name = "Surchauffe", text = 'Gagne "Puissance" 2, pas de dégât ce tour-là (rare) — ne redescend jamais seule' },
+        { icon = "\u{1F525}", name = "Surchauffe", text = 'Gagne "Incandescence" 2, pas de dégât ce tour-là (rare) — ne redescend jamais seule' },
       }
     end,
   },
@@ -398,33 +398,35 @@ Enemies.templates = {
       if rng:random() < 2 / 3 then
         return { kind = "dmg", name = "Poing Incandescent", icon = "\u{1F525}", dmg_type = "melee", amount = roll_scaled(7, e.level, rng) }
       end
-      return { kind = "buff-self", name = "Cœur en Fusion", icon = "\u{1F525}", status_key = "puissance", amount = 2, log_text = "voit son cœur de magma s'embraser" }
+      return { kind = "buff-self", name = "Cœur en Fusion", icon = "\u{1F525}", status_key = "incandescence", amount = 2, log_text = "voit son cœur de magma s'embraser" }
     end,
     moves_info = function(level)
       return {
         { icon = "\u{1F525}", name = "Poing Incandescent", text = range_text(7, level) .. " dégâts (fréquent)" },
-        { icon = "\u{1F525}", name = "Cœur en Fusion", text = 'Gagne "Puissance" 2, pas de dégât ce tour-là (rare) — ne redescend jamais seule' },
+        { icon = "\u{1F525}", name = "Cœur en Fusion", text = 'Gagne "Incandescence" 2, pas de dégât ce tour-là (rare) — ne redescend jamais seule' },
       }
     end,
   },
-  -- Ancre de la mécanique du Volcan ("Surchauffe" -- Puissance qui ne
-  -- redescend jamais seule) : Puissance garantie tous les 3 tours (pas
-  -- aléatoire, pour rester lisible sur cet ennemi) -- `e.vouivre_turn`,
-  -- compteur posé/incrémenté directement sur l'instance depuis choose_move,
-  -- même idiome que `e.defend_cycle` du Gobelourd.
+  -- Ancre de la mécanique du Volcan ("Surchauffe" -- Incandescence qui ne
+  -- redescend jamais seule, 2026-09-02 -- renommée depuis "Puissance", qui
+  -- décroît désormais en fin de tour comme les autres statuts, voir
+  -- Game.decay_end_of_turn_statuses) : Incandescence garantie tous les 3
+  -- tours (pas aléatoire, pour rester lisible sur cet ennemi) --
+  -- `e.vouivre_turn`, compteur posé/incrémenté directement sur l'instance
+  -- depuis choose_move, même idiome que `e.defend_cycle` du Gobelourd.
   {
     id = "vouivre", name = "Vouivre des Cendres", icon = "\u{1F409}", label = "VOU", hp_base = 20, cost = 17, target_mode = "random", biome = "volcan",
     choose_move = function(e, all, rng)
       e.vouivre_turn = (e.vouivre_turn or 0) + 1
       if e.vouivre_turn % 3 == 0 then
-        return { kind = "buff-self", name = "Montée en Cendres", icon = "\u{1F525}", status_key = "puissance", amount = 2, log_text = "monte en cendres" }
+        return { kind = "buff-self", name = "Montée en Cendres", icon = "\u{1F525}", status_key = "incandescence", amount = 2, log_text = "monte en cendres" }
       end
       return { kind = "dmg", name = "Griffure de Braise", icon = "\u{1F525}", dmg_type = "melee", amount = roll_scaled(6, e.level, rng) }
     end,
     moves_info = function(level)
       return {
         { icon = "\u{1F525}", name = "Griffure de Braise", text = range_text(6, level) .. " dégâts (2 tours sur 3)" },
-        { icon = "\u{1F525}", name = "Montée en Cendres", text = 'Gagne "Puissance" 2, automatique et garanti tous les 3 tours — ne redescend jamais seule' },
+        { icon = "\u{1F525}", name = "Montée en Cendres", text = 'Gagne "Incandescence" 2, automatique et garanti tous les 3 tours — ne redescend jamais seule' },
       }
     end,
   },
@@ -572,17 +574,19 @@ Enemies.templates = {
     end,
   },
   -- Boss du Volcan (2026-09-01, demande explicite -- "élémentaire de feu") :
-  -- même mécanique "Surchauffe" que le reste du biome (Puissance qui ne
-  -- redescend jamais seule, voir combat.lua/game.lua) portée à l'échelle du
-  -- boss -- "Montée en Puissance" ci-dessous, ET "Souffle Incandescent" pose
-  -- "Brûlure" (nouveau statut du biome, lui non plus jamais décroissant),
-  -- les 2 mécaniques du Volcan réunies sur ce seul boss. Seul (aucun sbire,
-  -- comme l'Aigle Géant -- voir Encounter.elementaire_feu_encounter).
+  -- même mécanique "Surchauffe" que le reste du biome (Incandescence qui ne
+  -- redescend jamais seule, voir combat.lua/game.lua -- renommée 2026-09-02,
+  -- distincte de Puissance qui décroît désormais en fin de tour) portée à
+  -- l'échelle du boss -- "Montée en Incandescence" ci-dessous (nom du COUP
+  -- inchangé, seul le statut qu'il accorde a changé de nom), ET "Souffle
+  -- Incandescent" pose "Brûlure" (nouveau statut du biome, lui non plus
+  -- jamais décroissant), les 2 mécaniques du Volcan réunies sur ce seul boss.
+  -- Seul (aucun sbire, comme l'Aigle Géant -- voir Encounter.elementaire_feu_encounter).
   {
     id = "elementaire-feu", name = "Élémentaire de Feu", icon = "\u{1F525}", label = "ELF", hp_base = 95, cost = 66, target_mode = "random", boss_only = true,
     choose_move = function(e, all, rng)
       if rng:random() < 0.25 then
-        return { kind = "buff-self", name = "Montée en Puissance", icon = "\u{1F525}", status_key = "puissance", amount = 2, log_text = "s'embrase et gagne en puissance" }
+        return { kind = "buff-self", name = "Montée en Incandescence", icon = "\u{1F525}", status_key = "incandescence", amount = 2, log_text = "s'embrase et gagne en incandescence" }
       end
       if rng:random() < 0.25 then
         return { kind = "dmg-all", name = "Éruption", icon = "\u{1F30B}", dmg_type = "magic", amount = roll_scaled(3, e.level, rng) }
@@ -597,7 +601,7 @@ Enemies.templates = {
         { icon = "\u{1F525}", name = "Griffe Ardente", text = range_text(7, level) .. " dégâts à un aventurier" },
         { icon = "\u{1F525}", name = "Souffle Incandescent", text = range_text(5, level) .. ' dégâts + "Brûlure" ' .. range_text(2, level) .. " à un aventurier" },
         { icon = "\u{1F30B}", name = "Éruption", text = range_text(3, level) .. " dégâts à tous les aventuriers" },
-        { icon = "\u{1F525}", name = "Montée en Puissance", text = 'Gagne "Puissance" 2, pas de dégât ce tour-là -- ne redescend jamais seule' },
+        { icon = "\u{1F525}", name = "Montée en Incandescence", text = 'Gagne "Incandescence" 2, pas de dégât ce tour-là -- ne redescend jamais seule' },
       }
     end,
   },
