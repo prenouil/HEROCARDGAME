@@ -233,7 +233,9 @@ local function mousepressed_tap(controller, x, y, button)
   local state = controller.state
 
   if controller.screen == "defeat" then
-    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller) end
+    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller)
+    elseif View.point_in(View.overlay_menu_button, x, y) then controller:back_to_menu()
+    end
     return
   end
 
@@ -306,11 +308,11 @@ local function mousepressed_tap(controller, x, y, button)
   -- (2026-08-20, voir Game.select_card) : plus de bouton "Jouer" à choisir,
   -- `pending` n'existe donc jamais sans `pending.hero_id` déjà fixé.
   if pending and pending.hero_id then
-    if pending.def.target == "enemy" or pending.def.target == "conditional" then
+    if pending.def.target == "enemy" or pending.def.target == "conditional" or pending.def.target == "enemy-or-ally" then
       local enemy_id = find_rect(View.enemy_rects(state), x, y)
       if enemy_id then controller:resolve_target("enemy", enemy_id); return end
     end
-    if pending.def.target == "ally" then
+    if pending.def.target == "ally" or pending.def.target == "enemy-or-ally" then
       local hero_id = find_rect(View.hero_rects(state), x, y)
       if hero_id then controller:resolve_target("ally", hero_id); return end
     end
@@ -339,7 +341,9 @@ local function mousepressed_arrow(controller, x, y, button)
   local state = controller.state
 
   if controller.screen == "defeat" then
-    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller) end
+    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller)
+    elseif View.point_in(View.overlay_menu_button, x, y) then controller:back_to_menu()
+    end
     return
   end
 
@@ -408,11 +412,11 @@ local function mousepressed_arrow(controller, x, y, button)
   -- (ennemi/allié). Un clic hors cible valide annule tout (décision explicite
   -- du porteur de projet -- pas de retour en arrière d'un cran).
   if pending and pending.hero_id then
-    if pending.def.target == "enemy" or pending.def.target == "conditional" then
+    if pending.def.target == "enemy" or pending.def.target == "conditional" or pending.def.target == "enemy-or-ally" then
       local enemy_id = find_rect(View.enemy_rects(state), x, y)
       if enemy_id then controller:resolve_target("enemy", enemy_id); return end
     end
-    if pending.def.target == "ally" then
+    if pending.def.target == "ally" or pending.def.target == "enemy-or-ally" then
       local hero_id = find_rect(View.hero_rects(state), x, y)
       if hero_id then controller:resolve_target("ally", hero_id); return end
     end
@@ -515,7 +519,7 @@ local function is_hovering_clickable_tap(controller, x, y)
   local state = controller.state
 
   if controller.screen == "defeat" then
-    return View.point_in(View.overlay_restart_button, x, y)
+    return View.point_in(View.overlay_restart_button, x, y) or View.point_in(View.overlay_menu_button, x, y)
   end
 
   if controller.screen == "victory" then
@@ -550,10 +554,10 @@ local function is_hovering_clickable_tap(controller, x, y)
 
   local pending = state.pending
   if pending and pending.hero_id then
-    if pending.def.target == "enemy" or pending.def.target == "conditional" then
+    if pending.def.target == "enemy" or pending.def.target == "conditional" or pending.def.target == "enemy-or-ally" then
       if find_rect(View.enemy_rects(state), x, y) then return true end
     end
-    if pending.def.target == "ally" then
+    if pending.def.target == "ally" or pending.def.target == "enemy-or-ally" then
       if find_rect(View.hero_rects(state), x, y) then return true end
     end
   end
@@ -575,7 +579,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
   local state = controller.state
 
   if controller.screen == "defeat" then
-    return View.point_in(View.overlay_restart_button, x, y)
+    return View.point_in(View.overlay_restart_button, x, y) or View.point_in(View.overlay_menu_button, x, y)
   end
 
   if controller.screen == "victory" then
@@ -609,10 +613,10 @@ local function is_hovering_clickable_arrow(controller, x, y)
 
   local pending = state.pending
   if pending and pending.hero_id then
-    if pending.def.target == "enemy" or pending.def.target == "conditional" then
+    if pending.def.target == "enemy" or pending.def.target == "conditional" or pending.def.target == "enemy-or-ally" then
       if find_rect(View.enemy_rects(state), x, y) then return true end
     end
-    if pending.def.target == "ally" then
+    if pending.def.target == "ally" or pending.def.target == "enemy-or-ally" then
       if find_rect(View.hero_rects(state), x, y) then return true end
     end
     return false

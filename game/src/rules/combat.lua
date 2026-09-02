@@ -35,7 +35,12 @@ end
 -- "combien ça coûte VRAIMENT" -- Combat.can_play, Game.resolve_pending
 -- (déduction) et l'affichage en main (draw_hand, view.lua) doivent tous
 -- passer par elle, jamais lire def.cost brut pour un coût vérifié/affiché.
+-- Gratuite (2026-09-02, statut GÉNÉRIQUE -- "Bis" du Barde, hero.gratuite) :
+-- tant que > 0, le coût réel tombe à 0 pour TOUTE carte de ce héros (avant
+-- même card_cost_delta, qui n'a alors plus d'effet visible) -- décompté de 1
+-- à chaque carte jouée par Game.on_card_played, jamais en fin de tour.
 function Combat.effective_cost(hero, def)
+  if hero and (hero.gratuite or 0) > 0 then return 0 end
   return def.cost + ((hero and hero.card_cost_delta) or 0)
 end
 

@@ -92,7 +92,7 @@ Glossary.terms = {
   -- Game.grant_furtif_discard_discretion (+2 Discrétion si défaussée non
   -- jouée) -- cette entrée ne sert qu'à l'explication affichée, jamais une
   -- deuxième source de vérité sur l'effet.
-  { key = "furtif", icon = nil, has_icon = false, related = "", explain = "Ne fait pas perdre de Discrétion en la jouant. Donne 2 Discrétion si défaussée sans avoir été jouée." },
+  { key = "furtif", icon = nil, has_icon = false, related = "", explain = "Donne 2 Discrétion si défaussée sans avoir été jouée." },
   -- Provocation (2026-08-28, statut propre au Paladin, clarifié après coup) :
   -- vrai statut de combat contrairement à Discrétion -- badge sur le cadre du
   -- héros comme Puissance/Esquive (voir STATUS_TOOLTIP_FIELDS dans view.lua),
@@ -131,8 +131,12 @@ Glossary.terms = {
   { key = "inspiration", icon = nil, has_icon = false, related = "", explain = "+6 flat au premier effet de dégâts/soin/bouclier que le porteur déclenche en jouant une carte (quelle que soit sa classe). -1 charge à cette utilisation, ET -1 automatique à la fin de chaque tour (les deux peuvent se cumuler le même tour)." },
   -- Encore (statut secondaire de la carte "Bis" du Barde -- hero.encore_extra_plays) :
   -- généré par Bis, consommé par le PROCHAIN effet de carte joué par le
-  -- porteur (quelle que soit sa classe), ou perdu en fin de tour si inutilisé.
-  { key = "encore", icon = nil, has_icon = false, related = "", explain = "La prochaine carte jouée par le porteur ce tour se déclenche des fois supplémentaires. Perdu en fin de tour si aucune carte n'est jouée avant." },
+  -- porteur (quelle que soit sa classe) -- ne se perd plus en fin de tour
+  -- (2026-09-02, simplification explicite, voir Game.decay_end_of_turn_statuses).
+  { key = "encore", icon = nil, has_icon = false, related = "", explain = "La prochaine carte jouée par le porteur ce tour se déclenche des fois supplémentaires." },
+  -- Gratuite (2026-09-02, statut GÉNÉRIQUE -- carte "Bis" du Barde,
+  -- hero.gratuite) : voir Combat.effective_cost/Game.on_card_played.
+  { key = "gratuite", icon = nil, has_icon = false, related = "", explain = "Tant que Gratuite > 0, toutes les cartes de l'aventurier coûtent et affichent 0 en énergie. -1 à chaque utilisation." },
 }
 
 -- Repli ASCII des lettres accentuées françaises (2026-08-30, bug signalé --

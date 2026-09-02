@@ -321,7 +321,14 @@ View.end_turn_button = {
   w = END_TURN_BTN_W, h = END_TURN_BTN_H, label = "Fin de tour",
 }
 
-View.overlay_restart_button = { x = W / 2 - 70, y = H / 2 + 40, w = 140, h = 34, label = "Rejouer" }
+-- Écran de défaite (2026-09-02, demande explicite -- "l'option est simplement
+-- de rejouer", remplacé par 2 choix) : même gabarit empilé que le menu pause
+-- juste en dessous. "Rejouer avec la même équipe" reconduit déjà
+-- self.last_selected_ids/self.run_mode SANS rien de neuf à câbler (voir
+-- Controller:reset_run) -- seul "Retourner au menu" est un vrai nouveau
+-- chemin (Controller:back_to_menu, déjà existant pour la pause).
+View.overlay_restart_button = { x = W / 2 - 130, y = H / 2 + 40, w = 260, h = 40, label = "Rejouer avec la même équipe" }
+View.overlay_menu_button = { x = W / 2 - 130, y = H / 2 + 88, w = 260, h = 40, label = "Retourner au menu" }
 
 -- Menu pause (2026-09-02, demande explicite -- ESC) : 2 options empilées,
 -- centrées -- même gabarit que View.back_button/l'écran Options.
@@ -422,7 +429,13 @@ function View.temple_effect_rects(controller)
   return centered_row(#t.choices, TEMPLE_EFFECT_W, TEMPLE_EFFECT_H, TEMPLE_EFFECT_Y, TEMPLE_EFFECT_GAP)
 end
 
-local TEMPLE_HERO_W, TEMPLE_HERO_H = 130, 136
+-- 136->144 (2026-09-02, bug signalé -- "les PV des aventuriers ne sont pas
+-- indiqués du tout, il faut tout montrer") : la carte n'affichait ni PV ni le
+-- NOM de la bénédiction/malédiction déjà portée (seulement une pastille de
+-- couleur, jamais lisible sans survoler) -- portrait réduit (70->58) pour
+-- faire de la place à une barre de PV (même idiome que draw_hero) et jusqu'à
+-- 2 lignes de statut (bénédiction/malédiction déjà portées), voir draw_temple.
+local TEMPLE_HERO_W, TEMPLE_HERO_H = 130, 144
 local TEMPLE_HERO_Y = 320 -- 300->320 (2026-08-31, passage 1280x720)
 function View.temple_hero_rects(controller)
   local rects = centered_row(#controller.state.heroes, TEMPLE_HERO_W, TEMPLE_HERO_H, TEMPLE_HERO_Y)
@@ -858,6 +871,10 @@ end
 local function unit_anim_transform(controller, id)
   local a = controller.anim[id]
   if not a then return 0, 0, 1 end
+  -- `a.t < 0` (2026-09-02, séquencement dégâts-après-bouclier -- voir
+  -- Controller:pulse/react_to_diff) : pas encore "son tour", même garde que
+  -- draw_shield_fx/status_badge pour ce même idiome de délai.
+  if a.t < 0 then return 0, 0, 1 end
   if a.kind == "pulse-up" then
     local t = a.t / 0.38
     return 0, -10 * (1 - (1 - t) ^ 2), 1 + 0.05 * (1 - t)
@@ -913,17 +930,35 @@ local function draw_shield_fx(controller, unit_id, r)
   else
     alpha = 1
   end
+  -- Gain vs absorption, désormais 2 visuels distincts (2026-09-02, demande
+  -- explicite -- "quand on gagne du bouclier... le bouclier qui monte
+  -- légèrement. Quand un coup tape dedans, le bouclier tremble") : `s.amount`
+  -- (déjà la donnée qui distingue les 2 cas, voir plus bas) pilote laquelle
+  -- des deux offsets s'applique -- jamais les deux à la fois.
+  local offset_x, offset_y = 0, 0
+  if s.amount then
+    -- Tremblement (impact) : même famille que le "shake" de unit_anim_transform
+    -- ci-dessus, mais amorti sur TOUTE la durée du fondu (pas juste ~0.4s) --
+    -- s'éteint en même temps que le bouclier lui-même disparaît.
+    offset_x = math.sin(t * 50) * 4 * math.max(0, 1 - t / dur)
+  else
+    -- Montée légère (gain) : part d'un peu plus bas, remonte à sa place au
+    -- fil du fondu entrant -- même esprit que "monte" au sens propre du terme,
+    -- pas un simple fondu sur place.
+    local rise_p = math.min(1, t / (dur * 0.35))
+    offset_y = -(1 - rise_p) * 10
+  end
   -- Theme.def existe dans la palette mais n'était utilisé nulle part -- couleur
   -- dédiée à la Défense plutôt que de recycler Theme.energy (déjà pris par
   -- l'affichage d'énergie et le ciblage en mode flèche).
-  Icons.draw_status("defense", r.w / 2, r.h / 2, r.w * 0.4, Theme.def, alpha * 0.9)
+  Icons.draw_status("defense", r.w / 2 + offset_x, r.h / 2 + offset_y, r.w * 0.4, Theme.def, alpha * 0.9)
   -- Montant absorbé (2026-08-24, demande explicite) : affiché seulement quand
   -- ce fondu vient d'intercepter un coup (Controller:react_to_diff pose
   -- `s.amount` dans ce cas précis) -- absent sur un simple gain de Défense.
   if s.amount then
     set(Theme.text, alpha)
     love.graphics.setFont(Fonts.get(14))
-    love.graphics.printf("-" .. tostring(s.amount), 0, r.h / 2 - 8, r.w, "center")
+    love.graphics.printf("-" .. tostring(s.amount), offset_x, r.h / 2 - 8, r.w, "center")
   end
   love.graphics.setColor(1, 1, 1, 1)
 end
@@ -1006,7 +1041,7 @@ local function draw_hero(controller, h, r)
   local fade_p = fade and math.min(1, fade.t / fade.duration) or 0
 
   local pending = controller.state.pending
-  local eligible_target = pending and pending.hero_id and pending.def.target == "ally" and not dead and h.id ~= pending.hero_id
+  local eligible_target = pending and pending.hero_id and (pending.def.target == "ally" or pending.def.target == "enemy-or-ally") and not dead and h.id ~= pending.hero_id
   -- Chaque carte a désormais un propriétaire fixe (def.class_id, voir
   -- Heroes.class_name) : la sélectionner l'assigne DIRECTEMENT à ce héros
   -- (Game.select_card/Game.assign_hero, plus de choix manuel -- voir
@@ -1480,7 +1515,8 @@ local function draw_enemy(controller, e, r)
   local pending = controller.state.pending
   local hero = pending and pending.hero_id and Combat.hero_by_id(controller.state, pending.hero_id)
   local awaiting_enemy_target = pending and pending.hero_id and not dead
-    and (pending.def.target == "enemy" or (pending.def.target == "conditional" and hero and not Combat.enemy_targeting(controller.state, hero)))
+    and (pending.def.target == "enemy" or pending.def.target == "enemy-or-ally"
+      or (pending.def.target == "conditional" and hero and not Combat.enemy_targeting(controller.state, hero)))
 
   -- Même rebond que côté héros (2026-08-09, mode "flèche") quand cet ennemi
   -- précis est une cible valide ET survolé par la souris -- calculé sur le
@@ -2634,26 +2670,31 @@ local DAMAGE_ZOOM_DURATION = 0.22
 
 local function draw_floaters(controller)
   for _, f in ipairs(controller.floaters) do
-    local p = math.min(1, f.t / controller.floater_duration)
-    local ease = 1 - (1 - p) ^ 2
-    -- "decay" DESCEND, tous les autres montent (2026-08-30, demande
-    -- explicite -- "un -1 qui descend doucement en fade") : signe inversé
-    -- sur FLOATER_RISE plutôt qu'une 2ᵉ constante, même vitesse/même courbe
-    -- dans les 2 sens.
-    local y = f.kind == "decay" and (f.y + ease * FLOATER_RISE) or (f.y - ease * FLOATER_RISE)
-    local alpha = 1 - p * p
-    set(Theme[FLOATER_COLOR[f.kind]] or Theme.text, alpha)
-    if f.kind == "damage" then
-      local zoom = ease_out_back(f.t, DAMAGE_ZOOM_DURATION)
-      love.graphics.setFont(Fonts.get(DAMAGE_FLOATER_SIZE))
-      love.graphics.push()
-      love.graphics.translate(f.x, y)
-      love.graphics.scale(zoom, zoom)
-      love.graphics.printf(f.text, -40, -DAMAGE_FLOATER_SIZE / 2, 80, "center")
-      love.graphics.pop()
-    else
-      love.graphics.setFont(Fonts.get(HEAL_FLOATER_SIZE))
-      love.graphics.printf(f.text, f.x - 40, y, 80, "center")
+    -- `f.t < 0` (2026-09-02, séquencement dégâts-après-bouclier -- voir
+    -- Controller:spawn_floater/react_to_diff) : pas encore "son tour", même
+    -- garde que draw_shield_fx/unit_anim_transform pour ce même idiome.
+    if f.t >= 0 then
+      local p = math.min(1, f.t / controller.floater_duration)
+      local ease = 1 - (1 - p) ^ 2
+      -- "decay" DESCEND, tous les autres montent (2026-08-30, demande
+      -- explicite -- "un -1 qui descend doucement en fade") : signe inversé
+      -- sur FLOATER_RISE plutôt qu'une 2ᵉ constante, même vitesse/même courbe
+      -- dans les 2 sens.
+      local y = f.kind == "decay" and (f.y + ease * FLOATER_RISE) or (f.y - ease * FLOATER_RISE)
+      local alpha = 1 - p * p
+      set(Theme[FLOATER_COLOR[f.kind]] or Theme.text, alpha)
+      if f.kind == "damage" then
+        local zoom = ease_out_back(f.t, DAMAGE_ZOOM_DURATION)
+        love.graphics.setFont(Fonts.get(DAMAGE_FLOATER_SIZE))
+        love.graphics.push()
+        love.graphics.translate(f.x, y)
+        love.graphics.scale(zoom, zoom)
+        love.graphics.printf(f.text, -40, -DAMAGE_FLOATER_SIZE / 2, 80, "center")
+        love.graphics.pop()
+      else
+        love.graphics.setFont(Fonts.get(HEAL_FLOATER_SIZE))
+        love.graphics.printf(f.text, f.x - 40, y, 80, "center")
+      end
     end
   end
   love.graphics.setColor(1, 1, 1, 1)
@@ -2679,17 +2720,23 @@ local PARTICLE_GRAVITY = 160
 
 local function draw_particles(controller)
   for _, pt in ipairs(controller.particles) do
-    local p = math.min(1, pt.t / (pt.duration or controller.particle_duration))
-    local gravity = pt.gravity or PARTICLE_GRAVITY
-    local x = pt.x + pt.vx * pt.t
-    local y = pt.y + pt.vy * pt.t + 0.5 * gravity * pt.t * pt.t
-    if pt.canvas and pt.quad then
-      love.graphics.setColor(1, 1, 1, 1 - p)
-      local rot = (pt.rot0 or 0) + (pt.vrot or 0) * pt.t
-      love.graphics.draw(pt.canvas, pt.quad, x, y, rot, 1, 1, pt.tile / 2, pt.tile / 2)
-    else
-      set(pt.color or Theme.hp, 1 - p)
-      love.graphics.rectangle("fill", x - 2, y - 2, 4, 4)
+    -- `pt.t < 0` (2026-09-02, séquencement dégâts-après-bouclier -- voir
+    -- Controller:spawn_impact/react_to_diff) : pas encore "son tour" -- sans
+    -- cette garde, la trajectoire (fonction de `pt.t`) se dessinerait déjà,
+    -- à l'envers, avant l'éclosion réelle.
+    if pt.t >= 0 then
+      local p = math.min(1, pt.t / (pt.duration or controller.particle_duration))
+      local gravity = pt.gravity or PARTICLE_GRAVITY
+      local x = pt.x + pt.vx * pt.t
+      local y = pt.y + pt.vy * pt.t + 0.5 * gravity * pt.t * pt.t
+      if pt.canvas and pt.quad then
+        love.graphics.setColor(1, 1, 1, 1 - p)
+        local rot = (pt.rot0 or 0) + (pt.vrot or 0) * pt.t
+        love.graphics.draw(pt.canvas, pt.quad, x, y, rot, 1, 1, pt.tile / 2, pt.tile / 2)
+      else
+        set(pt.color or Theme.hp, 1 - p)
+        love.graphics.rectangle("fill", x - 2, y - 2, 4, 4)
+      end
     end
   end
   love.graphics.setColor(1, 1, 1, 1)
@@ -2982,7 +3029,7 @@ local function draw_targeting_arrow(controller)
   local state = controller.state
   local pending = state.pending
   if not pending or not pending.hero_id then return end
-  if pending.def.target ~= "enemy" and pending.def.target ~= "ally" and pending.def.target ~= "conditional" then return end
+  if pending.def.target ~= "enemy" and pending.def.target ~= "ally" and pending.def.target ~= "conditional" and pending.def.target ~= "enemy-or-ally" then return end
 
   local mx, my = love.mouse.getPosition()
   mx, my = mx / SCALE, my / SCALE
@@ -2991,13 +3038,13 @@ local function draw_targeting_arrow(controller)
   if not origin then return end
   local ox, oy = origin.x + origin.w / 2, origin.y + origin.h / 2
   local valid = false
-  if pending.def.target == "enemy" or pending.def.target == "conditional" then
+  if pending.def.target == "enemy" or pending.def.target == "conditional" or pending.def.target == "enemy-or-ally" then
     for _, e in ipairs(state.enemies) do
       local r = View.enemy_rects(state)[e.id]
       if r and e.hp > 0 and point_in(r, mx, my) then valid = true end
     end
   end
-  if pending.def.target == "ally" then
+  if pending.def.target == "ally" or pending.def.target == "enemy-or-ally" then
     for _, h in ipairs(state.heroes) do
       if h.id ~= pending.hero_id then
         local r = View.hero_rects(state)[h.id]
@@ -3425,15 +3472,46 @@ local function draw_temple(controller)
       love.graphics.setLineWidth(selected and 4 or 2)
       love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
       love.graphics.setLineWidth(1)
-      local portrait_size = 70
+      local portrait_size = 58
       draw_class_icon(h.class_id, h.icon, h.label,
-        r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size,
+        r.x + (r.w - portrait_size) / 2, r.y + 8, portrait_size, portrait_size,
         eligible and Theme.text or Theme.muted, hero_alpha)
-      name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+      -- PV (2026-09-02, bug signalé -- "les PV des aventuriers ne sont pas
+      -- indiqués du tout, il faut tout montrer") : absent jusqu'ici de cet
+      -- écran -- même idiome que draw_hero (barre + valeur dedans), juste
+      -- sous le portrait rétréci (70->58 pour lui faire de la place).
+      hp_bar(r.x + 6, r.y + 68, r.w - 12, 14, h.hp / h.max_hp, h.hp / h.max_hp, Theme.hp)
+      text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp, r.x, r.y + 68, r.w, 14, 9, Theme.text)
+      name_badge(h.name, r.x + 8, r.y + 86, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+      -- Bénédiction/malédiction déjà portées, EN TOUTES LETTRES (2026-09-02,
+      -- demande explicite -- "les bénédictions/malédictions, et tout autre
+      -- statut que le joueur doit connaitre pour faire son choix") : avant,
+      -- rien ne le montrait sur cet écran (aucun badge, aucun nom) -- seul un
+      -- texte vague "Déjà béni/maudit" apparaissait, et seulement quand ça
+      -- rendait le héros inéligible pour CE tirage. Affiche désormais le NOM
+      -- de chacun dans TOUS les cas (un aventurier déjà béni reste un choix
+      -- valide pour une malédiction, et inversement -- le joueur doit pouvoir
+      -- le voir même quand ça ne le rend pas inéligible), coloré comme la
+      -- statue correspondante (TEMPLE_STATUE_COLORS, même code couleur que
+      -- draw_hero) -- description complète toujours réservée à l'infobulle
+      -- (tooltip_lines), pas dupliquée ici.
       if h.hp <= 0 then
-        text("Mort", r.x, r.y + 112, r.w, 11, Theme.muted)
-      elseif not eligible then
-        text(t.type == "blessing" and "Déjà béni" or "Déjà maudit", r.x, r.y + 112, r.w, 11, Theme.muted)
+        text("Mort", r.x, r.y + 100, r.w, 11, Theme.muted)
+      else
+        local status_y = r.y + 100
+        if h.blessing then
+          local blessing = Temple.by_id(h.blessing)
+          if blessing then
+            text(blessing.name, r.x + 2, status_y, r.w - 4, 11, TEMPLE_STATUE_COLORS[blessing.color] or Theme.heal)
+            status_y = status_y + 13
+          end
+        end
+        if h.curse then
+          local curse = Temple.by_id(h.curse)
+          if curse then
+            text(curse.name, r.x + 2, status_y, r.w - 4, 11, TEMPLE_STATUE_COLORS[curse.color] or Theme.hp)
+          end
+        end
       end
       -- "?" manquant (2026-08-30, bug signalé -- "pour les aventuriers, il
       -- n'y a pas le '?' ni les info bulles") : la rangée de statues juste
@@ -4230,9 +4308,8 @@ function View.draw(controller)
     -- écrire des erreurs comme '1 chevaux'") : accepte l'accord fautif à 1
     -- combat plutôt que la parenthèse.
     text("Le run s'arrête après " .. combats_won_text(controller) .. " combats remportés.", 0, H / 2, W, 12, Theme.muted)
-    local b = View.overlay_restart_button
-    set(Theme.accent); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 8, 8)
-    set(Theme.bg); text(b.label, b.x, b.y + 9, b.w, 12, Theme.bg)
+    draw_menu_style_button(View.overlay_restart_button)
+    draw_menu_style_button(View.overlay_menu_button)
   elseif controller.screen == "victory" then
     set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)
 

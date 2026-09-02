@@ -15,6 +15,7 @@ local Deck = require("src.rules.deck")
 local Encounter = require("src.rules.encounter")
 local Rng = require("src.util.rng")
 local Temple = require("src.rules.temple")
+local Cards = require("src.data.cards")
 
 local Game = {}
 
@@ -108,6 +109,10 @@ local function fresh_hero(def)
     -- bloque la décroissance auto de fin de tour pour N tours, indépendant de
     -- la consommation à l'usage.
     inspiration = 0, inspiration_shielded_turns = 0, encore_extra_plays = nil,
+    -- Gratuite (2026-09-02, statut GÉNÉRIQUE -- "Bis" du Barde) : coût 0 tant
+    -- que > 0, décompté de 1 par carte jouée (Game.on_card_played), jamais en
+    -- fin de tour -- voir Combat.effective_cost.
+    gratuite = nil,
     -- Servant d'os (Nécromancien) : dégâts "brut" programmés à un ennemi
     -- ALÉATOIRE tiré au moment où l'entrée se déclenche -- voir
     -- Game.schedule_damage, même structure que scheduled_shields ci-dessus.
@@ -191,6 +196,27 @@ local function apply_combat_start_temple_effects(n)
   end
 end
 
+--- Remet `card.def` sur sa forme CANONIQUE (2026-09-02, demande explicite --
+-- "le coût d'Avalanche de coups doit repasser à 1 à la fin de chaque
+-- combat. C'est un effet temporaire") : annule tout override posé pour LE
+-- COMBAT qui vient de se terminer (aujourd'hui, seul `zero_cost_def`, plus
+-- bas dans ce fichier, en pose un, mais cette fonction est volontairement
+-- générique -- "canonique" plutôt que "pas zero_cost", pour rester correcte
+-- si un futur effet posait un autre override temporaire similaire). Respecte
+-- `is_upgraded` : une carte améliorée à la Forge reste améliorée (son
+-- def canonique redevient `Cards.upgraded_def(base)`, pas `base` tout court)
+-- -- seul ce qu'un EFFET DE CARTE a modifié en cours de combat (ex. le coût)
+-- est annulé, jamais ce que le joueur a choisi de façon permanente. Placée
+-- ICI (avant Game.start_next_combat/start_boss_combat, ses 2 seuls appelants)
+-- plutôt qu'à côté de `zero_cost_def` -- Lua résout les locales du chunk
+-- dans l'ordre du fichier, une locale définie APRÈS son premier appel
+-- resterait invisible (résolue en global nil, voir l'erreur d'origine).
+local function reset_temporary_card_state(card)
+  local base = Cards.by_code(card.def.code)
+  if not base then return end -- ne devrait jamais arriver, filet de sécurité
+  card.def = card.def.is_upgraded and Cards.upgraded_def(base) or base
+end
+
 local function carried_hero(h)
   -- Entre deux combats d'un même run, seuls les PV persistent (blessures non
   -- soignées) ; tout le reste repart à zéro -- SAUF `blessing`/`curse`
@@ -212,6 +238,7 @@ local function carried_hero(h)
   -- reference_reset-ressource-par-combat.md côté agent_content -- Corruption
   -- ne doit pas hériter du même oubli).
   n.inspiration = 0; n.inspiration_shielded_turns = 0; n.encore_extra_plays = nil
+  n.gratuite = nil
   n.scheduled_damages = {}
   -- Discrétion (Assassin) (2026-08-30, bug confirmé -- "Mana et Discrétion
   -- doivent repartir à 0 à chaque combat") : même traitement que Corruption
@@ -531,6 +558,11 @@ function Game.start_next_combat(state)
   -- "Amnésie" (2026-08-28) : "disparait pour le RESTE du combat" -- revient
   -- donc bien ici, au tout début du combat suivant, mélangée avec le reste.
   for _, c in ipairs(state.exhausted) do reclaimed[#reclaimed + 1] = c end
+  -- Effets temporaires de carte (2026-09-02, "Avalanche de coups" -- voir
+  -- reset_temporary_card_state) : annulés ICI, sur TOUTES les cartes
+  -- reprises, avant même le mélange -- "à la fin de chaque combat", et ce
+  -- combat vient de se terminer.
+  for _, c in ipairs(reclaimed) do reset_temporary_card_state(c) end
   state.deck = Deck.shuffle(reclaimed, state.rng.deck)
   state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.energy = 0
@@ -586,6 +618,9 @@ function Game.start_boss_combat(state)
   for _, c in ipairs(state.hand) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.discard) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.exhausted) do reclaimed[#reclaimed + 1] = c end
+  -- Effets temporaires de carte (2026-09-02) : voir le commentaire équivalent
+  -- dans Game.start_next_combat.
+  for _, c in ipairs(reclaimed) do reset_temporary_card_state(c) end
   state.deck = Deck.shuffle(reclaimed, state.rng.deck)
   state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.energy = 0
@@ -892,11 +927,12 @@ function Game.resolve_pending(state, kind, target_id)
   end
 
   local target = nil
-  if def.target == "enemy" or (def.target == "conditional" and kind == "enemy") then
+  if def.target == "enemy" or (def.target == "conditional" and kind == "enemy")
+    or (def.target == "enemy-or-ally" and kind == "enemy") then
     if kind ~= "enemy" then return end
     target = Combat.enemy_by_id(state, target_id)
     if not target or target.hp <= 0 then return end
-  elseif def.target == "ally" then
+  elseif def.target == "ally" or (def.target == "enemy-or-ally" and kind == "ally") then
     if kind ~= "ally" then return end
     target = Combat.hero_by_id(state, target_id)
     if not target or target.hp <= 0 then return end
@@ -917,6 +953,17 @@ function Game.resolve_pending(state, kind, target_id)
   local corruption_spent = 0
   if def.corruption_cost_cap then
     corruption_spent = math.min(hero.corruption or 0, def.corruption_cost_cap)
+    -- Ne jamais dépenser plus de Corruption que nécessaire pour revenir à PV
+    -- max (2026-09-02, demande explicite -- "Rite mineur"/"Communion des
+    -- morts" utilisaient TOUJOURS le maximum disponible même déjà proches de
+    -- PV max). Opt-in via `def.heal_per_corruption` (X PV rendus par point de
+    -- Corruption dépensé) -- laisse "Servant d'os" (dégâts, pas de ce champ)
+    -- intact malgré le même `corruption_cost_cap`.
+    if def.heal_per_corruption then
+      local room = math.max(0, (hero.max_hp or hero.hp) - hero.hp)
+      local max_useful = math.ceil(room / def.heal_per_corruption)
+      corruption_spent = math.min(corruption_spent, max_useful)
+    end
     hero.corruption = (hero.corruption or 0) - corruption_spent
   end
   local ctx = { state = state, hero = hero, target = target, card_def = def, corruption_spent = corruption_spent }
@@ -954,6 +1001,7 @@ end
 -- joué).
 function Game.on_card_played(state, hero, def)
   hero.played_card_this_turn = true
+  if (hero.gratuite or 0) > 0 then hero.gratuite = hero.gratuite - 1 end
   local furtif = def_has_cat(def, "furtif")
   if hero.discretion ~= nil then
     if not furtif then
@@ -1006,8 +1054,11 @@ end
 -- voir ctx.hero.force_amnesie ci-dessous).
 -- `ctx.zero_cost` (2026-08-28, "Avalanche de coups") : appliqué à CETTE
 -- instance précise avant de la router, quelle que soit sa destination finale
--- (main si elle vient de tuer sa cible, sinon défausse) -- permanent pour
--- cette copie de carte, jamais réinitialisé ailleurs.
+-- (main si elle vient de tuer sa cible, sinon défausse) -- temporaire pour
+-- cette copie de carte (2026-09-02, revirement -- voir
+-- reset_temporary_card_state ci-dessus, appelée par Game.start_next_combat/
+-- start_boss_combat au moment où les cartes du combat précédent sont
+-- reprises dans le nouveau deck).
 function Game.finish_card(state, pending, ctx)
   local idx
   for i, c in ipairs(state.hand) do
@@ -1143,13 +1194,21 @@ function Game.tick_burn(state)
   Game.sync_camoufle_visibility(state) -- un héros peut mourir de la brûlure
 end
 
+-- Retourne `true` si le coup a réellement touché, `false` s'il a été esquivé
+-- ou n'avait pas de cible valide (2026-09-02, bug signalé -- "l'esquive
+-- permet d'éviter les dégâts d'une attaque mais aussi tous les autres effets
+-- négatifs, saignement/vulnérabilité/etc.") : avant, cette valeur de retour
+-- n'existait pas, donc les bolt-ons `move.bleed`/`move.burn`/`move.lands`
+-- (voir le kind "dmg" plus bas) s'appliquaient quand même après une esquive
+-- -- seuls les DÉGÂTS PURS étaient bien annulés. L'appelant doit désormais
+-- vérifier cette valeur avant d'appliquer quoi que ce soit d'autre.
 local function resolve_enemy_attack(state, e, amount, brut)
   local target = Combat.hero_by_id(state, e.target_hero_id)
-  if not target or target.hp <= 0 then return end
+  if not target or target.hp <= 0 then return false end
   if (target.esquive or 0) > 0 then
     target.esquive = target.esquive - 1
     Combat.log(state, e.name .. " utilise " .. e.next_move.name .. " sur " .. target.name .. "… esquivé !", "sys")
-    return
+    return false
   end
   -- source_unit = e (pas source_hero, qui reste nil pour garder le texte/la
   -- couleur "foe" du journal) : la propre Incapacité de l'ennemi qui frappe
@@ -1157,6 +1216,7 @@ local function resolve_enemy_attack(state, e, amount, brut)
   -- 2026-08-09 -- Lâcheté pose bien Incapacité sur un ennemi, mais rien n'en
   -- tenait compte à la résolution).
   Combat.deal_damage(state, nil, target, amount, "physique", nil, { brut = brut, source_unit = e })
+  return true
 end
 
 --- Attaque ennemie qui touche TOUS les héros vivants (2026-08-21, demande
@@ -1201,20 +1261,32 @@ function Game.resolve_enemy_action(state, e)
   elseif move.kind == "debuff" then
     local target = Combat.hero_by_id(state, e.target_hero_id)
     if target and target.hp > 0 then
-      target[move.status_key] = (target[move.status_key] or 0) + move.amount
-      local label = Enemies.status_labels[move.status_key] or move.status_key
-      local msg = e.name .. " inflige " .. label .. " " .. move.amount
-      -- status_key2/amount2 (optionnel, 2026-09-01, Nécromancien Novice/
-      -- Élémentaire de Cendre -- "Malédiction"/"Souffle Étouffant" posent
-      -- désormais 2 statuts d'un coup) : même mutation directe, un 2ᵉ champ
-      -- plutôt qu'une liste, pour rester un simple ajout au-dessus du champ
-      -- existant sans jamais avoir plus de 2 statuts à gérer.
-      if move.status_key2 then
-        target[move.status_key2] = (target[move.status_key2] or 0) + move.amount2
-        local label2 = Enemies.status_labels[move.status_key2] or move.status_key2
-        msg = msg .. " et " .. label2 .. " " .. move.amount2
+      -- Esquive (2026-09-02, bug signalé -- "l'esquive permet d'éviter... les
+      -- effets négatifs, saignement/vulnérabilité/etc.") : ce kind n'avait
+      -- jamais vérifié Esquive, contrairement au kind "dmg" (voir
+      -- resolve_enemy_attack) -- un statut comme la Malédiction du
+      -- Nécromancien Novice touchait donc TOUJOURS sa cible, esquive ou pas.
+      -- Même message/décompte que resolve_enemy_attack, pour un comportement
+      -- identique quel que soit le kind du coup.
+      if (target.esquive or 0) > 0 then
+        target.esquive = target.esquive - 1
+        Combat.log(state, e.name .. " utilise " .. move.name .. " sur " .. target.name .. "… esquivé !", "sys")
+      else
+        target[move.status_key] = (target[move.status_key] or 0) + move.amount
+        local label = Enemies.status_labels[move.status_key] or move.status_key
+        local msg = e.name .. " inflige " .. label .. " " .. move.amount
+        -- status_key2/amount2 (optionnel, 2026-09-01, Nécromancien Novice/
+        -- Élémentaire de Cendre -- "Malédiction"/"Souffle Étouffant" posent
+        -- désormais 2 statuts d'un coup) : même mutation directe, un 2ᵉ champ
+        -- plutôt qu'une liste, pour rester un simple ajout au-dessus du champ
+        -- existant sans jamais avoir plus de 2 statuts à gérer.
+        if move.status_key2 then
+          target[move.status_key2] = (target[move.status_key2] or 0) + move.amount2
+          local label2 = Enemies.status_labels[move.status_key2] or move.status_key2
+          msg = msg .. " et " .. label2 .. " " .. move.amount2
+        end
+        Combat.log(state, msg .. " à " .. target.name .. ".", "foe")
       end
-      Combat.log(state, msg .. " à " .. target.name .. ".", "foe")
     end
   elseif move.kind == "buff-self" then
     -- Générique, PAS spécifique à l'Aigle Géant malgré son seul usage actuel
@@ -1233,8 +1305,14 @@ function Game.resolve_enemy_action(state, e)
       resolve_enemy_attack_all(state, e, move.dmg_all_amount)
     end
   elseif move.kind == "dmg" then
-    resolve_enemy_attack(state, e, move.amount, move.brut)
-    if move.bleed then
+    -- Bolt-ons (bleed/burn) gardés par `landed` (2026-09-02, bug signalé --
+    -- "l'esquive permet d'éviter... les effets négatifs, saignement/
+    -- vulnérabilité/etc.") : resolve_enemy_attack renvoie désormais si le
+    -- coup a vraiment touché -- avant, ces 2 blocs s'exécutaient
+    -- inconditionnellement même après un "esquivé !" (seuls les dégâts purs,
+    -- gérés DANS resolve_enemy_attack, étaient bien annulés).
+    local landed = resolve_enemy_attack(state, e, move.amount, move.brut)
+    if landed and move.bleed then
       local target = Combat.hero_by_id(state, e.target_hero_id)
       if target and target.hp > 0 then target.saignements = (target.saignements or 0) + move.bleed end
     end
@@ -1242,13 +1320,16 @@ function Game.resolve_enemy_action(state, e)
     -- que move.bleed juste au-dessus, sur le champ h.brulure/e.brulure --
     -- jamais décrémenté automatiquement (voir Game.tick_burn), contrairement
     -- au Saignement.
-    if move.burn then
+    if landed and move.burn then
       local target = Combat.hero_by_id(state, e.target_hero_id)
       if target and target.hp > 0 then target.brulure = (target.brulure or 0) + move.burn end
     end
     -- "Charge en Piqué" de l'Aigle Géant (2026-08-30, `move.lands`) : générique
     -- comme "buff-self" ci-dessus -- un coup qui "atterrit" annule "Vol" (ou
     -- tout futur statut similaire), quel que soit l'ennemi qui le porte.
+    -- PAS gardé par `landed` (2026-09-02) : "atterrir" décrit l'AIGLE
+    -- lui-même (il redescend au sol), pas un effet sur le héros -- il
+    -- atterrit qu'il ait touché ou non.
     if move.lands then e.vol = 0 end
   elseif move.kind == "dmg-all" then
     resolve_enemy_attack_all(state, e, move.amount)
@@ -1298,15 +1379,15 @@ function Game.decay_end_of_turn_statuses(state)
     -- de la consommation à l'usage (consume_inspiration, combat.lua) --
     -- "Dernier rappel" protège cette décroissance auto pour N tours
     -- (h.inspiration_shielded_turns), sans jamais toucher la consommation à
-    -- l'usage. "Encore" (h.encore_extra_plays, carte "Bis") : perdu en fin de
-    -- tour s'il n'a servi à aucune carte jouée d'ici là (voir Game.resolve_pending,
-    -- seul autre endroit qui le consomme).
+    -- l'usage. "Encore" (h.encore_extra_plays, carte "Bis") : NE se perd PLUS
+    -- en fin de tour (2026-09-02, simplification explicite du glossaire --
+    -- persiste jusqu'à consommation par la prochaine carte jouée, voir
+    -- Game.resolve_pending, seul autre endroit qui le touche).
     if (h.inspiration_shielded_turns or 0) > 0 then
       h.inspiration_shielded_turns = h.inspiration_shielded_turns - 1
     elseif (h.inspiration or 0) > 0 then
       h.inspiration = h.inspiration - 1
     end
-    h.encore_extra_plays = nil
   end
   for _, e in ipairs(state.enemies) do
     if (e.incapacite or 0) > 0 then e.incapacite = math.max(0, e.incapacite - 1) end

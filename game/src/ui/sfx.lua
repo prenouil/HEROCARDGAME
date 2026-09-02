@@ -52,13 +52,32 @@ BUILDERS.hit_magic = function()
   end, 0.5)
 end
 
--- "shting" -- gain de bouclier ET dégâts intégralement absorbés (même son,
--- demandé explicitement identique) : deux notes carrées brillantes.
+-- "shting" -- coup qui vient buter dans un bouclier déjà là, dégâts absorbés
+-- en tout ou partie (2026-09-02, revirement -- servait AUSSI au gain de
+-- bouclier jusqu'ici, "demandé explicitement identique" à l'époque -- voir
+-- BUILDERS.shield_gain ci-dessous pour le nouveau son dédié au gain) : deux
+-- notes carrées brillantes, façon impact métallique.
 BUILDERS.shield = function()
   return Chiptune.concat({
     note(1200, 0.08, "square", 1.8, 0.5, 0.4),
     note(1600, 0.10, "square", 1.5, 0.5, 0.4),
   })
+end
+
+-- "wouch" -- gain de bouclier (2026-09-02, demande explicite -- "le son est
+-- un 'wouch' montant") : désormais DISTINCT de "shting" ci-dessus, réservé au
+-- coup qui absorbe -- même famille que "woosh" plus bas (bruit sous
+-- enveloppe en cloche + tonalité carrée), mais la tonalité MONTE au lieu de
+-- descendre, et beaucoup plus courte (accompagne juste le bouclier qui
+-- "monte légèrement" à l'écran, pas une chute pleine largeur comme le chiffre
+-- d'énergie).
+BUILDERS.shield_gain = function()
+  return Chiptune.render(0.28, function(t)
+    local p = math.min(1, t / 0.28)
+    local swell = math.sin(p * math.pi) -- 0 -> 1 -> 0
+    local tone_freq = 500 + 700 * p
+    return (Chiptune.noise() * 0.4 + Chiptune.square(tone_freq, t, 0.35) * 0.6) * swell
+  end, 0.35)
 end
 
 -- "woosh" -- le gros chiffre d'énergie qui chute sur sa pastille en début de

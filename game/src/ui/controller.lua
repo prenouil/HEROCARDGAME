@@ -1145,8 +1145,13 @@ end
 
 -- ---------- cosmétique ----------
 
-function Controller:pulse(unit_id, kind)
-  self.anim[unit_id] = { kind = kind, t = 0 }
+-- `delay` (optionnel, 2026-09-02, demande explicite -- "si l'aventurier perd
+-- des PV malgré le bouclier, il faut clairement l'indiquer APRÈS la
+-- disparition de l'animation du bouclier") : même idiome que
+-- Controller:spawn_shield_fx/pop_status -- `t` négatif, "pas encore son
+-- tour", voir le garde `a.t < 0` dans unit_anim_transform (view.lua).
+function Controller:pulse(unit_id, kind, delay)
+  self.anim[unit_id] = { kind = kind, t = -(delay or 0) }
 end
 
 --- Joue un son après `delay` secondes plutôt qu'immédiatement (2026-08-21,
@@ -1352,16 +1357,23 @@ function Controller:snapshot_units()
   return out
 end
 
-function Controller:spawn_floater(unit_id, amount, kind)
+-- `delay` (optionnel, 2026-09-02, voir le commentaire sur Controller:pulse
+-- ci-dessus -- même besoin ici pour le nombre de PV perdus) : même idiome
+-- `t` négatif, garde correspondant à ajouter côté rendu (draw_floaters).
+function Controller:spawn_floater(unit_id, amount, kind, delay)
   local r = View.unit_rect(self.state, unit_id)
   if not r then return end
   self.floaters[#self.floaters + 1] = {
     x = r.x + r.w / 2 + (math.random() - 0.5) * 22, y = r.y + r.h * 0.35,
-    text = (amount > 0 and "+" or "") .. amount, kind = kind, t = 0,
+    text = (amount > 0 and "+" or "") .. amount, kind = kind, t = -(delay or 0),
   }
 end
 
-function Controller:spawn_impact(unit_id)
+-- `delay` (optionnel, 2026-09-02, même besoin/idiome que ci-dessus) :
+-- reporté sur CHAQUE particule du burst, pas un seul délai partagé -- elles
+-- restent indépendantes une fois écloses (voir draw_particles, garde
+-- correspondant à ajouter côté rendu).
+function Controller:spawn_impact(unit_id, delay)
   local r = View.unit_rect(self.state, unit_id)
   if not r then return end
   local cx, cy = r.x + r.w / 2, r.y + r.h / 2
@@ -1369,7 +1381,7 @@ function Controller:spawn_impact(unit_id)
     local angle = math.random() * math.pi * 2
     local speed = 60 + math.random() * 70
     self.particles[#self.particles + 1] = {
-      x = cx, y = cy, vx = math.cos(angle) * speed, vy = math.sin(angle) * speed, t = 0,
+      x = cx, y = cy, vx = math.cos(angle) * speed, vy = math.sin(angle) * speed, t = -(delay or 0),
     }
   end
 end
@@ -1661,11 +1673,29 @@ function Controller:react_to_diff(before, opts)
       end
       return delay
     end
+    -- Bouclier calculé D'ABORD (2026-09-02, demande explicite -- "si
+    -- l'aventurier perd des PV malgré le bouclier, il faut clairement
+    -- l'indiquer APRÈS la disparition de l'animation du bouclier") : il faut
+    -- savoir ICI si CE coup vient de buter (au moins partiellement) dans un
+    -- bouclier pour décider si la perte de PV doit attendre la fin de son
+    -- fondu (self.shield_fx_duration) avant de s'afficher, ou apparaître
+    -- tout de suite comme d'habitude (aucun bouclier impliqué dans ce diff).
+    -- `shield_gained`/`shield_absorbed_hit` sont mutuellement exclusifs : la
+    -- Défense ne peut monter ET descendre dans le MÊME diff (gain de
+    -- bouclier et absorption d'un coup sont toujours 2 appels séparés).
+    local defense_before, defense_now = b.defense or 0, u.defense or 0
+    local absorbed = defense_before - defense_now
+    local shield_gained = defense_now > defense_before
+    local shield_absorbed_hit = not opts.skip_shield_sfx and not shield_gained and absorbed > 0
+
     if u.hp < b.hp then
-      self:pulse(u.id, "shake")
-      self:spawn_floater(u.id, u.hp - b.hp, "damage")
-      self:spawn_impact(u.id)
-      if not hit_played then Sfx.play(hit_sfx); hit_played = true end
+      -- Séquencé APRÈS le fondu de bouclier si ce coup vient de buter dedans
+      -- (2026-09-02) -- sinon affiché tout de suite comme avant.
+      local dmg_delay = unit_delay() + (shield_absorbed_hit and self.shield_fx_duration or 0)
+      self:pulse(u.id, "shake", dmg_delay)
+      self:spawn_floater(u.id, u.hp - b.hp, "damage", dmg_delay)
+      self:spawn_impact(u.id, dmg_delay)
+      if not hit_played then self:schedule_sfx(hit_sfx, dmg_delay); hit_played = true end
     elseif u.hp > b.hp then
       self:spawn_floater(u.id, u.hp - b.hp, "heal")
     end
@@ -1680,12 +1710,15 @@ function Controller:react_to_diff(before, opts)
     for _, k in ipairs(STATUS_KEYS) do
       if (u[k] or 0) > b[k] then self:pop_status(u.id, k, unit_delay()) end
     end
-    local defense_before, defense_now = b.defense or 0, u.defense or 0
-    local absorbed = defense_before - defense_now
-    if defense_now > defense_before then
+    -- Gain vs absorption, désormais 2 sons ET 2 visuels distincts (2026-09-02,
+    -- demande explicite -- "le son est un 'wouch' montant avec le bouclier
+    -- qui monte légèrement" au gain, "le bouclier tremble" à l'impact) : la
+    -- distinction visuelle vit dans draw_shield_fx (view.lua, sur `s.amount`,
+    -- déjà la donnée qui sépare les 2 cas) -- ici, seul le SON change de nom.
+    if shield_gained then
       self:spawn_shield_fx(u.id, nil, unit_delay())
-      if not shield_played then Sfx.play("shield"); shield_played = true end
-    elseif not opts.skip_shield_sfx and absorbed > 0 then
+      if not shield_played then Sfx.play("shield_gain"); shield_played = true end
+    elseif shield_absorbed_hit then
       self:spawn_shield_fx(u.id, absorbed, unit_delay())
       if not shield_played then Sfx.play("shield"); shield_played = true end
     end
