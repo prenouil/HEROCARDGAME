@@ -126,18 +126,32 @@ end
 -- donné. Jamais mêlée à la génération normale du mode Infini (voir
 -- "boss_only" sur ces templates dans enemies.lua, filtré hors du pool de
 -- Encounter.generate_encounter par random_pool ci-dessus).
-function Encounter.boss_encounter(uid_gen, rng, biome)
-  if biome == "foret" then return Encounter.homme_arbre_encounter(uid_gen, rng) end
-  if biome == "canyon" then return Encounter.aigle_encounter(uid_gen, rng) end
-  if biome == "catacombes" then return Encounter.roi_squelette_encounter(uid_gen, rng) end
-  if biome == "volcan" then return Encounter.elementaire_feu_encounter(uid_gen, rng) end
+-- Boss (id Enemies.templates) associé à chaque biome (2026-09-02, extrait ici
+-- pour être réutilisable par l'écran "Choisis un boss" -- voir
+-- Controller:enter_boss_select/View.boss_select_buttons -- sans dupliquer
+-- cette association ailleurs).
+Encounter.BOSS_BY_BIOME = {
+  foret = "homme-arbre", canyon = "aigle", catacombes = "roi-squelette", volcan = "elementaire-feu",
+}
+
+-- `level` (2026-09-02, demande explicite -- écran "Choisis un boss", boutons
+-- -/+ de 1 à 9) : optionnel, défaut 1 comme avant cette demande -- s'applique
+-- au boss ET à ses éventuels sbires, uniformément (le seul niveau qu'un run
+-- normal connaisse est déjà "un par ennemi de la rencontre", jamais un niveau
+-- de boss distinct de ses sbires).
+function Encounter.boss_encounter(uid_gen, rng, biome, level)
+  if biome == "foret" then return Encounter.homme_arbre_encounter(uid_gen, rng, level) end
+  if biome == "canyon" then return Encounter.aigle_encounter(uid_gen, rng, level) end
+  if biome == "catacombes" then return Encounter.roi_squelette_encounter(uid_gen, rng, level) end
+  if biome == "volcan" then return Encounter.elementaire_feu_encounter(uid_gen, rng, level) end
   local pool = { "foret", "canyon", "catacombes", "volcan" }
-  return Encounter.boss_encounter(uid_gen, rng, pool[rng:random(#pool)])
+  return Encounter.boss_encounter(uid_gen, rng, pool[rng:random(#pool)], level)
 end
 
---- 1 Homme Arbre + 4 Pousses d'Arbre, toujours niveau 1 -- voir le
+--- 1 Homme Arbre + 4 Pousses d'Arbre, niveau 1 par défaut -- voir le
 -- commentaire de Encounter.boss_encounter ci-dessus.
-function Encounter.homme_arbre_encounter(uid_gen, rng)
+function Encounter.homme_arbre_encounter(uid_gen, rng, level)
+  level = level or 1
   local homme_arbre = Enemies.by_id("homme-arbre")
   local pousse = Enemies.by_id("pousse")
   -- Ordre [pousse, pousse, homme-arbre, pousse, pousse] (2026-08-21, demande
@@ -146,11 +160,11 @@ function Encounter.homme_arbre_encounter(uid_gen, rng)
   -- pile au centre avec 2 Pousses de chaque côté, sans logique de layout dédiée.
   local instances = {}
   for _ = 1, 2 do
-    instances[#instances + 1] = Encounter.instantiate_enemy(pousse, 1, uid_gen, rng)
+    instances[#instances + 1] = Encounter.instantiate_enemy(pousse, level, uid_gen, rng)
   end
-  instances[#instances + 1] = Encounter.instantiate_enemy(homme_arbre, 1, uid_gen, rng)
+  instances[#instances + 1] = Encounter.instantiate_enemy(homme_arbre, level, uid_gen, rng)
   for _ = 1, 2 do
-    instances[#instances + 1] = Encounter.instantiate_enemy(pousse, 1, uid_gen, rng)
+    instances[#instances + 1] = Encounter.instantiate_enemy(pousse, level, uid_gen, rng)
   end
   return instances
 end
@@ -160,9 +174,9 @@ end
 -- sbire -- tout son budget de PV/tours est porté par lui seul (voir
 -- enemies.lua, hp_base plus haut que celui de l'Homme Arbre pour compenser
 -- l'absence de sbires à abattre séparément).
-function Encounter.aigle_encounter(uid_gen, rng)
+function Encounter.aigle_encounter(uid_gen, rng, level)
   local aigle = Enemies.by_id("aigle")
-  return { Encounter.instantiate_enemy(aigle, 1, uid_gen, rng) }
+  return { Encounter.instantiate_enemy(aigle, level or 1, uid_gen, rng) }
 end
 
 --- Boss des Catacombes (2026-09-01, demande explicite -- "roi squelette") :
@@ -171,25 +185,26 @@ end
 -- COMMUN "squelette" (Squelette Archer) comme sbires plutôt qu'un minion
 -- dédié, pour que la mécanique "relève ses sbires tombés" du Roi Squelette
 -- (voir enemies.lua) fasse directement écho au Prêtre Déchu du même biome.
-function Encounter.roi_squelette_encounter(uid_gen, rng)
+function Encounter.roi_squelette_encounter(uid_gen, rng, level)
+  level = level or 1
   local roi = Enemies.by_id("roi-squelette")
   local squelette = Enemies.by_id("squelette")
   local instances = {}
   for _ = 1, 2 do
-    instances[#instances + 1] = Encounter.instantiate_enemy(squelette, 1, uid_gen, rng)
+    instances[#instances + 1] = Encounter.instantiate_enemy(squelette, level, uid_gen, rng)
   end
-  instances[#instances + 1] = Encounter.instantiate_enemy(roi, 1, uid_gen, rng)
+  instances[#instances + 1] = Encounter.instantiate_enemy(roi, level, uid_gen, rng)
   for _ = 1, 2 do
-    instances[#instances + 1] = Encounter.instantiate_enemy(squelette, 1, uid_gen, rng)
+    instances[#instances + 1] = Encounter.instantiate_enemy(squelette, level, uid_gen, rng)
   end
   return instances
 end
 
 --- Boss du Volcan (2026-09-01, demande explicite -- "élémentaire de feu") :
 -- seul, comme l'Aigle Géant -- voir son commentaire ci-dessus.
-function Encounter.elementaire_feu_encounter(uid_gen, rng)
+function Encounter.elementaire_feu_encounter(uid_gen, rng, level)
   local elementaire = Enemies.by_id("elementaire-feu")
-  return { Encounter.instantiate_enemy(elementaire, 1, uid_gen, rng) }
+  return { Encounter.instantiate_enemy(elementaire, level or 1, uid_gen, rng) }
 end
 
 function Encounter.summary(enemies)

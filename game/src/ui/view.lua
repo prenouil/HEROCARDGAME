@@ -20,6 +20,7 @@ local Cards = require("src.data.cards")
 local Temple = require("src.rules.temple")
 local Game = require("src.rules.game")
 local Deck = require("src.rules.deck")
+local Encounter = require("src.rules.encounter")
 
 local View = {}
 
@@ -357,7 +358,7 @@ do
   -- retrait complet hors scope de cette demande.
   local defs = {
     { id = "run", label = "Jouer un run" },
-    { id = "boss", label = "Tester le boss" },
+    { id = "boss", label = "Tester un boss" },
     { id = "options", label = "Options" },
     { id = "quit", label = "Quitter" },
   }
@@ -376,6 +377,45 @@ end
 -- start_boss_combat) -- gardé nommé génériquement au cas où un futur écran
 -- à bouton unique en ait de nouveau besoin.
 View.back_button = { x = W / 2 - 90, y = H / 2 + 40, w = 180, h = 40, label = "Retour" }
+
+-- Écran "Choisis un boss" (2026-09-02, demande explicite -- "Tester un boss"
+-- passe désormais par la sélection d'équipe normale, PUIS ce choix, plutôt
+-- que de lancer directement l'équipe/le boss historiques ; ÉTENDU le même
+-- jour deux fois -- portrait + "?" d'infobulle par carte, clic = sélectionne
+-- (ne lance plus directement), gros bouton "Combattre" séparé ; PUIS un
+-- réglage de niveau UNIQUE (pas un par carte) entre "Retour" et "Combattre",
+-- niveau au-dessus/boutons -/+ en dessous) : une carte par boss jouable
+-- (Encounter.BOSS_BY_BIOME, toujours 4 -- un par biome) -- voir
+-- Controller:select_boss/adjust_boss_level/launch_boss_fight.
+-- Toutes les constantes/locaux de ce bloc restent DANS le `do...end`
+-- (2026-09-02, limite des 200 locaux par chunk déjà serrée dans ce fichier --
+-- voir DraftFx plus loin pour le même geste) : rien ne doit survivre en local
+-- de haut niveau au-delà des champs `View.boss_select_*` eux-mêmes.
+View.boss_select_buttons = {}
+View.BOSS_SELECT_PORTRAIT = 120
+do
+  local card_w, card_h, card_gap, y0 = 260, 220, 20, 170
+  local portrait = View.BOSS_SELECT_PORTRAIT
+  local total_w = 4 * card_w + 3 * card_gap
+  local x0 = W / 2 - total_w / 2
+  for i, biome in ipairs(Enemies.ALL_BIOMES) do
+    local boss = Enemies.by_id(Encounter.BOSS_BY_BIOME[biome])
+    local cx, cy = x0 + (i - 1) * (card_w + card_gap), y0
+    View.boss_select_buttons[i] = {
+      biome = biome, boss_id = boss.id, boss_icon = boss.icon, boss_label = boss.label,
+      name = boss.name, biome_name = Enemies.BIOME_NAMES[biome],
+      x = cx, y = cy, w = card_w, h = card_h,
+      portrait_x = cx + (card_w - portrait) / 2, portrait_y = cy + 18, portrait_size = portrait,
+    }
+  end
+  local last = View.boss_select_buttons[#View.boss_select_buttons]
+  local row_y = last.y + last.h + 34
+  View.boss_select_combat_button = { x = last.x + last.w - 200, y = row_y, w = 200, h = 60, label = "Combattre" }
+  View.boss_select_back_button = { x = x0, y = row_y, w = 180, h = 60, label = "Retour" }
+  View.boss_select_level_text_rect = { x = W / 2 - 70, y = row_y, w = 140, h = 24 }
+  View.boss_select_level_minus = { x = W / 2 - 60, y = row_y + 28, w = 40, h = 32 }
+  View.boss_select_level_plus = { x = W / 2 + 20, y = row_y + 28, w = 40, h = 32 }
+end
 
 -- Écran "La Forge" (2026-08-28, demande explicite -- remplace l'ancien
 -- panneau "Forge" de feuDeCamp, voir Controller:enter_forge_screen) : jusqu'à
@@ -2361,6 +2401,29 @@ local function tooltip_lines(controller)
     local lines = {}
     add_described_line(lines, desc, {})
     return def.name, lines
+  elseif h.kind == "boss_preview" then
+    -- Écran "Choisis un boss" (2026-09-02, demande explicite -- "il est
+    -- important d'ajouter les info bulles... les valeurs doivent dépendre
+    -- du niveau choisi") : `h.target` porte le biome (pas un ennemi réel,
+    -- aucune instance n'existe encore) -- réutilise `template.moves_info`,
+    -- déjà partagé avec l'infobulle "enemy" en combat (voir plus haut) pour
+    -- ne jamais avoir 2 formulations différentes du même coup. Niveau lu sur
+    -- controller.boss_select.level (réglage unique, pas par carte).
+    local biome = h.target
+    local template = Enemies.by_id(Encounter.BOSS_BY_BIOME[biome])
+    if not template then return nil end
+    local level = (controller.boss_select and controller.boss_select.level) or 1
+    local lines = {}
+    local seen = {}
+    if template.id == "homme-arbre" then
+      lines[#lines + 1] = "Sensible au feu : les dégâts de feu infligent +50%."
+    end
+    for _, m in ipairs(template.moves_info(level)) do
+      add_described_line(lines, m.text, seen, m.name .. " — ")
+    end
+    local lo, hi = Enemies.scaled_range(template.hp_base, level)
+    lines[#lines + 1] = "PV max " .. lo .. "-" .. hi
+    return template.name .. " Nv." .. level, lines
   end
   return nil
 end
@@ -3825,7 +3888,11 @@ local function draw_team_select(controller)
   -- police énorme avant le tout premier correctif). Taille 16 -> 24
   -- (2026-08-30, demande explicite -- "doit être écrit beaucoup plus gros") :
   -- décalage remis à l'échelle dans la même proportion (16 -> 24).
-  text(lb.label, lb.x, lb.y + lb.h / 2 - 24, lb.w, 24, ready and Theme.bg or Theme.muted, "center")
+  -- Label "Affronter le boss" en mode "boss_test" (2026-09-02, demande
+  -- explicite) -- lb.label reste "Partir à l'aventure", la valeur par défaut
+  -- pour "infini"/"bounded".
+  local launch_label = ts.mode == "boss_test" and "Affronter\nle boss" or lb.label
+  text(launch_label, lb.x, lb.y + lb.h / 2 - 24, lb.w, 24, ready and Theme.bg or Theme.muted, "center")
 
   -- "Auto-fill" (2026-09-02) : style plus discret que "Partir à l'aventure"
   -- (toujours actif, pas de pulse "prêt") -- juste au-dessus.
@@ -3937,6 +4004,75 @@ local function draw_options(controller)
   Background.draw(nil, W, H)
   text("Pas d'options pour le moment", 0, H / 2 - 60, W, 20, Theme.text)
   draw_menu_style_button(View.back_button)
+end
+
+-- Écran "Choisis un boss" (2026-09-02) : voir View.boss_select_buttons.
+-- Petit bouton carré "-"/"+" (2026-09-02) : même style que draw_menu_style_button
+-- mais sans label multi-mot, juste le symbole -- factorisé pour les 2 boutons
+-- de chaque carte boss ci-dessous.
+local function draw_boss_step_button(r, symbol)
+  set(Theme.panel_light)
+  love.graphics.rectangle("fill", r.x, r.y, r.w, r.h, 8, 8)
+  set(Theme.muted); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 8, 8)
+  love.graphics.setLineWidth(1)
+  text(symbol, r.x, r.y + r.h / 2 - 8, r.w, 16, Theme.text, "center")
+end
+
+local function draw_boss_select(controller)
+  Background.draw(nil, W, H)
+  text("Choisis un boss", 0, 70, W, 24, Theme.text)
+  text("Clique un boss pour le sélectionner, règle le niveau (1-9), puis Combattre.", 0, 102, W, 12, Theme.muted)
+  local bs = controller.boss_select
+  local level = bs and (bs.level or 1) or 1
+  for _, b in ipairs(View.boss_select_buttons) do
+    local selected = bs and bs.selected_biome == b.biome
+    set(selected and Theme.heal or Theme.panel_light)
+    love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 12, 12)
+    set(selected and Theme.accent or Theme.muted); love.graphics.setLineWidth(selected and 3 or 2)
+    love.graphics.rectangle("line", b.x, b.y, b.w, b.h, 12, 12)
+    love.graphics.setLineWidth(1)
+
+    draw_enemy_icon(b.boss_id, b.boss_icon, b.boss_label, b.portrait_x, b.portrait_y, b.portrait_size, b.portrait_size, Theme.text)
+    local name_y = b.portrait_y + b.portrait_size + 10
+    text(b.name, b.x, name_y, b.w, 14, selected and Theme.bg or Theme.text, "center")
+    text(b.biome_name, b.x, name_y + 18, b.w, 11, selected and Theme.bg or Theme.muted, "center")
+
+    -- "?" d'infobulle (2026-09-02, demande explicite -- "ne pas oublier de
+    -- mettre le '?'") : même convention que partout ailleurs, voir
+    -- draw_tooltip_hint -- coin bas-droit de la carte, valeurs de l'infobulle
+    -- dépendantes du niveau réglé (voir tooltip_lines, h.kind == "boss_preview").
+    love.graphics.push()
+    love.graphics.translate(b.x, b.y)
+    draw_tooltip_hint(b.w, b.h, selected and Theme.bg or Theme.text)
+    love.graphics.pop()
+  end
+
+  -- Réglage de niveau UNIQUE (2026-09-02, demande explicite -- "n'a pas
+  -- besoin d'être répété pour chaque boss... entre retour et combattre...
+  -- niveau sur la première ligne puis les boutons sur la deuxième") :
+  -- s'applique au boss qui sera lancé, quel qu'il soit -- voir
+  -- Controller:adjust_boss_level (plus de biome en paramètre).
+  local lt = View.boss_select_level_text_rect
+  text("Niveau " .. level, lt.x, lt.y, lt.w, 20, Theme.text, "center")
+  draw_boss_step_button(View.boss_select_level_minus, "-")
+  draw_boss_step_button(View.boss_select_level_plus, "+")
+
+  local ready = bs and bs.selected_biome ~= nil
+  local cb = View.boss_select_combat_button
+  if ready then
+    local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 4)
+    set(Theme.accent, 0.35 + 0.35 * pulse)
+    love.graphics.rectangle("fill", cb.x - 5, cb.y - 5, cb.w + 10, cb.h + 10, 12, 12)
+  end
+  set(ready and Theme.heal or Theme.panel_light)
+  love.graphics.rectangle("fill", cb.x, cb.y, cb.w, cb.h, 10, 10)
+  set(ready and Theme.accent or Theme.muted); love.graphics.setLineWidth(3)
+  love.graphics.rectangle("line", cb.x, cb.y, cb.w, cb.h, 10, 10)
+  love.graphics.setLineWidth(1)
+  text(cb.label, cb.x, cb.y + cb.h / 2 - 12, cb.w, 24, ready and Theme.bg or Theme.muted, "center")
+
+  draw_menu_style_button(View.boss_select_back_button)
 end
 
 -- Victoire sur le boss (2026-08-21, demande explicite -- "il faut enlever le
@@ -4198,6 +4334,7 @@ function View.draw(controller)
   -- de toute la fonction pour un seul appel final commun.
   if controller.screen == "menu" then draw_menu(controller); draw_pause_menu(controller); return end
   if controller.screen == "options" then draw_options(controller); draw_pause_menu(controller); return end
+  if controller.screen == "boss_select" then draw_boss_select(controller); draw_tooltip(controller); draw_pause_menu(controller); return end
   if controller.screen == "bossVictory" then draw_boss_victory(controller); draw_pause_menu(controller); return end
   if controller.screen == "biome_intro" then draw_biome_intro(controller); draw_pause_menu(controller); return end
   if controller.screen == "team_select" then draw_team_select(controller); draw_deck_view(controller); draw_pause_menu(controller); return end

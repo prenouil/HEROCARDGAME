@@ -573,19 +573,24 @@ function Game.start_next_combat(state)
 end
 
 --- Combat de boss autonome (2026-08-21, demande explicite) : bouton "Tester
--- le boss" au menu -- mêmes fondations qu'un run normal (nouveaux héros
+-- un boss" au menu -- mêmes fondations qu'un run normal (nouveaux héros
 -- pleine vie, nouveau deck, nouveaux flux aléatoires) mais rencontre FIXE
 -- (Encounter.boss_encounter) plutôt que tirée par le budget. Ne touche jamais
 -- `state.run.combat_index`/le mode de run -- ce n'est pas un run normal, voir
--- Controller:start_boss_test (self.run_mode reste nil).
-function Game.start_boss_test(state, seed, selected_ids)
+-- Controller:start_boss_test (self.run_mode reste nil). `biome` (2026-09-02,
+-- demande explicite -- écran "Choisis un boss" après la sélection d'équipe) :
+-- choisit le boss précis (voir Encounter.BOSS_BY_BIOME) -- absent, retombe
+-- sur le tirage aléatoire d'avant (Encounter.boss_encounter), jamais un cas
+-- d'erreur. `level` (même demande, boutons -/+ 1-9 sur l'écran de choix) :
+-- transmis tel quel, absent = niveau 1 (voir Encounter.boss_encounter).
+function Game.start_boss_test(state, seed, selected_ids, biome, level)
   selected_ids = selected_ids or Heroes.DEFAULT_PARTY_IDS
   local heroes = {}
   for i, id in ipairs(selected_ids) do heroes[i] = fresh_hero(Heroes.by_id(id)) end
   state.heroes = heroes
   state.run = { combat_index = 1, is_boss = true }
   state.rng = Game.new_rng_streams(seed)
-  state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter)
+  state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter, biome, level)
   state.deck = Deck.build_starting_deck(selected_ids, function() return Game.next_uid(state) end, state.rng.deck)
   state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
   state.turn = 1; state.over = false; state.energy = 0

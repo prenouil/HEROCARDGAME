@@ -309,7 +309,7 @@ function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "menu" -- "menu" | "options" | "team_select" | "playing" | "victory" | "campfire" | "forge" | "temple" | "refuge" | "biome_intro" | "bossVictory" | "defeat"
+  self.screen = "menu" -- "menu" | "options" | "team_select" | "boss_select" | "playing" | "victory" | "campfire" | "forge" | "temple" | "refuge" | "biome_intro" | "bossVictory" | "defeat"
   -- Mode de run choisi au menu (2026-08-21, demande explicite) : "infini"
   -- (illimité, l'ancien comportement par défaut), "bounded" (BOUNDED_COMBAT_COUNT
   -- combats -- 9, 2026-08-30, était 5 -- puis l'Homme Arbre, voir
@@ -360,6 +360,21 @@ function Controller.new()
   -- card_anims = {{def, from, to, elapsed, duration, mode="in"|"out"}, ...} },
   -- voir Controller:enter_team_select.
   self.team_select = nil
+  -- Écran "Choisis un boss" (2026-09-02, demande explicite -- "Tester un
+  -- boss" passe désormais par la sélection d'équipe normale, PUIS ce choix,
+  -- ÉTENDU le même jour pour choisir aussi le niveau et exiger une vraie
+  -- sélection avant de pouvoir combattre) : { selected_ids = {id,...},
+  -- selected_biome = nil | "foret"|"canyon"|"catacombes"|"volcan",
+  -- level = 1-9 (UN SEUL réglage partagé par les 4 boss, pas un par carte --
+  -- voir Controller:adjust_boss_level) }, voir Controller:enter_boss_select/
+  -- select_boss/launch_boss_fight, View.boss_select_buttons.
+  -- `self.boss_test_biome`/`self.boss_test_level` : dernier boss/niveau
+  -- choisis, reconduits par "Rejouer" après une défaite
+  -- (restart_after_defeat, input.lua), même logique de confort que
+  -- self.last_selected_ids.
+  self.boss_select = nil
+  self.boss_test_biome = nil
+  self.boss_test_level = nil
   self.draft_picks = nil
   -- Toujours vide désormais (2026-08-30, refonte -- voir
   -- Controller:enter_post_combat_sequence) : un seul évènement "camp" est
@@ -616,11 +631,14 @@ end
 
 --- Entre sur l'écran de choix d'équipe (2026-08-29, demande explicite --
 -- avant chaque run, choisir 4 des 6 `Heroes.defs`) : appelé au clic sur
--- "Jouer un run"/"Mode infini" au menu (voir menu_click, input.lua), PAS sur
--- "Tester le boss" (reste un raccourci fixe à l'équipe historique, voir
--- Controller:start_boss_test -- aucune sélection n'a de sens pour un test
--- isolé). `mode` ("infini"/"bounded") est juste mémorisé ici, transmis tel
--- quel à Controller:reset_run une fois "Partir à l'aventure" cliqué.
+-- "Jouer un run"/"Mode infini" au menu (voir menu_click, input.lua), ET
+-- depuis 2026-09-02 aussi sur "Tester un boss" (mode "boss_test" -- ne
+-- lance plus directement l'équipe historique, voir son commentaire plus
+-- bas). `mode` ("infini"/"bounded"/"boss_test") est juste mémorisé ici :
+-- "infini"/"bounded" sont transmis tels quels à Controller:reset_run une
+-- fois "Partir à l'aventure" cliqué (voir Controller:team_select_launch) ;
+-- "boss_test" route plutôt vers Controller:enter_boss_select (le bouton
+-- devient "Affronter le boss", voir draw_team_select, view.lua).
 function Controller:enter_team_select(mode)
   self.screen = "team_select"
   local available = {}
@@ -941,6 +959,10 @@ function Controller:team_select_launch()
   Sfx.play("woosh")
   local mode, selected_ids = ts.mode, ts.selected_ids
   self.team_select = nil
+  if mode == "boss_test" then
+    self:enter_boss_select(selected_ids)
+    return
+  end
   self:reset_run(mode, selected_ids)
 end
 
@@ -965,6 +987,10 @@ function Controller:team_select_autofill()
   Sfx.play("woosh")
   local mode = ts.mode
   self.team_select = nil
+  if mode == "boss_test" then
+    self:enter_boss_select(selected_ids)
+    return
+  end
   self:reset_run(mode, selected_ids)
 end
 
@@ -1095,19 +1121,70 @@ function Controller:play_enter_run_combat_intro()
   self:play_turn_start_sequence()
 end
 
---- "Tester le boss" au menu (2026-08-21, demande explicite) : combat autonome
--- contre l'Homme Arbre + ses 4 Pousses d'Arbre (voir Game.start_boss_test),
--- héros frais comme un nouveau run. `run_mode = "boss_test"` (ni "infini" ni
--- "bounded") : "Rejouer" après une défaite relance le même test plutôt que de
--- retomber sur le mode infini, et une victoire ramène au menu plutôt que
--- d'enchaîner sur un faux "combat 2" -- voir Input.mousepressed et
--- Controller:advance_to_next_combat.
-function Controller:start_boss_test()
+--- Écran "Choisis un boss" (2026-09-02, demande explicite) : entre APRÈS la
+-- sélection d'équipe normale (voir Controller:team_select_launch/autofill,
+-- mode "boss_test"), avant de lancer le combat lui-même -- liste les 4 boss
+-- jouables (Encounter.BOSS_BY_BIOME), chacun niveau 1 par défaut.
+function Controller:enter_boss_select(selected_ids)
+  self.screen = "boss_select"
+  self.boss_select = { selected_ids = selected_ids, selected_biome = nil, level = 1 }
+end
+
+--- Clic sur une carte boss (2026-09-02, demande explicite -- "on ne clique
+-- plus pour passer au combat, on clique sur le boss pour le sélectionner") :
+-- se contente de le marquer sélectionné (surbrillance, voir draw_boss_select)
+-- -- ne lance plus rien directement, voir Controller:launch_boss_fight pour
+-- le vrai lancement via le bouton "Combattre".
+function Controller:select_boss(biome)
+  local bs = self.boss_select
+  if not bs then return end
+  if bs.selected_biome ~= biome then Sfx.play("hover") end
+  bs.selected_biome = biome
+end
+
+--- Boutons "-"/"+" du réglage de niveau (2026-09-02, demande explicite --
+-- UN SEUL réglage partagé par les 4 boss, pas un par carte, affiché entre
+-- "Retour" et "Combattre") : 1 à 9, indépendant de la sélection -- s'applique
+-- au boss qui sera lancé, quel qu'il soit.
+function Controller:adjust_boss_level(delta)
+  local bs = self.boss_select
+  if not bs then return end
+  bs.level = math.max(1, math.min(9, (bs.level or 1) + delta))
+end
+
+--- "Combattre" (2026-09-02, demande explicite -- gros bouton en bas à
+-- droite, grisé/inerte tant qu'aucun boss n'est sélectionné, voir
+-- draw_boss_select) : lance le test avec l'équipe et le boss/niveau choisis.
+function Controller:launch_boss_fight()
+  local bs = self.boss_select
+  if not bs or not bs.selected_biome then return end
+  local biome, level, selected_ids = bs.selected_biome, bs.level or 1, bs.selected_ids
+  self.boss_select = nil
+  self:start_boss_test(biome, selected_ids, level)
+end
+
+--- "Tester un boss" au menu (2026-08-21, demande explicite -- étendu le
+-- 2026-09-02 pour choisir l'équipe, le boss précis ET son niveau, au lieu
+-- d'un raccourci fixe) : combat autonome contre le boss choisi + ses
+-- éventuels sbires (voir Game.start_boss_test), héros frais comme un nouveau
+-- run. `run_mode = "boss_test"` (ni "infini" ni "bounded") : "Rejouer" après
+-- une défaite relance le même test (même boss, même niveau, même équipe --
+-- voir Input.mousepressed) plutôt que de retomber sur le mode infini, et une
+-- victoire ramène au menu plutôt que d'enchaîner sur un faux "combat 2" --
+-- voir Controller:advance_to_next_combat. `biome`/`level`/`selected_ids`
+-- absents (ex. "Rejouer") : reconduisent self.boss_test_biome/
+-- self.boss_test_level/self.last_selected_ids, déjà mémorisés au premier
+-- lancement.
+function Controller:start_boss_test(biome, selected_ids, level)
   self.screen = "playing"
   self.run_mode = "boss_test"
+  self.boss_test_biome = biome or self.boss_test_biome
+  self.boss_test_level = level or self.boss_test_level or 1
+  selected_ids = selected_ids or self.last_selected_ids or Heroes.DEFAULT_PARTY_IDS
+  self.last_selected_ids = selected_ids
   self:clear_animation_state()
   self.last_post_combat_event = nil
-  Game.start_boss_test(self.state)
+  Game.start_boss_test(self.state, nil, selected_ids, self.boss_test_biome, self.boss_test_level)
   if self.state.over then self:handle_combat_victory(); return end
   self.seq:push(function() end, self:play_enemy_entrance_sequence())
   self:play_turn_start_sequence()

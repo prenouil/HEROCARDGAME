@@ -63,7 +63,7 @@ local function menu_click(controller, x, y)
   if controller.screen == "menu" then
     for _, b in ipairs(View.menu_buttons) do
       if View.point_in(b, x, y) then
-        if b.id == "boss" then controller:start_boss_test()
+        if b.id == "boss" then controller:enter_team_select("boss_test")
         elseif b.id == "run" then controller:enter_team_select("bounded")
         elseif b.id == "options" then controller:enter_options()
         elseif b.id == "quit" then love.event.quit()
@@ -75,6 +75,23 @@ local function menu_click(controller, x, y)
   end
   if controller.screen == "options" then
     if View.point_in(View.back_button, x, y) then controller:back_to_menu() end
+    return true
+  end
+  -- Écran "Choisis un boss" (2026-09-02, étendu le même jour -- niveau
+  -- réglable + sélection avant lancement) : le réglage de niveau est UNIQUE
+  -- (partagé, plus un par carte -- voir View.boss_select_level_minus/plus)
+  -- et testé AVANT le corps des cartes ; un clic sur une carte sélectionne ce
+  -- boss (ne lance plus rien directement, voir Controller:select_boss).
+  -- "Combattre" : inerte tant qu'aucun boss n'est sélectionné (voir
+  -- draw_boss_select).
+  if controller.screen == "boss_select" then
+    if View.point_in(View.boss_select_level_minus, x, y) then controller:adjust_boss_level(-1); return true end
+    if View.point_in(View.boss_select_level_plus, x, y) then controller:adjust_boss_level(1); return true end
+    for _, b in ipairs(View.boss_select_buttons) do
+      if View.point_in(b, x, y) then controller:select_boss(b.biome); return true end
+    end
+    if View.point_in(View.boss_select_combat_button, x, y) then controller:launch_boss_fight(); return true end
+    if View.point_in(View.boss_select_back_button, x, y) then controller:back_to_menu() end
     return true
   end
   return false
@@ -89,6 +106,15 @@ local function menu_hovering(controller, x, y)
   end
   if controller.screen == "options" then
     return View.point_in(View.back_button, x, y)
+  end
+  if controller.screen == "boss_select" then
+    if View.point_in(View.boss_select_level_minus, x, y) or View.point_in(View.boss_select_level_plus, x, y) then
+      return true
+    end
+    for _, b in ipairs(View.boss_select_buttons) do
+      if View.point_in(b, x, y) then return true end
+    end
+    return View.point_in(View.boss_select_combat_button, x, y) or View.point_in(View.boss_select_back_button, x, y)
   end
   return false
 end
@@ -511,7 +537,7 @@ end
 local function is_hovering_clickable_tap(controller, x, y)
   if controller.pause_menu_open then return pause_menu_hovering(controller, x, y) end
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
-  if controller.screen == "menu" or controller.screen == "options" then
+  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
     return menu_hovering(controller, x, y)
   end
   if controller.screen == "team_select" then return team_select_hovering(controller, x, y) end
@@ -571,7 +597,7 @@ end
 local function is_hovering_clickable_arrow(controller, x, y)
   if controller.pause_menu_open then return pause_menu_hovering(controller, x, y) end
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
-  if controller.screen == "menu" or controller.screen == "options" then
+  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
     return menu_hovering(controller, x, y)
   end
   if controller.screen == "team_select" then return team_select_hovering(controller, x, y) end
@@ -634,6 +660,17 @@ function Input.mousemoved(controller, x, y)
   if controller.pause_menu_open then controller:set_hover(nil, nil); return end
   if controller.deck_view_open then controller:set_hover(nil, nil); return end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
+    controller:set_hover(nil, nil)
+    return
+  end
+
+  -- Écran "Choisis un boss" (2026-09-02, demande explicite -- infobulle par
+  -- carte, valeurs dépendantes du niveau réglé) : hors des 4 cartes, aucune
+  -- infobulle (Retour/Combattre/le réglage de niveau n'en ont pas besoin).
+  if controller.screen == "boss_select" then
+    for _, b in ipairs(View.boss_select_buttons) do
+      if View.point_in(b, x, y) then controller:set_hover("boss_preview", b.biome); return end
+    end
     controller:set_hover(nil, nil)
     return
   end
