@@ -12,6 +12,9 @@ local Temple = require("src.rules.temple")
 -- (Heroes.defs) et leurs cartes (Cards.list, filtrées par class_id).
 local Heroes = require("src.data.heroes")
 local Cards = require("src.data.cards")
+-- Écran "Construis ton deck" ("Run Solo", 2026-09-02) : Deck.starting_cards_for_class
+-- pré-remplit la partie basse, Deck.shuffle mélange le deck final au lancement.
+local Deck = require("src.rules.deck")
 local Sequencer = require("src.util.sequencer")
 -- Dépendance à la UI (rects de layout, purs -- aucun appel love.graphics dedans)
 -- nécessaire pour savoir D'OÙ une carte part visuellement quand elle est piochée
@@ -309,7 +312,7 @@ function Controller.new()
   local self = setmetatable({}, Controller)
   self.state = Game.new_state()
   self.seq = Sequencer.new()
-  self.screen = "menu" -- "menu" | "options" | "team_select" | "boss_select" | "playing" | "victory" | "campfire" | "forge" | "temple" | "refuge" | "biome_intro" | "bossVictory" | "defeat"
+  self.screen = "menu" -- "menu" | "options" | "team_select" | "boss_select" | "deck_builder" | "playing" | "victory" | "campfire" | "forge" | "temple" | "refuge" | "biome_intro" | "bossVictory" | "defeat"
   -- Mode de run choisi au menu (2026-08-21, demande explicite) : "infini"
   -- (illimité, l'ancien comportement par défaut), "bounded" (BOUNDED_COMBAT_COUNT
   -- combats -- 9, 2026-08-30, était 5 -- puis l'Homme Arbre, voir
@@ -375,6 +378,15 @@ function Controller.new()
   self.boss_select = nil
   self.boss_test_biome = nil
   self.boss_test_level = nil
+  -- Écran "Construis ton deck" ("Run Solo", 2026-09-02, demande explicite) :
+  -- { hero_id, top_defs, bottom_cards = {{uid,def},...}, uid_counter,
+  -- top_scroll, bottom_scroll, fading_cards, reflow_from, reflow_t,
+  -- reflow_duration }, voir Controller:enter_deck_builder. `solo_test_*` :
+  -- dernier aventurier/deck lancés, reconduits par "Rejouer" après une
+  -- défaite, même logique de confort que boss_test_biome ci-dessus.
+  self.deck_builder = nil
+  self.solo_test_hero_id = nil
+  self.solo_test_deck_defs = nil
   self.draft_picks = nil
   -- Toujours vide désormais (2026-08-30, refonte -- voir
   -- Controller:enter_post_combat_sequence) : un seul évènement "camp" est
@@ -639,12 +651,17 @@ end
 -- fois "Partir à l'aventure" cliqué (voir Controller:team_select_launch) ;
 -- "boss_test" route plutôt vers Controller:enter_boss_select (le bouton
 -- devient "Affronter le boss", voir draw_team_select, view.lua).
+-- `max_team_size` (2026-09-02, demande explicite -- "Run Solo", mode "solo") :
+-- 1 seul aventurier au lieu de 4 -- toute la logique de cap/"prêt"/auto-fill
+-- ci-dessous et dans view.lua/input.lua lit CE champ plutôt qu'un 4 en dur,
+-- pour rester correcte pour les 2 tailles sans dupliquer l'écran.
 function Controller:enter_team_select(mode)
   self.screen = "team_select"
   local available = {}
   for _, def in ipairs(Heroes.defs) do available[#available + 1] = def.id end
   self.team_select = {
     mode = mode, available_ids = available, selected_ids = {},
+    max_team_size = (mode == "solo") and 1 or 4,
     focused_id = nil, card_anims = {}, hero_anims = {},
   }
 end
@@ -901,7 +918,7 @@ end
 
 --- "Valider" (2026-08-29) : bascule l'aventurier mis en avant entre les 2
 -- listes -- l'AJOUTE à l'équipe s'il n'y était pas (refusé, sans effet, si
--- l'équipe compte déjà 4 -- bouton visuellement désactivé dans ce cas, voir
+-- l'équipe compte déjà ts.max_team_size -- bouton visuellement désactivé dans ce cas, voir
 -- draw_team_select), ou l'en RETIRE s'il y était déjà ("resélectionné
 -- normalement pour être sorti du groupe" -- le bouton se relabellise
 -- "Retirer" côté vue). Le portrait se déplace vers sa NOUVELLE rangée
@@ -927,7 +944,7 @@ function Controller:team_select_confirm()
     ts.available_ids[#ts.available_ids + 1] = id
     adding = false
   else
-    if #ts.selected_ids >= 4 then return end
+    if #ts.selected_ids >= ts.max_team_size then return end
     ts.selected_ids[#ts.selected_ids + 1] = id
     local index_in_available
     for i, aid in ipairs(ts.available_ids) do if aid == id then index_in_available = i break end end
@@ -949,18 +966,25 @@ function Controller:team_select_confirm()
   ts.focused_id = nil
 end
 
---- "Partir à l'aventure" (2026-08-29) : n'a d'effet qu'à exactement 4
--- aventuriers confirmés (bouton visuellement inerte sinon, voir
--- draw_team_select) -- lance la run avec CETTE sélection précise via
--- Controller:reset_run, qui accepte désormais `selected_ids` en plus de `mode`.
+--- "Partir à l'aventure" (2026-08-29) : n'a d'effet qu'à exactement
+-- `ts.max_team_size` aventuriers confirmés (1 en mode "solo", 4 sinon --
+-- bouton visuellement inerte sinon, voir draw_team_select) -- lance la run
+-- avec CETTE sélection précise via Controller:reset_run (mode "infini"/
+-- "bounded"), ou route vers l'écran suivant pour "boss_test"/"solo" (voir
+-- Controller:enter_boss_select/enter_deck_builder), qui accepte désormais
+-- `selected_ids` en plus de `mode`.
 function Controller:team_select_launch()
   local ts = self.team_select
-  if not ts or #ts.selected_ids ~= 4 then return end
+  if not ts or #ts.selected_ids ~= ts.max_team_size then return end
   Sfx.play("woosh")
   local mode, selected_ids = ts.mode, ts.selected_ids
   self.team_select = nil
   if mode == "boss_test" then
     self:enter_boss_select(selected_ids)
+    return
+  end
+  if mode == "solo" then
+    self:enter_deck_builder(selected_ids[1])
     return
   end
   self:reset_run(mode, selected_ids)
@@ -980,7 +1004,7 @@ function Controller:team_select_autofill()
   local pool = {}
   for _, def in ipairs(Heroes.defs) do pool[#pool + 1] = def.id end
   local selected_ids = {}
-  for _ = 1, 4 do
+  for _ = 1, ts.max_team_size do
     local idx = math.random(#pool)
     selected_ids[#selected_ids + 1] = table.remove(pool, idx)
   end
@@ -989,6 +1013,10 @@ function Controller:team_select_autofill()
   self.team_select = nil
   if mode == "boss_test" then
     self:enter_boss_select(selected_ids)
+    return
+  end
+  if mode == "solo" then
+    self:enter_deck_builder(selected_ids[1])
     return
   end
   self:reset_run(mode, selected_ids)
@@ -1185,6 +1213,156 @@ function Controller:start_boss_test(biome, selected_ids, level)
   self:clear_animation_state()
   self.last_post_combat_event = nil
   Game.start_boss_test(self.state, nil, selected_ids, self.boss_test_biome, self.boss_test_level)
+  if self.state.over then self:handle_combat_victory(); return end
+  self.seq:push(function() end, self:play_enemy_entrance_sequence())
+  self:play_turn_start_sequence()
+end
+
+-- ---------- écran "Construis ton deck" ("Run Solo") ----------
+
+--- Entre sur l'écran de construction de deck (2026-09-02, demande explicite,
+-- menu "Run Solo") : appelé APRÈS la sélection d'équipe à 1 seul aventurier
+-- (voir Controller:team_select_launch/autofill, mode "solo"). Panneau du
+-- haut = TOUTES les cartes de cet aventurier (Cards.list filtrée par
+-- class_id, départ ET avancées) ; panneau du bas = le deck en construction,
+-- PRÉ-REMPLI avec ses 3 cartes "depart" normales (Deck.starting_cards_for_class,
+-- comme un run classique) -- le joueur en ajoute/retire ensuite librement.
+function Controller:enter_deck_builder(hero_id)
+  self.screen = "deck_builder"
+  local top_defs = {}
+  for _, def in ipairs(Cards.list) do
+    if def.class_id == hero_id then top_defs[#top_defs + 1] = def end
+  end
+  local bottom_cards = {}
+  local uid = 0
+  for _, def in ipairs(Deck.starting_cards_for_class(hero_id)) do
+    uid = uid + 1
+    bottom_cards[#bottom_cards + 1] = { uid = uid, def = def }
+  end
+  self.deck_builder = {
+    hero_id = hero_id, top_defs = top_defs, bottom_cards = bottom_cards, uid_counter = uid,
+    top_scroll = 0, bottom_scroll = 0,
+    -- Vol/évanouissement/retriage (2026-09-02, demande explicite) : le vol
+    -- lui-même réutilise controller.card_anims/draw_card_flights tel quel
+    -- (voir Controller:deck_builder_add) -- ces 3 champs sont propres au
+    -- retrait (Controller:deck_builder_remove/draw_deck_builder, view.lua).
+    fading_cards = {}, reflow_from = nil, reflow_t = 0, reflow_duration = 0.2,
+  }
+end
+
+--- Clic sur une carte du panneau du HAUT (2026-09-02) : ajoute une copie de
+-- SA VERSION DE BASE en bas (jamais déjà améliorée -- l'amélioration est un
+-- choix séparé et manuel, voir Controller:deck_builder_toggle_upgrade),
+-- avec un vol cosmétique (même mécanisme que tout autre déplacement de
+-- carte dans ce jeu, voir draw_card_flights/view.lua).
+function Controller:deck_builder_add(index)
+  local db = self.deck_builder
+  if not db then return end
+  local def = db.top_defs[index]
+  if not def then return end
+  local top_layout = View.deck_builder_top_layout(self)
+  local top_scroll = math.max(0, math.min(top_layout.max_scroll, db.top_scroll or 0))
+  local from = View.deck_builder_rect_at(top_layout, top_scroll, index)
+  db.uid_counter = db.uid_counter + 1
+  db.bottom_cards[#db.bottom_cards + 1] = { uid = db.uid_counter, def = def }
+  local bottom_layout = View.deck_builder_bottom_layout(self)
+  local bottom_scroll = math.max(0, math.min(bottom_layout.max_scroll, db.bottom_scroll or 0))
+  local to = View.deck_builder_rect_at(bottom_layout, bottom_scroll, #db.bottom_cards)
+  self.card_anims[#self.card_anims + 1] = { def = def, from = from, to = to, elapsed = 0, delay = 0, duration = 0.32 }
+  Sfx.play("flush")
+end
+
+--- Clic sur une carte du panneau du BAS (2026-09-02) : la retire -- "elle
+-- s'évanouit" (fondu sur place, voir db.fading_cards/draw_deck_builder) --
+-- "et les autres cartes se retrient" (db.reflow_from : position AVANT
+-- retrait de chaque carte restante, capturée ici -- draw_deck_builder les
+-- fait glisser de là vers leur nouvelle case pendant db.reflow_duration).
+function Controller:deck_builder_remove(index)
+  local db = self.deck_builder
+  if not db then return end
+  local entry = db.bottom_cards[index]
+  if not entry then return end
+  local bottom_layout = View.deck_builder_bottom_layout(self)
+  local bottom_scroll = math.max(0, math.min(bottom_layout.max_scroll, db.bottom_scroll or 0))
+  local reflow_from = {}
+  for i, c in ipairs(db.bottom_cards) do
+    if c.uid ~= entry.uid then
+      reflow_from[c.uid] = View.deck_builder_rect_at(bottom_layout, bottom_scroll, i)
+    end
+  end
+  local removed_rect = View.deck_builder_rect_at(bottom_layout, bottom_scroll, index)
+  table.remove(db.bottom_cards, index)
+  db.reflow_from = reflow_from
+  db.reflow_t = 0
+  db.fading_cards[#db.fading_cards + 1] = { def = entry.def, rect = removed_rect, t = 0, duration = 0.25 }
+  Sfx.play("flush")
+end
+
+--- Clic DROIT sur une carte du panneau du BAS (2026-09-02, demande
+-- explicite) : bascule base <-> améliorée SUR PLACE (même identité `uid`,
+-- jamais un retrait/ajout) -- "eclat" (son qui monte, déjà utilisé à la
+-- Forge) pour améliorer, "downgrade" (son qui descend, nouveau -- voir
+-- sfx.lua) pour repasser en version normale.
+function Controller:deck_builder_toggle_upgrade(index)
+  local db = self.deck_builder
+  if not db then return end
+  local entry = db.bottom_cards[index]
+  if not entry or not entry.def.upgrade then return end
+  if entry.def.is_upgraded then
+    entry.def = Cards.by_code(entry.def.code)
+    Sfx.play("downgrade")
+  else
+    entry.def = Cards.upgraded_def(entry.def)
+    Sfx.play("upgrade")
+  end
+end
+
+local DECK_BUILDER_SCROLL_STEP = 40
+--- Molette (2026-09-02, voir Input.wheelmoved) : `panel` = "top"|"bottom",
+-- les 2 zones défilent indépendamment -- même formule/bornes que
+-- Controller:scroll_deck_view, dupliquée par zone.
+function Controller:scroll_deck_builder(panel, dy)
+  local db = self.deck_builder
+  if not db then return end
+  if panel == "top" then
+    local max_scroll = View.deck_builder_top_layout(self).max_scroll
+    db.top_scroll = math.max(0, math.min(max_scroll, (db.top_scroll or 0) - dy * DECK_BUILDER_SCROLL_STEP))
+  else
+    local max_scroll = View.deck_builder_bottom_layout(self).max_scroll
+    db.bottom_scroll = math.max(0, math.min(max_scroll, (db.bottom_scroll or 0) - dy * DECK_BUILDER_SCROLL_STEP))
+  end
+end
+
+--- "Tester" (2026-09-02, demande explicite -- gros bouton en bas à droite,
+-- inerte tant que le deck n'a pas au moins View.DECK_BUILDER_MIN_CARDS
+-- cartes) : lance un combat aléatoire (Game.start_solo_run, budget du 1er
+-- combat d'un run normal) avec CE deck précis et le seul aventurier choisi.
+function Controller:launch_solo_test()
+  local db = self.deck_builder
+  if not db or #db.bottom_cards < View.DECK_BUILDER_MIN_CARDS then return end
+  local hero_id = db.hero_id
+  local deck_defs = {}
+  for _, c in ipairs(db.bottom_cards) do deck_defs[#deck_defs + 1] = c.def end
+  self.deck_builder = nil
+  self:start_solo_test(hero_id, deck_defs)
+end
+
+--- "Run Solo" (2026-09-02) : `run_mode = "solo_test"` (ni "infini" ni
+-- "bounded"/"boss_test") -- "Rejouer" après une défaite relance le même test
+-- (même aventurier, même deck -- voir Input.mousepressed) plutôt que de
+-- retomber sur le mode infini, et une victoire ramène au menu comme
+-- "Tester un boss" (voir Controller:advance_to_next_combat).
+-- `hero_id`/`deck_defs` absents (ex. "Rejouer") : reconduisent
+-- self.solo_test_hero_id/self.solo_test_deck_defs, mémorisés au premier
+-- lancement.
+function Controller:start_solo_test(hero_id, deck_defs)
+  self.screen = "playing"
+  self.run_mode = "solo_test"
+  self.solo_test_hero_id = hero_id or self.solo_test_hero_id
+  self.solo_test_deck_defs = deck_defs or self.solo_test_deck_defs
+  self:clear_animation_state()
+  self.last_post_combat_event = nil
+  Game.start_solo_run(self.state, nil, self.solo_test_hero_id, self.solo_test_deck_defs)
   if self.state.over then self:handle_combat_victory(); return end
   self.seq:push(function() end, self:play_enemy_entrance_sequence())
   self:play_turn_start_sequence()
@@ -1845,6 +2023,22 @@ function Controller:update(dt)
     a.elapsed = a.elapsed + dt
     if a.elapsed >= a.delay + a.duration then table.remove(self.card_anims, i) end
   end
+  -- Écran "Construis ton deck" (2026-09-02) : même idiome de purge que
+  -- card_anims ci-dessus pour les cartes qui s'évanouissent ; le retriage
+  -- (db.reflow_from) n'a besoin que d'avancer son minuteur, purgé une fois
+  -- fini (voir draw_deck_builder, view.lua, qui l'ignore alors silencieusement).
+  if self.deck_builder then
+    local db = self.deck_builder
+    for i = #db.fading_cards, 1, -1 do
+      local f = db.fading_cards[i]
+      f.t = f.t + dt
+      if f.t >= f.duration then table.remove(db.fading_cards, i) end
+    end
+    if db.reflow_from then
+      db.reflow_t = db.reflow_t + dt
+      if db.reflow_t >= db.reflow_duration then db.reflow_from = nil end
+    end
+  end
   -- Pièces de la victoire (2026-09-02) : même idiome de purge que card_anims
   -- ci-dessus, MAIS la liste qui se vide déclenche en plus l'ajout réel à
   -- state.gold -- volontairement pas via self.seq (qui sert déjà à séquencer
@@ -2285,7 +2479,18 @@ end
 
 function Controller:handle_combat_victory_now()
   self.pending_victory = false
-  if self.state.run.is_boss then
+  -- "Run Solo" (2026-09-03, refonte -- demande explicite : "il faut
+  -- enchainer les combats à la suite avec la difficulté qui augmente [...]
+  -- sans évènements ni draft entre chaque combat. Pas de fin, le joueur
+  -- quitte quand il veut") : n'est PLUS un combat isolé comme "Tester un
+  -- boss" (avant cette date, même branche que state.run.is_boss ci-dessous,
+  -- voir git log) -- vérifié sur self.run_mode (concept propre à ce fichier,
+  -- voir son commentaire dans Controller.new) séparément de state.run.is_boss
+  -- (rules, vraiment réservé aux combats de boss) car les 2 divergent
+  -- maintenant : "Tester un boss" retourne au menu, "Run Solo" enchaîne.
+  if self.run_mode == "solo_test" then
+    self:enter_solo_victory()
+  elseif self.state.run.is_boss then
     self:enter_boss_victory()
   else
     self:enter_victory_screen()
@@ -2300,6 +2505,31 @@ function Controller:enter_boss_victory()
   local self_ = self
   self.seq:push(function() end, BOSS_VICTORY_HOLD_DURATION)
   self.seq:push(function() self_:enter_menu() end)
+end
+
+--- "Run Solo" (2026-09-03, demande explicite -- voir Controller:handle_combat_victory_now
+-- ci-dessus) : même écran bref réutilisé tel quel (draw_boss_victory, sous-
+-- titre déjà conditionné sur run_mode == "solo_test", "Combat remporté !")
+-- mais enchaîne sur Controller:advance_to_next_combat au lieu de
+-- Controller:enter_menu -- celle-ci retombe déjà, pour ce run_mode (jamais
+-- "bounded"), sur Game.start_next_combat : budget croissant
+-- (Encounter.budget_for_combat(combat_index)), aucune promotion Élite
+-- (state.run.mode jamais "bounded" en Run Solo, seule condition qui déclenche
+-- Encounter.promote_to_elite) ni de boss (jamais Game.start_boss_combat),
+-- aucun biome (Game.current_biome renvoie nil sans state.run.biomes) -- donc
+-- "juste des monstres normaux" comme demandé -- et surtout AUCUN évènement
+-- "camp"/draft entre 2 combats (advance_to_next_combat ne les appelle
+-- jamais, contrairement à Controller:enter_post_combat_sequence, réservée au
+-- flux "infini"/"bounded"). Pas de fin : boucle indéfiniment tant que le
+-- joueur ne quitte pas via le menu pause.
+function Controller:enter_solo_victory()
+  self.screen = "bossVictory"
+  self.card_anims = {}
+  self.victory_anim = { t = 0 }
+  Sfx.play("victory")
+  local self_ = self
+  self.seq:push(function() end, BOSS_VICTORY_HOLD_DURATION)
+  self.seq:push(function() self_:advance_to_next_combat() end)
 end
 
 --- Écran d'annonce de biome (2026-09-01, demande explicite) : affiché 2 fois

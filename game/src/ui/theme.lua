@@ -47,6 +47,18 @@ local Theme = {
   status = hex("c47fe8"),
   black = { 0, 0, 0 },
   white = { 1, 1, 1 },
+  -- Type de carte (2026-09-03, demande explicite -- cellule "Offensive"/
+  -- "Support" sur chaque carte) : rouge/bleu francs, jamais Theme.hp (déjà
+  -- réservé aux PV perdus) ni Theme.card_class.paladin.border (bleu proche
+  -- mais réservé à l'identité visuelle de classe) -- ces 2 teintes doivent se
+  -- reconnaître sur N'IMPORTE quelle carte, indépendamment de sa classe.
+  offensive = hex("c23b3b"),
+  support = hex("3b7ec2"),
+  -- Enchantement (2026-09-03, 3ᵉ type de carte -- ne cible personne, pose un
+  -- pouvoir passif) : violet, distinct du rouge/bleu ci-dessus ET de
+  -- Theme.mana (indigo, réservé à la ressource du Mage) -- 3ᵉ teinte
+  -- primaire facilement reconnaissable au premier coup d'œil.
+  enchantment = hex("8e44ad"),
 }
 
 function Theme.with_alpha(c, a)

@@ -69,6 +69,10 @@ Cards.list = {
     -- (present côté héros seulement, jamais côté ennemi).
     code = "coup-direct-guerrier", name = "Combattant expérimenté", class_id = "guerrier", tier = "depart", cost = 0,
     cats = { "melee", "degats", "defense" }, dmg_type = "physique", target = "enemy-or-ally",
+    -- Type (2026-09-03, demande explicite) : "cible un ennemi (dégâts) OU un
+    -- allié (bouclier)" -- les 2 branches sont un choix explicite du joueur,
+    -- comparables en poids -- dual dès le tableur, pas une exception.
+    types = { "offensive", "support" },
     desc = 'Inflige 4 "epee" à un ennemi OU 4 "bouclier" à un allié.',
     effect = function(ctx)
       if Combat.hero_by_id(ctx.state, ctx.target.id) then
@@ -95,6 +99,7 @@ Cards.list = {
     -- ailleurs dans le jeu, voir glossary.lua).
     code = "coup-appuye", name = "Coup appuyé", class_id = "guerrier", tier = "depart", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
+    types = { "offensive" },
     desc = 'Inflige 6 "epee" et "Vulnerabilite" 2 à un ennemi.',
     effect = function(ctx)
       Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "physique", ctx)
@@ -111,6 +116,7 @@ Cards.list = {
   {
     code = "coup-taille", name = "Coup de taille", class_id = "guerrier", tier = "depart", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "all-enemies",
+    types = { "offensive" },
     desc = 'Inflige 3 "epee" à tous les ennemis.',
     effect = function(ctx)
       for _, e in ipairs(living_enemies(ctx)) do Combat.deal_damage(ctx.state, ctx.hero, e, 3, "physique", ctx) end
@@ -130,6 +136,7 @@ Cards.list = {
     -- Bouclier seul).
     code = "coup-estoc", name = "Coup Contandant", class_id = "guerrier", tier = "avance", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
+    types = { "offensive" },
     desc = 'Inflige 4 "epee". Inflige 4 "epee" de plus si l\'ennemi a du "bouclier" ou "Vulnerabilite".',
     effect = function(ctx)
       local vulnerable = (ctx.target.defense or 0) > 0 or (ctx.target.vulnerabilite or 0) > 0
@@ -153,6 +160,7 @@ Cards.list = {
     -- confirmer si 4 était réellement voulu.
     code = "avalanche-coups", name = "Avalanche de coups", class_id = "guerrier", tier = "avance", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
+    types = { "offensive" },
     desc = 'Inflige 4 "epee", son coût devient 0 jusqu\'à la fin du combat. S\'il tue la cible, revient en main.',
     effect = function(ctx)
       ctx.zero_cost = true
@@ -184,35 +192,92 @@ Cards.list = {
     -- (next_move.kind == "dmg") -- "la moitié/totalité DES DÉGÂTS" n'a pas de
     -- sens contre un débuff (ex. Malédiction) qui n'inflige rien à annuler ;
     -- Riposte ne fait alors rien, comme quand personne ne vise le Guerrier.
+    -- Rewrite multi-ennemis (2026-09-02, demande explicite -- "si plusieurs
+    -- ennemis ciblent le Guerrier, TOUTES les attaques sont annulées et
+    -- chaque ennemi reçoit les dégâts qu'il devait infliger") : boucle sur
+    -- TOUS les ennemis dont l'action télégraphiée vise le Guerrier (même
+    -- geste que Repli stratégique côté Assassin, voir plus haut) au lieu de
+    -- s'arrêter au premier trouvé (Combat.enemy_targeting) -- chacun annule
+    -- SA PROPRE attaque et reçoit SES PROPRES dégâts en retour (moitié/
+    -- totalité), jamais un montant partagé/mutualisé entre eux.
     code = "riposte", name = "Riposte", class_id = "guerrier", tier = "avance", cost = 2,
     cats = { "melee", "degats", "defense" }, dmg_type = "physique", target = "self",
-    desc = 'Si "cibleennemi", annule l\'attaque et inflige la moitié des dégâts en retour.',
+    -- Type (2026-09-03) : dual comme le tag "defense" du dessus le suggère
+    -- déjà -- annule l'attaque (protège le Guerrier, Support) ET inflige les
+    -- dégâts en retour à l'ennemi (Offensive), les 2 dans le MÊME geste.
+    types = { "offensive", "support" },
+    desc = 'Si "cibleennemi", annule TOUTES les attaques et inflige la moitié des dégâts en retour à chaque ennemi.',
     effect = function(ctx)
-      local attacker = Combat.enemy_targeting(ctx.state, ctx.hero)
-      if not attacker or not attacker.next_move or attacker.next_move.kind ~= "dmg" then
-        Combat.log(ctx.state, "Riposte : " .. ctx.hero.name .. " n'est visé par aucune attaque de dégâts, la carte ne fait rien.", "sys")
-        return
+      local count = 0
+      for _, e in ipairs(ctx.state.enemies) do
+        if e.hp > 0 and e.next_move and e.next_move.kind == "dmg" and e.target_hero_id == ctx.hero.id then
+          local retaliation = e.next_move.amount * 0.5
+          e.next_move = nil
+          e.target_hero_id = nil
+          Combat.deal_damage(ctx.state, ctx.hero, e, retaliation, "physique", ctx)
+          count = count + 1
+        end
       end
-      local retaliation = attacker.next_move.amount * 0.5
-      attacker.next_move = nil
-      attacker.target_hero_id = nil
-      Combat.deal_damage(ctx.state, ctx.hero, attacker, retaliation, "physique", ctx)
-      Combat.log(ctx.state, "Riposte contre " .. attacker.name .. " !", "you")
+      if count > 0 then
+        Combat.log(ctx.state, "Riposte contre " .. count .. " ennemi(s) !", "you")
+      else
+        Combat.log(ctx.state, "Riposte : " .. ctx.hero.name .. " n'est visé par aucune attaque de dégâts, la carte ne fait rien.", "sys")
+      end
     end,
     upgrade = {
-      desc = 'Si "cibleennemi", annule l\'attaque et inflige la totalité des dégâts en retour.',
+      desc = 'Si "cibleennemi", annule TOUTES les attaques et inflige la totalité des dégâts en retour à chaque ennemi.',
       effect = function(ctx)
-        local attacker = Combat.enemy_targeting(ctx.state, ctx.hero)
-        if not attacker or not attacker.next_move or attacker.next_move.kind ~= "dmg" then
-          Combat.log(ctx.state, "Riposte : " .. ctx.hero.name .. " n'est visé par aucune attaque de dégâts, la carte ne fait rien.", "sys")
-          return
+        local count = 0
+        for _, e in ipairs(ctx.state.enemies) do
+          if e.hp > 0 and e.next_move and e.next_move.kind == "dmg" and e.target_hero_id == ctx.hero.id then
+            local retaliation = e.next_move.amount
+            e.next_move = nil
+            e.target_hero_id = nil
+            Combat.deal_damage(ctx.state, ctx.hero, e, retaliation, "physique", ctx)
+            count = count + 1
+          end
         end
-        local retaliation = attacker.next_move.amount
-        attacker.next_move = nil
-        attacker.target_hero_id = nil
-        Combat.deal_damage(ctx.state, ctx.hero, attacker, retaliation, "physique", ctx)
-        Combat.log(ctx.state, "Riposte contre " .. attacker.name .. " !", "you")
+        if count > 0 then
+          Combat.log(ctx.state, "Riposte contre " .. count .. " ennemi(s) !", "you")
+        else
+          Combat.log(ctx.state, "Riposte : " .. ctx.hero.name .. " n'est visé par aucune attaque de dégâts, la carte ne fait rien.", "sys")
+        end
       end,
+    },
+  },
+
+  -- Enchantements (2026-09-03, demande explicite -- "type" de carte à part,
+  -- ni Offensive ni Support : ne cible personne, ne fait rien sur le moment,
+  -- pose juste un pouvoir passif permanent (pour le combat en cours) sur
+  -- l'aventurier qui la joue, qui réagit ensuite à un évènement de jeu précis.
+  -- Toujours "avance" (jamais "depart", demande explicite), `target = "self"`
+  -- comme toute carte sans choix de cible (le joueur clique juste pour
+  -- confirmer) -- `effect` ne fait QUE poser le champ sur `ctx.hero`, tout le
+  -- reste du pouvoir vit dans les hooks des règles (voir combat.lua/game.lua,
+  -- champs hero.instinct_chasseur/frenesie_step/etc.). Conçues avec
+  -- agent_content (voir content/memory/reference_enchantement-mecanique.md).
+  {
+    code = "instinct-chasseur", name = "Instinct du Chasseur", class_id = "guerrier", tier = "avance", cost = 1,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Gagne 4 "bouclier" à chaque coup porté à un ennemi.',
+    effect = function(ctx) ctx.hero.instinct_chasseur = 4 end,
+    upgrade = {
+      desc = 'Gagne 6 "bouclier" à chaque coup porté à un ennemi.',
+      effect = function(ctx) ctx.hero.instinct_chasseur = 6 end,
+    },
+  },
+  {
+    -- `frenesie_bonus_pct` (déjà à 0 par défaut, voir fresh_hero/carried_hero
+    -- dans game.lua) : posé explicitement ici aussi pour rester correct même
+    -- si un futur champ par défaut changeait -- ne fait jamais de mal de le
+    -- réaffirmer à 0 au moment où Frénésie s'active.
+    code = "frenesie", name = "Frénésie", class_id = "guerrier", tier = "avance", cost = 2,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = '+50% de dégâts par carte Offensive déjà jouée ce tour.',
+    effect = function(ctx) ctx.hero.frenesie_step = 0.5; ctx.hero.frenesie_bonus_pct = ctx.hero.frenesie_bonus_pct or 0 end,
+    upgrade = {
+      desc = '+75% de dégâts par carte Offensive déjà jouée ce tour.',
+      effect = function(ctx) ctx.hero.frenesie_step = 0.75; ctx.hero.frenesie_bonus_pct = ctx.hero.frenesie_bonus_pct or 0 end,
     },
   },
 
@@ -229,6 +294,7 @@ Cards.list = {
   {
     code = "rempart", name = "Rempart", class_id = "paladin", tier = "depart", cost = 1,
     cats = { "defense" }, dmg_type = nil, target = "ally",
+    types = { "support" },
     desc = 'L\'allié ciblé gagne 4 "bouclier". Gagne 4 "bouclier".',
     effect = function(ctx)
       Combat.grant_defense(ctx.target, 4, ctx)
@@ -252,6 +318,7 @@ Cards.list = {
     -- tableur fourni).
     code = "provocateur", name = "Provocateur", class_id = "paladin", tier = "depart", cost = 1,
     cats = { "defense" }, dmg_type = nil, target = "ally",
+    types = { "support" },
     desc = 'L\'allié ciblé gagne 4 "bouclier". Gagne "Provocation" 2.',
     effect = function(ctx)
       Combat.grant_defense(ctx.target, 4, ctx)
@@ -271,6 +338,7 @@ Cards.list = {
     -- tour+2), pas un seul gain doublé plus tard.
     code = "infranchissable", name = "Infranchissable", class_id = "paladin", tier = "depart", cost = 1,
     cats = { "defense" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = 'Gagne 10 "bouclier". Gagne 10 "bouclier" au début du prochain tour. Gagne "Provocation" 2.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -296,6 +364,10 @@ Cards.list = {
     -- par le statut Provocation), juste rééquilibrée 6/9 -> 8/12.
     code = "raillerie", name = "Raillerie", class_id = "paladin", tier = "avance", cost = 2,
     cats = { "defense" }, dmg_type = nil, target = "enemy",
+    -- Type (2026-09-03) : Support malgré `target = "enemy"` -- ne touche à
+    -- AUCUN moment les PV/statuts de la cible, ne fait que rediriger son
+    -- attaque tout en se blindant soi-même. Aucun dégât, jamais Offensive.
+    types = { "support" },
     desc = 'L\'ennemi ciblé cible le Paladin. Gagne 8 "bouclier".',
     effect = function(ctx)
       Combat.grant_defense(ctx.hero, 8, ctx)
@@ -319,6 +391,7 @@ Cards.list = {
     -- cours après avoir été jouée, revient au combat suivant.
     code = "clairvoyance", name = "Clairvoyance", class_id = "paladin", tier = "avance", cost = 0,
     cats = { "sort", "amnesie" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = '"Pioche" 1. Gagne 1 "energie". "soin" 4. "Amnesie"',
     effect = function(ctx)
       Deck = Deck or require("src.rules.deck")
@@ -350,6 +423,7 @@ Cards.list = {
     -- inchangé (4/6).
     code = "lumiere-divine", name = "Lumière divine", class_id = "paladin", tier = "avance", cost = 2,
     cats = { "defense", "soin", "sort", "amnesie" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = 'Tous les alliés gagnent 6 "bouclier". "soin" 4 à tous les alliés. "Amnesie"',
     effect = function(ctx)
       for _, h in ipairs(living_heroes(ctx)) do
@@ -368,6 +442,29 @@ Cards.list = {
     },
   },
 
+  -- Enchantements (2026-09-03, voir le commentaire au-dessus des 2 premiers,
+  -- côté Guerrier, pour le principe général).
+  {
+    code = "bouclier-vivant", name = "Bouclier vivant", class_id = "paladin", tier = "avance", cost = 2,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'La moitié de son "bouclier" gagné va aussi à l\'autre allié le plus bas en PV.',
+    effect = function(ctx) ctx.hero.bouclier_vivant_ratio = 0.5 end,
+    upgrade = {
+      desc = 'Tout son "bouclier" gagné va aussi à l\'autre allié le plus bas en PV.',
+      effect = function(ctx) ctx.hero.bouclier_vivant_ratio = 1.0 end,
+    },
+  },
+  {
+    code = "bouclier-pointes", name = "Bouclier de pointes", class_id = "paladin", tier = "avance", cost = 2,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Chaque "bouclier" absorbé inflige 1 dégât brut à l\'attaquant.',
+    effect = function(ctx) ctx.hero.shield_thorns = 1 end,
+    upgrade = {
+      desc = 'Chaque "bouclier" absorbé inflige 2 dégâts brut à l\'attaquant.',
+      effect = function(ctx) ctx.hero.shield_thorns = 2 end,
+    },
+  },
+
   -- ---------- Mage ----------
   -- "Main de feu"/Barrière (2026-08-24, remplacent "Coup direct"/"Encaisser" --
   -- seule classe dont les 2 cartes "de base" ont un nom propre). Renommée
@@ -380,6 +477,12 @@ Cards.list = {
   {
     code = "flameche", name = "Main de feu", class_id = "mage", tier = "depart", cost = 1, mana_cost = 0,
     cats = { "melee", "degats", "feu" }, dmg_type = "magique", target = "enemy",
+    -- Type (2026-09-03) : le gain de mana à soi reste incidental (ressource
+    -- pour plus tard, pas un bénéfice immédiat comparable à un dégât/soin/
+    -- bouclier) -- Offensive seule, comme le reste des cartes de dégâts qui
+    -- accordent aussi une ressource mineure en passant (voir Barrière
+    -- ci-dessous pour l'équivalent symétrique côté Support).
+    types = { "offensive" },
     desc = 'Inflige 2 "etincelle" à un ennemi. Gagne 1 "mana".',
     effect = function(ctx)
       Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 2, "magique", ctx)
@@ -400,6 +503,7 @@ Cards.list = {
   {
     code = "barriere", name = "Barrière", class_id = "mage", tier = "depart", cost = 1, mana_cost = 0,
     cats = { "defense" }, dmg_type = nil, target = "ally",
+    types = { "support" },
     desc = 'L\'allié gagne 2 "bouclier". Gagne 1 "mana".',
     effect = function(ctx)
       Combat.grant_defense(ctx.target, 2, ctx)
@@ -418,6 +522,7 @@ Cards.list = {
   {
     code = "missile-magique", name = "Missile magique", class_id = "mage", tier = "depart", cost = 1, mana_cost = 1,
     cats = { "sort", "distance", "degats" }, dmg_type = "magique", target = "enemy",
+    types = { "offensive" },
     desc = 'Inflige 8 "etincelle".',
     effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 8, "magique", ctx) end,
     upgrade = {
@@ -428,6 +533,7 @@ Cards.list = {
   {
     code = "image-miroir", name = "Image miroir", class_id = "mage", tier = "avance", cost = 1, mana_cost = 1,
     cats = { "sort", "defense" }, dmg_type = "magique", target = "self",
+    types = { "support" },
     desc = 'Gagne "Esquive" 2.',
     effect = function(ctx) Combat.apply_status(ctx.hero, "esquive", 2) end,
     upgrade = {
@@ -438,6 +544,7 @@ Cards.list = {
   {
     code = "tornade-feu", name = "Tornade de feu", class_id = "mage", tier = "avance", cost = 1, mana_cost = 2,
     cats = { "sort", "distance", "degats", "feu" }, dmg_type = "magique", target = "all-enemies",
+    types = { "offensive" },
     desc = 'Inflige 8 "fireball" à tous les ennemis.',
     effect = function(ctx)
       for _, e in ipairs(living_enemies(ctx)) do Combat.deal_damage(ctx.state, ctx.hero, e, 8, "magique", ctx) end
@@ -452,11 +559,35 @@ Cards.list = {
   {
     code = "boule-feu", name = "Boule de feu", class_id = "mage", tier = "avance", cost = 2, mana_cost = 3,
     cats = { "sort", "distance", "degats", "feu" }, dmg_type = "magique", target = "enemy",
+    types = { "offensive" },
     desc = 'Inflige 20 "fireball".',
     effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 20, "magique", ctx) end,
     upgrade = {
       desc = 'Inflige 30 "fireball".',
       effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 30, "magique", ctx) end,
+    },
+  },
+
+  -- Enchantements (2026-09-03, voir le commentaire au-dessus des 2 premiers,
+  -- côté Guerrier, pour le principe général).
+  {
+    code = "combustion-differee", name = "Combustion différée", class_id = "mage", tier = "avance", cost = 2,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Ses dégâts "feu" appliquent "Brulure" 1 à la cible.',
+    effect = function(ctx) ctx.hero.combustion_differee = 1 end,
+    upgrade = {
+      desc = 'Ses dégâts "feu" appliquent "Brulure" 2 à la cible.',
+      effect = function(ctx) ctx.hero.combustion_differee = 2 end,
+    },
+  },
+  {
+    code = "second-souffle", name = "Second Souffle", class_id = "mage", tier = "avance", cost = 1,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Regagne 2 mana à chaque fois qu\'il tombe à 0.',
+    effect = function(ctx) ctx.hero.second_souffle = 2 end,
+    upgrade = {
+      desc = 'Regagne 3 mana à chaque fois qu\'il tombe à 0.',
+      effect = function(ctx) ctx.hero.second_souffle = 3 end,
     },
   },
 
@@ -472,6 +603,7 @@ Cards.list = {
   {
     code = "plan-attaque", name = "Plan d'attaque", class_id = "assassin", tier = "depart", cost = 1,
     cats = { "melee", "degats", "furtif" }, dmg_type = "physique", target = "enemy",
+    types = { "offensive" },
     desc = 'Si Camouflé, inflige 8 "epee", sinon inflige 4 "epee". "Furtif"',
     effect = function(ctx)
       local amount = (ctx.hero.camoufle or 0) > 0 and 8 or 4
@@ -493,6 +625,7 @@ Cards.list = {
     -- confirmer.
     code = "se-cacher", name = "Se cacher", class_id = "assassin", tier = "depart", cost = 1,
     cats = { "defense", "furtif" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = 'L\'Assassin gagne 8 "bouclier". "Furtif"',
     effect = function(ctx) Combat.grant_defense(ctx.hero, 8, ctx) end,
     upgrade = {
@@ -512,6 +645,10 @@ Cards.list = {
     -- palier 4->6), à confirmer.
     code = "repli-strategique", name = "Repli stratégique", class_id = "assassin", tier = "depart", cost = 1,
     cats = { "defense", "furtif" }, dmg_type = nil, target = "ally",
+    -- Type (2026-09-03) : Support -- redirige des ennemis (les fait changer
+    -- de cible) mais ne leur inflige jamais rien ; l'action utile pour le
+    -- joueur est le bouclier accordé à l'allié qui prend le relais.
+    types = { "support" },
     desc = 'Si "cibleennemi", ces ennemis changent de cible pour l\'allié ciblé, qui gagne 6 "bouclier" par ennemi. "Furtif"',
     effect = function(ctx)
       local count = 0
@@ -558,6 +695,7 @@ Cards.list = {
     -- supplémentaire nécessaire.
     code = "en-traitre", name = "En traître", class_id = "assassin", tier = "avance", cost = 1,
     cats = { "melee", "degats", "furtif" }, dmg_type = "physique", target = "enemy",
+    types = { "offensive" },
     desc = 'Si Camouflé, inflige 6 "epee" et "Saignements" 3, reste Camouflé. "Furtif"',
     effect = function(ctx)
       if (ctx.hero.camoufle or 0) > 0 then
@@ -591,6 +729,12 @@ Cards.list = {
     -- unifiée, plus de palier sur ce champ précis).
     code = "assassinat", name = "Assassinat", class_id = "assassin", tier = "avance", cost = 1,
     cats = { "melee", "degats", "furtif" }, dmg_type = "physique", target = "enemy",
+    -- Type (2026-09-03) : dual -- si Camouflé, dégâts purs (Offensive) ;
+    -- sinon, la branche "lot de consolation" ne fait AUCUN dégât et n'accorde
+    -- que de la Discrétion/Puissance à soi (Support), pas juste un à-côté
+    -- mineur comme le mana de Main de feu -- une des 2 branches EST le
+    -- Support, comparable en poids à l'autre.
+    types = { "offensive", "support" },
     desc = 'Si Camouflé, inflige 12 "epee", sinon gagne "Discrétion" 5, "Puissance" 2 et Assassinat va sur le dessus du deck. "Furtif"',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -623,6 +767,7 @@ Cards.list = {
     -- effet, juste tagguée "Furtif" en plus.
     code = "preparation", name = "Préparation", class_id = "assassin", tier = "avance", cost = 1,
     cats = { "defense", "furtif" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = 'Gagne 4 "bouclier", 1 "energie" et "Discrétion" 3. "Furtif"',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -641,6 +786,29 @@ Cards.list = {
     },
   },
 
+  -- Enchantements (2026-09-03, voir le commentaire au-dessus des 2 premiers,
+  -- côté Guerrier, pour le principe général).
+  {
+    code = "ombre-patiente", name = "Ombre Patiente", class_id = "assassin", tier = "avance", cost = 1,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Devenir Camouflé donne "Puissance" 1.',
+    effect = function(ctx) ctx.hero.ombre_patiente = 1 end,
+    upgrade = {
+      desc = 'Devenir Camouflé donne "Puissance" 2.',
+      effect = function(ctx) ctx.hero.ombre_patiente = 2 end,
+    },
+  },
+  {
+    code = "imperceptible", name = "Imperceptible", class_id = "assassin", tier = "avance", cost = 1,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Tous ses gains de "Discrétion" sont augmentés de 2.',
+    effect = function(ctx) ctx.hero.imperceptible = 2 end,
+    upgrade = {
+      desc = 'Tous ses gains de "Discrétion" sont augmentés de 4.',
+      effect = function(ctx) ctx.hero.imperceptible = 4 end,
+    },
+  },
+
   -- ---------- Nécromancien ----------
   -- Conçues avec agent_content (2026-08-29, voir content/memory/) --
   -- sélectionnable à l'écran de choix d'équipe (2026-08-29, voir
@@ -653,6 +821,11 @@ Cards.list = {
     code = "rite-mineur", name = "Rite mineur", class_id = "necromancien", tier = "depart", cost = 1,
     corruption_cost_cap = 3, heal_per_corruption = 2,
     cats = { "sort", "degats", "soin" }, dmg_type = "necrose", target = "enemy",
+    -- Type (2026-09-03) : dual -- dégâts à l'ennemi (Offensive) ET soin à
+    -- soi proportionnel à la Corruption dépensée (Support), substantiel
+    -- (2-3 PV par point, pas un à-côté), contrairement au mana incidental de
+    -- Main de feu -- comparable à Combattant expérimenté/Assassinat.
+    types = { "offensive", "support" },
     desc = 'Inflige 6 "necrose" à un ennemi. Se soigne de 2*X.',
     effect = function(ctx)
       Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 6, "necrose", ctx)
@@ -675,6 +848,11 @@ Cards.list = {
     -- de PV) s'applique automatiquement, sans le recalculer ici.
     code = "sceau-faiblesse", name = "Sceau de faiblesse", class_id = "necromancien", tier = "depart", cost = 0,
     cats = { "sort", "debuff" }, dmg_type = nil, target = "enemy",
+    -- Type (2026-09-03) : Offensive seule -- la perte de PV est un COÛT payé
+    -- par le lanceur (comme les autres cartes à auto-sacrifice du
+    -- Nécromancien), pas un bénéfice accordé à un allié ; seul le débuff
+    -- posé sur l'ennemi compte pour la classification.
+    types = { "offensive" },
     desc = 'Perd 2 "PV". Applique "Vulnerabilite" 3 à un ennemi.',
     effect = function(ctx)
       Combat.deal_damage(ctx.state, nil, ctx.hero, 2, nil, nil, { brut = true })
@@ -701,6 +879,7 @@ Cards.list = {
     -- l'allié compte bien la Corruption fraîchement gagnée par ce sacrifice.
     code = "voile-ossements", name = "Voile d'ossements", class_id = "necromancien", tier = "depart", cost = 1,
     cats = { "defense" }, dmg_type = nil, target = "ally",
+    types = { "support" },
     desc = 'Perd 2 "PV" : l\'allié ciblé gagne 1 "bouclier" par Corruption.',
     effect = function(ctx)
       Combat.deal_damage(ctx.state, nil, ctx.hero, 2, nil, nil, { brut = true })
@@ -723,6 +902,7 @@ Cards.list = {
     -- perdus") en découle automatiquement, jamais ajouté une 2ᵉ fois ici.
     code = "pacte-funeste", name = "Pacte funeste", class_id = "necromancien", tier = "avance", cost = 1,
     cats = { "sort", "degats" }, dmg_type = "necrose", target = "enemy",
+    types = { "offensive" },
     desc = 'Perd la moitié de ses "PV" actuels. Inflige 2 "necrose" par PV perdu à un ennemi.',
     effect = function(ctx)
       local lost = math.ceil(ctx.hero.hp / 2)
@@ -756,6 +936,7 @@ Cards.list = {
     code = "servant-os", name = "Servant d'os", class_id = "necromancien", tier = "avance", cost = 2,
     corruption_cost_cap = 4,
     cats = { "sort", "degats" }, dmg_type = nil, target = "self",
+    types = { "offensive" },
     desc = 'Inflige X "brut" à un ennemi aléatoire, au début des 3 prochains tours.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -786,6 +967,7 @@ Cards.list = {
     code = "communion-morts", name = "Communion des morts", class_id = "necromancien", tier = "avance", cost = 1,
     corruption_cost_cap = 6, heal_per_corruption = 2,
     cats = { "sort", "soin" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = 'Se soigne de 2*X.',
     effect = function(ctx)
       if ctx.corruption_spent > 0 then Combat.grant_heal(ctx.hero, 2 * ctx.corruption_spent, ctx) end
@@ -796,6 +978,29 @@ Cards.list = {
       effect = function(ctx)
         if ctx.corruption_spent > 0 then Combat.grant_heal(ctx.hero, 3 * ctx.corruption_spent, ctx) end
       end,
+    },
+  },
+
+  -- Enchantements (2026-09-03, voir le commentaire au-dessus des 2 premiers,
+  -- côté Guerrier, pour le principe général).
+  {
+    code = "rite-chair", name = "Rite de la Chair", class_id = "necromancien", tier = "avance", cost = 1,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Gagne "Corruption" 2 à chaque début de tour.',
+    effect = function(ctx) ctx.hero.rite_de_la_chair = 2 end,
+    upgrade = {
+      desc = 'Gagne "Corruption" 3 à chaque début de tour.',
+      effect = function(ctx) ctx.hero.rite_de_la_chair = 3 end,
+    },
+  },
+  {
+    code = "pacte-survie", name = "Pacte de Survie", class_id = "necromancien", tier = "avance", cost = 1,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Gagne 1 "bouclier" par PV perdu.',
+    effect = function(ctx) ctx.hero.pacte_survie = 1 end,
+    upgrade = {
+      desc = 'Gagne 2 "bouclier" par PV perdu.',
+      effect = function(ctx) ctx.hero.pacte_survie = 2 end,
     },
   },
 
@@ -819,6 +1024,7 @@ Cards.list = {
     -- lui-même de l'Inspiration.
     code = "air-belliqueux", name = "Air belliqueux", class_id = "barde", tier = "depart", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
+    types = { "offensive" },
     desc = 'Inflige 3 "epee" à un ennemi. +2 par charge d\'Inspiration sur les alliés.',
     effect = function(ctx)
       local total = 0
@@ -837,6 +1043,7 @@ Cards.list = {
   {
     code = "choeur-bataille", name = "Chœur de bataille", class_id = "barde", tier = "depart", cost = 1,
     cats = { "sort" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = 'Tous les alliés gagnent "Inspiration" 2.',
     effect = function(ctx)
       for _, h in ipairs(living_heroes(ctx)) do Combat.apply_status(h, "inspiration", 2) end
@@ -851,6 +1058,7 @@ Cards.list = {
   {
     code = "improvisation", name = "Improvisation", class_id = "barde", tier = "depart", cost = 0,
     cats = { "sort" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = 'Gagne "Inspiration" 2. "Pioche" 1.',
     effect = function(ctx)
       Deck = Deck or require("src.rules.deck")
@@ -878,6 +1086,7 @@ Cards.list = {
     -- explicitement ("-1 charge à l'usage ET -1 automatique en fin de tour").
     code = "dernier-rappel", name = "Dernier rappel", class_id = "barde", tier = "avance", cost = 1,
     cats = { "sort" }, dmg_type = nil, target = "ally",
+    types = { "support" },
     desc = 'L\'allié ciblé ne perd pas d\'Inspiration à la fin de ce tour et gagne "Inspiration" 3.',
     effect = function(ctx)
       ctx.target.inspiration_shielded_turns = math.max(ctx.target.inspiration_shielded_turns or 0, 1)
@@ -901,6 +1110,7 @@ Cards.list = {
     -- prochaine carte, coût énergie forcé à 0 -- voir Combat.effective_cost.
     code = "bis", name = "Bis", class_id = "barde", tier = "avance", cost = 1,
     cats = { "sort" }, dmg_type = nil, target = "ally",
+    types = { "support" },
     desc = 'Si l\'allié a de l\'"Inspiration", elle est retirée et sa prochaine carte est "Gratuite" et jouée 2 fois. "Encore"',
     effect = function(ctx)
       if (ctx.target.inspiration or 0) > 0 then
@@ -932,6 +1142,7 @@ Cards.list = {
     -- effet plat, inconditionnel, sur tous les alliés -- aucun calcul par charge.
     code = "rappel-triomphal", name = "Rappel triomphal", class_id = "barde", tier = "avance", cost = 2,
     cats = { "sort", "defense" }, dmg_type = nil, target = "self",
+    types = { "support" },
     desc = 'Tous les alliés gagnent "Inspiration" 2 et 6 "bouclier".',
     effect = function(ctx)
       for _, h in ipairs(living_heroes(ctx)) do
@@ -947,6 +1158,34 @@ Cards.list = {
           Combat.grant_defense(h, 9, ctx)
         end
       end,
+    },
+  },
+
+  -- Enchantements (2026-09-03, voir le commentaire au-dessus des 2 premiers,
+  -- côté Guerrier, pour le principe général).
+  {
+    -- Coût qui BAISSE à l'amélioration (2026-09-03, demande explicite --
+    -- 2 -> 1, même mécanisme que "Coup de taille" du Guerrier, voir
+    -- Cards.upgraded_def/def.upgrade.cost) : seul le coût change, l'effet est
+    -- identique aux 2 paliers.
+    code = "memoire-melodique", name = "Mémoire mélodique", class_id = "barde", tier = "avance", cost = 2,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = "Chaque carte jouée rend une autre carte de la main gratuite ce tour.",
+    effect = function(ctx) ctx.hero.memoire_melodique = true end,
+    upgrade = {
+      desc = "Coût 1. Chaque carte jouée rend une autre carte de la main gratuite ce tour.",
+      cost = 1,
+      effect = function(ctx) ctx.hero.memoire_melodique = true end,
+    },
+  },
+  {
+    code = "tournee-finale", name = "Tournée finale", class_id = "barde", tier = "avance", cost = 1,
+    cats = { "enchantement" }, dmg_type = nil, target = "self", types = { "enchantment" },
+    desc = 'Un allié qui consomme une charge d\'"Inspiration" gagne 4 "bouclier".',
+    effect = function(ctx) ctx.hero.tournee_finale = 4 end,
+    upgrade = {
+      desc = 'Un allié qui consomme une charge d\'"Inspiration" gagne 6 "bouclier".',
+      effect = function(ctx) ctx.hero.tournee_finale = 6 end,
     },
   },
 }
@@ -969,7 +1208,9 @@ function Cards.upgraded_def(def)
   assert(def.upgrade, "carte non améliorable : " .. tostring(def.code))
   local up = {}
   for k, v in pairs(def) do up[k] = v end
-  up.name = def.name .. " +"
+  -- "+ Nom +" (2026-09-02, demande explicite -- avant : suffixe seul) : un
+  -- "+" de chaque côté, jamais un seul derrière.
+  up.name = "+ " .. def.name .. " +"
   up.desc = def.upgrade.desc
   up.effect = def.upgrade.effect
   up.is_upgraded = true

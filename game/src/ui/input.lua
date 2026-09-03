@@ -4,6 +4,11 @@
 -- voir Game.select_card) : il ne reste que 2 temps, carte -> cible.
 
 local View = require("src.ui.view")
+-- Molette sur l'écran "Construis ton deck" (2026-09-02) : Input.wheelmoved ne
+-- reçoit que dx/dy (crans de molette, voir main.lua), jamais la position du
+-- curseur -- seul endroit de ce fichier qui a besoin de la relire lui-même
+-- (love.mouse.getPosition(), divisée par SCALE comme partout ailleurs).
+local SCALE = require("src.ui.layout_scale")
 
 local Input = {}
 
@@ -65,6 +70,7 @@ local function menu_click(controller, x, y)
       if View.point_in(b, x, y) then
         if b.id == "boss" then controller:enter_team_select("boss_test")
         elseif b.id == "run" then controller:enter_team_select("bounded")
+        elseif b.id == "solo" then controller:enter_team_select("solo")
         elseif b.id == "options" then controller:enter_options()
         elseif b.id == "quit" then love.event.quit()
         end
@@ -116,6 +122,51 @@ local function menu_hovering(controller, x, y)
     end
     return View.point_in(View.boss_select_combat_button, x, y) or View.point_in(View.boss_select_back_button, x, y)
   end
+  return false
+end
+
+--- Écran "Construis ton deck" ("Run Solo", 2026-09-02, demande explicite) :
+-- clic GAUCHE sur une carte du haut = en ajouter une copie en bas
+-- (Controller:deck_builder_add) ; clic gauche sur une carte du bas = la
+-- retirer (Controller:deck_builder_remove) -- le clic DROIT (bascule
+-- amélioration) est géré à part dans Input.mousepressed, jamais ici (ce
+-- fichier ne reçoit que des clics GAUCHE, voir mousepressed_tap/arrow).
+local function deck_builder_click(controller, x, y)
+  if controller.screen ~= "deck_builder" then return false end
+  local db = controller.deck_builder
+  if not db then return true end
+
+  if View.point_in(View.deck_builder_back_button, x, y) then controller:back_to_menu(); return true end
+  if #db.bottom_cards >= View.DECK_BUILDER_MIN_CARDS and View.point_in(View.deck_builder_test_button, x, y) then
+    controller:launch_solo_test()
+    return true
+  end
+
+  local top_layout = View.deck_builder_top_layout(controller)
+  local top_scroll = math.max(0, math.min(top_layout.max_scroll, db.top_scroll or 0))
+  local top_index = View.deck_builder_hit(top_layout, top_scroll, #db.top_defs, x, y)
+  if top_index then controller:deck_builder_add(top_index); return true end
+
+  local bottom_layout = View.deck_builder_bottom_layout(controller)
+  local bottom_scroll = math.max(0, math.min(bottom_layout.max_scroll, db.bottom_scroll or 0))
+  local bottom_index = View.deck_builder_hit(bottom_layout, bottom_scroll, #db.bottom_cards, x, y)
+  if bottom_index then controller:deck_builder_remove(bottom_index); return true end
+
+  return true
+end
+
+local function deck_builder_hovering(controller, x, y)
+  if controller.screen ~= "deck_builder" then return false end
+  local db = controller.deck_builder
+  if not db then return false end
+  if View.point_in(View.deck_builder_back_button, x, y) then return true end
+  if #db.bottom_cards >= View.DECK_BUILDER_MIN_CARDS and View.point_in(View.deck_builder_test_button, x, y) then return true end
+  local top_layout = View.deck_builder_top_layout(controller)
+  local top_scroll = math.max(0, math.min(top_layout.max_scroll, db.top_scroll or 0))
+  if View.deck_builder_hit(top_layout, top_scroll, #db.top_defs, x, y) then return true end
+  local bottom_layout = View.deck_builder_bottom_layout(controller)
+  local bottom_scroll = math.max(0, math.min(bottom_layout.max_scroll, db.bottom_scroll or 0))
+  if View.deck_builder_hit(bottom_layout, bottom_scroll, #db.bottom_cards, x, y) then return true end
   return false
 end
 
@@ -225,7 +276,7 @@ local function team_select_click(controller, x, y)
     controller:team_select_focus(party_id); return true
   end
 
-  if #ts.selected_ids == 4 and View.point_in(View.team_select_launch_button, x, y) then
+  if #ts.selected_ids == ts.max_team_size and View.point_in(View.team_select_launch_button, x, y) then
     controller:team_select_launch()
     return true
   end
@@ -245,6 +296,7 @@ end
 -- par reset_run(), qui reconduit déjà self.run_mode tout seul.
 local function restart_after_defeat(controller)
   if controller.run_mode == "boss_test" then controller:start_boss_test()
+  elseif controller.run_mode == "solo_test" then controller:start_solo_test()
   else controller:reset_run()
   end
 end
@@ -254,6 +306,7 @@ local function mousepressed_tap(controller, x, y, button)
   if pause_menu_click(controller, x, y) then return end
   if deck_view_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
+  if deck_builder_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
   if controller.screen == "bossVictory" then return end
   local state = controller.state
@@ -362,6 +415,7 @@ local function mousepressed_arrow(controller, x, y, button)
   if pause_menu_click(controller, x, y) then return end
   if deck_view_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
+  if deck_builder_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
   if controller.screen == "bossVictory" then return end
   local state = controller.state
@@ -455,7 +509,22 @@ local function mousepressed_arrow(controller, x, y, button)
   if hand_id then controller:select_card(hand_id) end
 end
 
+-- Clic DROIT (2026-09-02, demande explicite -- écran "Construis ton deck",
+-- bascule base/améliorée d'une carte du panneau du bas) : seul geste de ce
+-- fichier qui n'est PAS un clic gauche -- traité à part, avant le garde-fou
+-- `button ~= 1` ci-dessous qui ignorait silencieusement tout le reste.
+local function deck_builder_right_click(controller, x, y)
+  if controller.screen ~= "deck_builder" then return end
+  local db = controller.deck_builder
+  if not db then return end
+  local bottom_layout = View.deck_builder_bottom_layout(controller)
+  local bottom_scroll = math.max(0, math.min(bottom_layout.max_scroll, db.bottom_scroll or 0))
+  local index = View.deck_builder_hit(bottom_layout, bottom_scroll, #db.bottom_cards, x, y)
+  if index then controller:deck_builder_toggle_upgrade(index) end
+end
+
 function Input.mousepressed(controller, x, y, button)
+  if button == 2 then deck_builder_right_click(controller, x, y); return end
   if button ~= 1 then return end
   if controller.input_mode == "arrow" then mousepressed_arrow(controller, x, y, button)
   else mousepressed_tap(controller, x, y, button) end
@@ -529,7 +598,7 @@ local function team_select_hovering(controller, x, y)
   if available_id and controller:team_select_hero_interactive(available_id) then return true end
   local party_id = find_rect(View.team_select_party_rects(controller), x, y)
   if party_id and controller:team_select_hero_interactive(party_id) then return true end
-  if #ts.selected_ids == 4 and View.point_in(View.team_select_launch_button, x, y) then return true end
+  if #ts.selected_ids == ts.max_team_size and View.point_in(View.team_select_launch_button, x, y) then return true end
   if View.point_in(View.team_select_autofill_button, x, y) then return true end
   return false
 end
@@ -540,6 +609,7 @@ local function is_hovering_clickable_tap(controller, x, y)
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
     return menu_hovering(controller, x, y)
   end
+  if controller.screen == "deck_builder" then return deck_builder_hovering(controller, x, y) end
   if controller.screen == "team_select" then return team_select_hovering(controller, x, y) end
   if controller.screen == "bossVictory" then return false end
   local state = controller.state
@@ -600,6 +670,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
     return menu_hovering(controller, x, y)
   end
+  if controller.screen == "deck_builder" then return deck_builder_hovering(controller, x, y) end
   if controller.screen == "team_select" then return team_select_hovering(controller, x, y) end
   if controller.screen == "bossVictory" then return false end
   local state = controller.state
@@ -670,6 +741,26 @@ function Input.mousemoved(controller, x, y)
   if controller.screen == "boss_select" then
     for _, b in ipairs(View.boss_select_buttons) do
       if View.point_in(b, x, y) then controller:set_hover("boss_preview", b.biome); return end
+    end
+    controller:set_hover(nil, nil)
+    return
+  end
+
+  -- Écran "Construis ton deck" (2026-09-02) : infobulle générique "card"
+  -- (déjà utilisée partout ailleurs -- mots-clés du glossaire présents dans
+  -- def.desc, voir tooltip_lines dans view.lua) sur n'importe quelle carte
+  -- des 2 panneaux, rien en dehors.
+  if controller.screen == "deck_builder" then
+    local db = controller.deck_builder
+    if db then
+      local top_layout = View.deck_builder_top_layout(controller)
+      local top_scroll = math.max(0, math.min(top_layout.max_scroll, db.top_scroll or 0))
+      local top_index = View.deck_builder_hit(top_layout, top_scroll, #db.top_defs, x, y)
+      if top_index then controller:set_hover("card", db.top_defs[top_index]); return end
+      local bottom_layout = View.deck_builder_bottom_layout(controller)
+      local bottom_scroll = math.max(0, math.min(bottom_layout.max_scroll, db.bottom_scroll or 0))
+      local bottom_index = View.deck_builder_hit(bottom_layout, bottom_scroll, #db.bottom_cards, x, y)
+      if bottom_index then controller:set_hover("card", db.bottom_cards[bottom_index].def); return end
     end
     controller:set_hover(nil, nil)
     return
@@ -825,7 +916,21 @@ end
 -- fenêtre n'est pas ouverte (voir Controller:scroll_deck_view, qui garde
 -- déjà ce même garde-fou, doublé ici pour ne pas dépenser un appel pour rien).
 function Input.wheelmoved(controller, dx, dy)
-  if controller.deck_view_open then controller:scroll_deck_view(dy) end
+  if controller.deck_view_open then controller:scroll_deck_view(dy); return end
+  -- Écran "Construis ton deck" (2026-09-02, demande explicite -- "la partie
+  -- haute et la partie basse sont indépendantes, chacune leur ascenseur") :
+  -- le panneau défilé dépend d'où le curseur se trouve AU MOMENT du cran de
+  -- molette (love.mouse.getPosition(), voir le commentaire de SCALE en tête
+  -- de ce fichier -- seul appel de ce genre ici, dx/dy n'étant que des crans).
+  if controller.screen == "deck_builder" and controller.deck_builder then
+    local mx, my = love.mouse.getPosition()
+    mx, my = mx / SCALE, my / SCALE
+    if View.point_in(View.deck_builder_top_panel_rect, mx, my) then
+      controller:scroll_deck_builder("top", dy)
+    elseif View.point_in(View.deck_builder_bottom_panel_rect, mx, my) then
+      controller:scroll_deck_builder("bottom", dy)
+    end
+  end
 end
 
 return Input

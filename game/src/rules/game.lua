@@ -29,6 +29,20 @@ local function def_has_cat(def, cat)
   end
   return false
 end
+
+-- Même idiome que def_has_cat ci-dessus, mais sur `def.types` (2026-09-03,
+-- cartes "Enchantement" -- Frénésie du Guerrier compte les cartes de type
+-- "offensive" jouées ce tour, voir Game.on_card_played) : les 2 champs sont
+-- des tableaux de tags distincts (`cats` = catégories internes/mots-clés de
+-- carte, `types` = Offensive/Support/Enchantement affichés sur la cellule en
+-- haut de la carte, voir cards.lua/view.lua) -- jamais confondus.
+local function def_has_type(def, t)
+  if not def or not def.types then return false end
+  for _, x in ipairs(def.types) do
+    if x == t then return true end
+  end
+  return false
+end
 -- Exposée publiquement (2026-08-28, demande explicite -- petit effet visuel
 -- de disparition sur une carte "Furtif" défaussée, voir
 -- Controller:animate_discard_snapshot dans src/ui/controller.lua) : la UI a
@@ -130,6 +144,21 @@ local function fresh_hero(def)
     thorns = nil, card_cost_delta = nil, targeting_bonus = nil, force_amnesie = nil,
     extra_draw = nil, turn_start_shield = nil, death_ward = nil, reserviste = nil,
     discard_on_draw_chance = nil,
+    -- Enchantements (2026-09-03, demande explicite -- 2 par classe, jamais
+    -- "Départ", accordés par la carte correspondante au moment où elle est
+    -- jouée -- voir cards.lua) : nil tant qu'aucun n'a été joué CE combat,
+    -- comme blessing/curse ci-dessus mais remis à nil à CHAQUE combat (voir
+    -- carried_hero plus bas) plutôt que persistant tout le run, puisqu'il
+    -- faut rejouer la carte pour réactiver le pouvoir. `frenesie_bonus_pct`
+    -- (Guerrier) est le seul champ non-nil par défaut (0, pas nil) -- décroît
+    -- au sens où il repart à 0 CHAQUE TOUR même une fois Frénésie active,
+    -- voir Game.start_turn.
+    instinct_chasseur = nil, frenesie_step = nil, frenesie_bonus_pct = 0,
+    bouclier_vivant_ratio = nil, shield_thorns = nil,
+    combustion_differee = nil, second_souffle = nil,
+    ombre_patiente = nil, imperceptible = nil,
+    rite_de_la_chair = nil, pacte_survie = nil,
+    memoire_melodique = nil, tournee_finale = nil,
   }
 end
 
@@ -257,6 +286,17 @@ local function carried_hero(h)
   -- que fresh_hero (voir sa définition, tout premier combat d'un run) --
   -- jamais 2 sources de vérité pour cette valeur.
   if n.mana ~= nil then n.mana = MAGE_MANA_START end
+  -- Enchantements (2026-09-03) : remis à nil (rien joué CE combat) à chaque
+  -- nouveau combat, même principe que puissance/provocation plus haut --
+  -- toujours à rejouer pour être réactivés, jamais reportés d'un combat à
+  -- l'autre (contrairement à blessing/curse, propagés tels quels par
+  -- shallow_copy ci-dessus, rien à faire pour ces 2-là).
+  n.instinct_chasseur = nil; n.frenesie_step = nil; n.frenesie_bonus_pct = 0
+  n.bouclier_vivant_ratio = nil; n.shield_thorns = nil
+  n.combustion_differee = nil; n.second_souffle = nil
+  n.ombre_patiente = nil; n.imperceptible = nil
+  n.rite_de_la_chair = nil; n.pacte_survie = nil
+  n.memoire_melodique = nil; n.tournee_finale = nil
   apply_combat_start_temple_effects(n)
   return n
 end
@@ -289,12 +329,29 @@ end
 -- joue aucune carte ce tour" -- voir Game.on_card_played/
 -- Game.tick_discretion_end_of_turn) : ne jamais écrire `hero.discretion = ...`
 -- directement ailleurs.
+-- "Imperceptible" (2026-09-03, Enchantement de l'Assassin -- hero.imperceptible) :
+-- +2/+4 à CHAQUE gain de Discrétion, quelle qu'en soit la source -- appliqué
+-- ICI, seul point d'entrée pour un gain de Discrétion (voir le commentaire
+-- au-dessus de cette fonction), donc valable aussi bien pour les cartes
+-- Assassinat/En traître/Préparation que pour le passif générique "+1 quand un
+-- allié joue une carte"/"+5 en fin de tour sans agir" -- rien à dupliquer
+-- ailleurs.
 function Game.gain_discretion(state, hero, amount)
+  if hero.imperceptible then amount = amount + hero.imperceptible end
   local was_camoufle = (hero.camoufle or 0) > 0
   hero.discretion = math.min(10, (hero.discretion or 0) + amount)
   if hero.discretion >= 10 then
     hero.camoufle = 1
     if not was_camoufle then Combat.log(state, hero.name .. " atteint 10 Discrétion : Camouflé.", "power") end
+    -- "Ombre patiente" (2026-09-03, Enchantement de l'Assassin --
+    -- hero.ombre_patiente) : Puissance à CHAQUE entrée en Camouflé (`not
+    -- was_camoufle` = transition 0->1, pas "reste Camouflé") -- répétable
+    -- sans plafond dans un même combat si la Discrétion retombe puis remonte
+    -- à 10 plusieurs fois, confirmé explicitement par le porteur de projet.
+    if not was_camoufle and hero.ombre_patiente then
+      Combat.apply_status(hero, "puissance", hero.ombre_patiente)
+      Combat.log(state, hero.name .. " (Ombre patiente) gagne " .. hero.ombre_patiente .. " Puissance.", "power")
+    end
     Game.sync_camoufle_visibility(state)
   end
 end
@@ -327,6 +384,13 @@ function Game.new_state()
     run = { combat_index = 1 }, draft_picks = nil,
     combat_snapshot = nil, turn_snapshot = nil, uid_counter = 0, log = {},
     rng = nil, -- créés par Game.reset_run (voir Game.new_rng_streams)
+    -- "Mémoire mélodique" (2026-09-03, Enchantement du Barde) : uids de cartes
+    -- en main rendues gratuites JUSTE POUR CE TOUR -- revenues à leur coût
+    -- normal au tour suivant (voir Game.start_turn), jamais au combat suivant
+    -- comme le "coût 0" permanent d'Avalanche de coups (ctx.zero_cost,
+    -- reset_temporary_card_state) -- mécanisme distinct et parallèle, pas une
+    -- réutilisation.
+    turn_free_uids = {},
   }
 end
 
@@ -367,6 +431,11 @@ function Game.new_rng_streams(master_seed)
     -- même raison d'être que "curse" ci-dessus (ne jamais décaler un AUTRE
     -- tirage reproductible pour un contenu qui n'existait pas encore).
     necro = Rng.new(master_seed + 8),
+    -- "Mémoire mélodique" (2026-09-03, Enchantement du Barde) : tire la carte
+    -- au hasard dans le reste de la main rendue gratuite ce tour-ci -- flux
+    -- dédié, même raison d'être que "curse"/"necro" ci-dessus (ne jamais
+    -- décaler un AUTRE tirage reproductible).
+    enchantment = Rng.new(master_seed + 9),
   }
 end
 
@@ -600,6 +669,45 @@ function Game.start_boss_test(state, seed, selected_ids, biome, level)
   Game.start_turn(state)
 end
 
+--- "Run Solo" (2026-09-02, menu "Run Solo", écran "Construis ton deck") : ne
+-- prépare QUE le 1er combat -- un seul héros, rencontre ALÉATOIRE
+-- (Encounter.generate_encounter, même budget que le tout 1er combat d'un run
+-- normal) au lieu d'un boss fixe, ET un deck ENTIÈREMENT fourni par l'appelant
+-- (`deck_defs`, liste de defs -- base OU améliorée, choisies carte par carte
+-- sur l'écran de construction) plutôt que Deck.build_starting_deck.
+-- `hero_id` : un seul, pas une liste `selected_ids` comme les autres
+-- Game.start_*. Les combats SUIVANTS (2026-09-03, refonte -- demande
+-- explicite : "il faut enchainer les combats à la suite avec la difficulté
+-- qui augmente [...] sans évènements ni draft entre chaque combat. Pas de
+-- fin") ne repassent PLUS par cette fonction : `state.run.mode` reste nil ici
+-- (jamais "bounded"), donc Game.start_next_combat -- appelé directement par
+-- Controller:advance_to_next_combat après chaque victoire, voir
+-- Controller:enter_solo_victory -- lui suffit tel quel pour enchaîner : budget
+-- croissant (Encounter.budget_for_combat(combat_index)), jamais d'Élite/de
+-- biome (conditions réservées à `mode == "bounded"`), jamais de boss (seul
+-- Game.start_boss_combat en pose, jamais appelé pour ce run_mode).
+function Game.start_solo_run(state, seed, hero_id, deck_defs)
+  state.heroes = { fresh_hero(Heroes.by_id(hero_id)) }
+  state.run = { combat_index = 1, is_boss = false }
+  state.rng = Game.new_rng_streams(seed)
+  local budget = Encounter.budget_for_combat(1)
+  local instances = Encounter.generate_encounter(budget, state.rng.encounter, nil)
+  local enemies = {}
+  for i, inst in ipairs(instances) do
+    enemies[i] = Encounter.instantiate_enemy(inst.template, inst.level, function() return Game.next_uid(state) end, state.rng.encounter)
+  end
+  state.enemies = enemies
+  local cards = {}
+  for _, def in ipairs(deck_defs) do cards[#cards + 1] = { uid = Game.next_uid(state), def = def } end
+  state.deck = Deck.shuffle(cards, state.rng.deck)
+  state.hand = {}; state.discard = {}; state.exhausted = {}; state.pending = nil
+  state.turn = 1; state.over = false; state.energy = 0
+  state.log = {}
+  Combat.log(state, "Run Solo (budget " .. budget .. ") : " .. Encounter.summary(state.enemies), "sys")
+  Game.snapshot_combat(state)
+  Game.start_turn(state)
+end
+
 --- Le boss d'un run borné à 5 combats (2026-08-21, demande explicite) :
 -- mêmes fondations que Game.start_next_combat (héros/deck reportés du combat
 -- précédent) mais rencontre FIXE (Encounter.boss_encounter) plutôt que tirée
@@ -743,12 +851,37 @@ end
 -- Retourne la liste des uids piochés (pour que la UI puisse les animer).
 function Game.start_turn(state)
   if state.over then return {} end
+  -- "Mémoire mélodique" (2026-09-03, Enchantement du Barde) : les cartes
+  -- rendues gratuites JUSTE POUR LE TOUR précédent (voir Game.resolve_pending/
+  -- state.turn_free_uids) reviennent à leur coût normal ICI, avant tout autre
+  -- traitement de ce nouveau tour -- `reset_temporary_card_state` (déjà
+  -- utilisée par Game.start_next_combat/start_boss_combat pour Avalanche de
+  -- coups) respecte `is_upgraded`, donc une carte améliorée reste améliorée,
+  -- seul le coût 0 posé par Mémoire mélodique s'efface.
+  for _, c in ipairs(state.hand) do
+    if state.turn_free_uids[c.uid] then reset_temporary_card_state(c) end
+  end
+  state.turn_free_uids = {}
   local bonus_energy = state.turn > 1 and reserviste_bonus_energy(state) or 0
   state.energy = Game.TURN_START_ENERGY + bonus_energy
   for _, h in ipairs(state.heroes) do
     if h.hp > 0 then
       h.defense = 0
       h.played_card_this_turn = false
+      -- Frénésie (2026-09-03, Enchantement du Guerrier -- hero.frenesie_bonus_pct) :
+      -- repart à 0 CHAQUE tour (même si Frénésie reste active tout le
+      -- combat, voir hero.frenesie_step) -- "depuis le début du tour",
+      -- jamais un cumul entre tours.
+      h.frenesie_bonus_pct = 0
+      -- "Rite de la Chair" (2026-09-03, Enchantement du Nécromancien --
+      -- hero.rite_de_la_chair) : Corruption automatique à CHAQUE début de
+      -- tour, inconditionnel (plus de seuil de PV bas -- tranché
+      -- explicitement par le porteur de projet, plus large que la 1ʳᵉ
+      -- mouture proposée).
+      if h.rite_de_la_chair then
+        h.corruption = (h.corruption or 0) + h.rite_de_la_chair
+        Combat.log(state, h.name .. " (Rite de la Chair) gagne " .. h.rite_de_la_chair .. " Corruption.", "power")
+      end
       -- Puissance ne décroît plus ICI (2026-09-02, demande explicite -- "la
       -- puissance descend à la fin de chaque tour, que ce soit pour les
       -- aventuriers ou les ennemis") : déplacée en FIN de tour, aux côtés
@@ -759,7 +892,11 @@ function Game.start_turn(state)
       -- APRÈS la remise à 0 de la Défense juste au-dessus, sinon le gain
       -- serait effacé aussitôt -- chaque DÉBUT DE TOUR, pas seulement à
       -- l'entrée en combat (contrairement à la plupart des autres effets).
-      if h.turn_start_shield then Combat.grant_defense(h, h.turn_start_shield) end
+      -- `{state=state}` (2026-09-03) : pas un `ctx` de carte complet (pas de
+      -- `hero`, donc l'Inspiration n'y voit toujours aucun effet, inchangé) --
+      -- juste assez pour que "Bouclier vivant" (Combat.grant_defense) puisse
+      -- retrouver le reste de l'équipe même pour CE gain hors carte.
+      if h.turn_start_shield then Combat.grant_defense(h, h.turn_start_shield, { state = state }) end
       -- Boucliers programmés (2026-08-28, "Infranchissable") : même raison
       -- d'être qu'au-dessus (après la remise à 0 de la Défense).
       if h.scheduled_shields and #h.scheduled_shields > 0 then
@@ -767,7 +904,7 @@ function Game.start_turn(state)
         for _, entry in ipairs(h.scheduled_shields) do
           entry.turns_left = entry.turns_left - 1
           if entry.turns_left <= 0 then
-            Combat.grant_defense(h, entry.amount)
+            Combat.grant_defense(h, entry.amount, { state = state })
             Combat.log(state, h.name .. " reçoit " .. entry.amount .. " bouclier programmé.", "you")
           else
             remaining[#remaining + 1] = entry
@@ -947,7 +1084,19 @@ function Game.resolve_pending(state, kind, target_id)
   -- def.target == "all-enemies" : target reste nil, l'effet itère living_enemies() lui-même.
 
   state.energy = state.energy - cost
-  if def.mana_cost then hero.mana = hero.mana - def.mana_cost end
+  if def.mana_cost then
+    hero.mana = hero.mana - def.mana_cost
+    -- "Second Souffle" (2026-09-03, Enchantement du Mage -- hero.second_souffle) :
+    -- CHAQUE fois que le Mage tombe à 0 mana (jamais négatif, voir
+    -- Combat.can_play qui bloque déjà toute carte trop coûteuse) -- répétable,
+    -- sans plafond, explicitement à l'ESSAI (2026-09-03, "pour l'instant") --
+    -- à rééquilibrer si besoin plus tard, garder cette note tant que ce statut
+    -- expérimental n'a pas été confirmé/révisé par le porteur de projet.
+    if hero.mana == 0 and hero.second_souffle then
+      hero.mana = hero.mana + hero.second_souffle
+      Combat.log(state, hero.name .. " (Second Souffle) regagne " .. hero.second_souffle .. " mana.", "power")
+    end
+  end
   -- Coût variable en Corruption (2026-08-29, Nécromancien -- "1 (+X, 0-N
   -- Corruption)") : X = tout ce que le héros peut fournir jusqu'au plafond
   -- `def.corruption_cost_cap`, déduit ICI (jamais un choix du joueur, jamais
@@ -986,6 +1135,7 @@ function Game.resolve_pending(state, kind, target_id)
     Combat.log(state, def.name .. " se déclenche " .. extra_plays .. " fois de plus (Encore).", "power")
   end
   Game.on_card_played(state, hero, def)
+  Game.apply_memoire_melodique(state, hero, pending.uid)
   Game.check_victory(state)
   Game.finish_card(state, pending, ctx)
 end
@@ -1007,6 +1157,17 @@ end
 function Game.on_card_played(state, hero, def)
   hero.played_card_this_turn = true
   if (hero.gratuite or 0) > 0 then hero.gratuite = hero.gratuite - 1 end
+  -- Frénésie (2026-09-03, Enchantement du Guerrier -- hero.frenesie_step) :
+  -- CHAQUE carte Offensive du Guerrier jouée incrémente le bonus de dégâts
+  -- pour la PROCHAINE (pas celle-ci -- elle vient de se résoudre avec la
+  -- valeur PRÉCÉDENTE, voir Combat.damage_multiplier) -- une carte de zone
+  -- (Coup de taille) ne compte que pour +1, quel que soit le nombre
+  -- d'ennemis touchés, puisque cette fonction se déclenche 1 SEULE fois par
+  -- carte jouée, jamais par cible touchée -- tranché explicitement par le
+  -- porteur de projet.
+  if hero.frenesie_step and def_has_type(def, "offensive") then
+    hero.frenesie_bonus_pct = (hero.frenesie_bonus_pct or 0) + hero.frenesie_step
+  end
   local furtif = def_has_cat(def, "furtif")
   if hero.discretion ~= nil then
     if not furtif then
@@ -1050,6 +1211,35 @@ local function zero_cost_def(def)
   for k, v in pairs(def) do d[k] = v end
   d.cost = 0
   return d
+end
+
+--- "Mémoire mélodique" (2026-09-03, Enchantement du Barde --
+-- hero.memoire_melodique) : CHAQUE carte Barde jouée (donc `hero.class_id ==
+-- "barde"` suffit -- un héros ne joue jamais que les cartes de sa propre
+-- classe, voir Game.select_card) rend gratuite, jusqu'à la fin du tour, UNE
+-- carte au hasard parmi le RESTE de la main -- jamais la carte tout juste
+-- jouée elle-même, encore présente dans `state.hand` à cet instant précis
+-- (Game.finish_card ne la retire qu'ENSUITE, voir Game.resolve_pending) --
+-- exclue explicitement via `played_uid`. Réutilise `zero_cost_def` ci-dessus
+-- comme Avalanche de coups, mais le uid rejoint `state.turn_free_uids`
+-- plutôt que de compter sur `reset_temporary_card_state` à la prochaine
+-- ENTRÉE EN COMBAT -- revenue à son coût normal au tour SUIVANT (voir
+-- Game.start_turn), pas au combat suivant : mécanisme parallèle assumé, pas
+-- une pure réutilisation (collision théorique avec un "coût 0" permanent
+-- d'Avalanche de coups sur LA MÊME copie de carte non gérée -- combo assez
+-- rare, Guerrier ET Barde requis dans la même main, pour être laissée de
+-- côté pour l'instant).
+function Game.apply_memoire_melodique(state, hero, played_uid)
+  if not (hero.memoire_melodique and hero.class_id == "barde") then return end
+  local candidates = {}
+  for _, c in ipairs(state.hand) do
+    if c.uid ~= played_uid then candidates[#candidates + 1] = c end
+  end
+  if #candidates == 0 then return end
+  local pick = candidates[state.rng.enchantment:random(#candidates)]
+  pick.def = zero_cost_def(pick.def)
+  state.turn_free_uids[pick.uid] = true
+  Combat.log(state, pick.def.name .. " devient gratuite ce tour-ci (Mémoire mélodique).", "power")
 end
 
 --- Équivalent finishCard : retire la carte de la main vers défausse/main/dessus

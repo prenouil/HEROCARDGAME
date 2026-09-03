@@ -90,6 +90,23 @@ local function consume_inspiration(amount, ctx)
   if ctx and ctx.hero and (ctx.hero.inspiration or 0) > 0 and not ctx.inspiration_consumed then
     ctx.inspiration_consumed = true
     ctx.hero.inspiration = ctx.hero.inspiration - 1
+    -- "Tournée finale" (2026-09-03, Enchantement du Barde -- hero.tournee_finale) :
+    -- CHAQUE fois qu'un allié consomme une charge d'Inspiration (pas
+    -- seulement la dernière) il gagne du bouclier -- cherche le Barde parmi
+    -- l'équipe via `ctx.state` (1 seul par équipe, peut être `ctx.hero`
+    -- lui-même si le Barde consomme SA PROPRE Inspiration -- aucun cas
+    -- particulier nécessaire, la boucle le retrouve comme n'importe quel
+    -- autre porteur). `ctx.state` absent (gain de bouclier/soin/dégâts hors
+    -- carte) : l'effet ne se déclenche simplement pas.
+    if ctx.state then
+      for _, h in ipairs(ctx.state.heroes) do
+        if h.tournee_finale and h.hp > 0 then
+          Combat.grant_defense(ctx.hero, h.tournee_finale, ctx)
+          Combat.log(ctx.state, ctx.hero.name .. " (Tournée finale) gagne " .. h.tournee_finale .. " bouclier.", "you")
+          break
+        end
+      end
+    end
     return amount + 6
   end
   return amount
@@ -154,6 +171,14 @@ function Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire)
   if source_unit and (source_unit.puissance or 0) > 0 and dmg_type == "physique" then
     pct = pct + 0.25 * source_unit.puissance -- Puissance (Assassin, via Assassinat/En traître) : par stack
   end
+  -- Frénésie (2026-09-03, Enchantement du Guerrier) : `frenesie_bonus_pct` est
+  -- déjà le pourcentage total résolu (0.5/0.75 par carte Offensive déjà jouée
+  -- CE TOUR, voir Game.on_card_played/Game.start_turn) -- pas un compteur de
+  -- stacks à multiplier ici comme Puissance ci-dessus, le pas peut différer
+  -- entre base (0.5) et amélioré (0.75).
+  if source_unit and (source_unit.frenesie_bonus_pct or 0) > 0 and dmg_type == "physique" then
+    pct = pct + source_unit.frenesie_bonus_pct
+  end
   if source_unit and (source_unit.incapacite or 0) > 0 then
     pct = pct - 0.25 -- Incapacité : -25% flat, peu importe le nombre de stacks (comme Vulnérabilité)
   end
@@ -216,6 +241,20 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
   local to_hp = amount - absorbed
   target_unit.hp = target_unit.hp - to_hp
 
+  -- "Bouclier de pointes" (2026-09-03, Enchantement du Paladin -- hero.shield_thorns) :
+  -- réagit au bouclier ABSORBÉ (`absorbed` ci-dessus), PAS aux PV perdus comme
+  -- "Le Rancunier"/hero.thorns plus bas -- condition quasi inverse (thorns
+  -- réagit à ce qui PASSE le bouclier), donc un champ jumeau distinct plutôt
+  -- que de réutiliser thorns, les 2 pouvant coexister sur un même héros.
+  -- `source_unit ~= target_unit` : jamais de retour sur soi-même (même garde
+  -- que thorns), même si aucun effet du jeu ne fait aujourd'hui encaisser au
+  -- Paladin un coup dont IL serait la source.
+  if absorbed > 0 and target_unit.shield_thorns and source_unit and source_unit ~= target_unit and source_unit.hp > 0 then
+    local retaliation = absorbed * target_unit.shield_thorns
+    Combat.deal_damage(state, nil, source_unit, retaliation, nil, nil, { brut = true, source_unit = target_unit })
+    Combat.log(state, target_unit.name .. " (Bouclier de pointes) renvoie " .. retaliation .. " dégâts à " .. source_unit.name .. ".", "you")
+  end
+
   -- "La Renaissante" (2026-08-29, bénédiction -- hero.death_ward, un simple
   -- booléen copié depuis Temple.effects par
   -- Game.apply_combat_start_temple_effects, jamais une connaissance directe
@@ -265,6 +304,19 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
     target_unit.corruption = target_unit.corruption + to_hp
   end
 
+  -- "Pacte de Survie" (2026-09-03, Enchantement du Nécromancien --
+  -- hero.pacte_survie) : gagne 1/2 bouclier PAR PV perdu à CE déclenchement,
+  -- quelle qu'en soit la source (dégâts ennemis OU auto-sacrifice de ses
+  -- propres cartes, même geste générique que Corruption juste au-dessus).
+  -- Sans plafond -- choix assumé par le porteur de projet (2026-09-03), pas
+  -- un oubli : combiné à Pacte funeste (auto-sacrifice la moitié/le tiers de
+  -- ses PV), un seul déclenchement peut donner un gros pic de bouclier -- à
+  -- surveiller en playtest plutôt qu'un plafond arbitraire deviné ici.
+  if to_hp > 0 and target_unit.pacte_survie and target_unit.hp > 0 then
+    local shield = Combat.grant_defense(target_unit, to_hp * target_unit.pacte_survie)
+    Combat.log(state, target_unit.name .. " (Pacte de Survie) gagne " .. shield .. " bouclier.", "you")
+  end
+
   -- "Le Rancunier" (2026-08-29, bénédiction -- hero.thorns) : renvoie ce
   -- montant à l'attaquant à chaque VRAIE perte de PV -- `source_unit` porte le
   -- VRAI frappeur même pour une attaque ennemie (voir sa doc plus haut, jamais
@@ -295,6 +347,26 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
     end
   end
 
+  -- "Instinct du Chasseur" (2026-09-03, Enchantement du Guerrier --
+  -- hero.instinct_chasseur) : CHAQUE coup porté par une carte du Guerrier sur
+  -- un ennemi (pas seulement un kill -- tranché explicitement par le porteur
+  -- de projet, plus large que la 1ʳᵉ mouture proposée) -- `amount > 0` : le
+  -- coup a réellement porté quelque chose, même entièrement absorbé par du
+  -- bouclier, pas juste "visé".
+  if amount > 0 and is_enemy_target and source_hero and source_hero.instinct_chasseur then
+    Combat.grant_defense(source_hero, source_hero.instinct_chasseur)
+    Combat.log(state, source_hero.name .. " (Instinct du Chasseur) gagne " .. source_hero.instinct_chasseur .. " bouclier.", "you")
+  end
+
+  -- "Combustion différée" (2026-09-03, Enchantement du Mage --
+  -- hero.combustion_differee) : chaque dégât "feu" du Mage qui touche un
+  -- ennemi (même détection `is_fire` que la sensibilité au feu de l'Homme
+  -- Arbre plus haut) lui applique Brûlure en plus.
+  if amount > 0 and is_enemy_target and is_fire and source_hero and source_hero.combustion_differee then
+    Combat.apply_status(target_unit, "brulure", source_hero.combustion_differee)
+    Combat.log(state, target_unit.name .. " prend feu (Combustion différée).", "you")
+  end
+
   -- "Le Blessé" (2026-08-29, malédiction -- hero.self_damage_on_hit) :
   -- l'aventurier maudit se blesse lui-même à chaque attaque qui inflige
   -- RÉELLEMENT des dégâts à un ennemi (jamais sur un allié touché par erreur,
@@ -317,6 +389,32 @@ end
 function Combat.grant_defense(target_unit, base, ctx)
   local amount = round(consume_inspiration(base, ctx))
   target_unit.defense = (target_unit.defense or 0) + amount
+  -- "Bouclier vivant" (2026-09-03, Enchantement du Paladin --
+  -- hero.bouclier_vivant_ratio) : CHAQUE fois que le Paladin lui-même gagne
+  -- du bouclier, quelle qu'en soit la source (ses propres cartes, un
+  -- bouclier programmé/de début de tour posé par Game.start_turn, etc. --
+  -- cette fonction est LE point de passage unique pour tout gain de
+  -- bouclier, voir son commentaire au-dessus) -- l'AUTRE allié vivant le
+  -- plus bas en PV (jamais le Paladin lui-même, sinon un 2ᵉ octroi le
+  -- reciblerait et boucle à l'infini) en gagne la moitié/la totalité.
+  -- `ctx.state` requis pour retrouver le reste de l'équipe -- absent pour un
+  -- gain hors carte sans état accessible, l'effet ne fait alors simplement
+  -- rien plutôt que planter (voir Game.start_turn, qui passe désormais
+  -- `{state=state}` pour turn_start_shield/scheduled_shields, justement pour
+  -- que ce cas reste couvert).
+  if amount > 0 and target_unit.bouclier_vivant_ratio and ctx and ctx.state then
+    local best = nil
+    for _, h in ipairs(ctx.state.heroes) do
+      if h ~= target_unit and h.hp > 0 and (not best or h.hp < best.hp) then best = h end
+    end
+    if best then
+      local shared = round(amount * target_unit.bouclier_vivant_ratio)
+      if shared > 0 then
+        best.defense = (best.defense or 0) + shared
+        Combat.log(ctx.state, best.name .. " reçoit " .. shared .. " bouclier (Bouclier vivant).", "you")
+      end
+    end
+  end
   return amount
 end
 

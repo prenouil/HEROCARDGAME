@@ -356,8 +356,12 @@ do
   -- "infini" (Controller.run_mode == "infini", pool d'ennemis non filtré par
   -- biome, etc.) reste intact, juste devenu inaccessible depuis l'UI --
   -- retrait complet hors scope de cette demande.
+  -- "Run Solo" (2026-09-02, demande explicite, sous "Jouer un run") : un
+  -- seul aventurier, deck personnalisé construit à la main -- voir
+  -- Controller:enter_deck_builder.
   local defs = {
     { id = "run", label = "Jouer un run" },
+    { id = "solo", label = "Run Solo" },
     { id = "boss", label = "Tester un boss" },
     { id = "options", label = "Options" },
     { id = "quit", label = "Quitter" },
@@ -415,6 +419,106 @@ do
   View.boss_select_level_text_rect = { x = W / 2 - 70, y = row_y, w = 140, h = 24 }
   View.boss_select_level_minus = { x = W / 2 - 60, y = row_y + 28, w = 40, h = 32 }
   View.boss_select_level_plus = { x = W / 2 + 20, y = row_y + 28, w = 40, h = 32 }
+end
+
+-- Écran "Construis ton deck" ("Run Solo", 2026-09-02, demande explicite) :
+-- panneau du haut = toutes les cartes de l'aventurier choisi (Cards.list
+-- filtrée par class_id, voir Controller:enter_deck_builder), panneau du bas
+-- = le deck en construction -- CHACUN son défilement indépendant (molette,
+-- voir Controller:scroll_deck_builder), même geste que View.deck_view_layout
+-- (fenêtre "voir le deck") mais dupliqué en 2 zones distinctes plutôt que
+-- factorisé en un module à part -- la mise en page (colonnes/ascenseur) reste
+-- identique, seules les données diffèrent.
+View.deck_builder_top_panel_rect = { x = 40, y = 50, w = W - 80, h = 260 }
+View.deck_builder_bottom_panel_rect = { x = 40, y = 330, w = W - 80, h = 250 }
+View.deck_builder_back_button = { x = 40, y = 630, w = 180, h = 60, label = "Retour" }
+View.deck_builder_test_button = { x = W - 240, y = 630, w = 200, h = 60, label = "Tester" }
+View.DECK_BUILDER_MIN_CARDS = 12
+
+-- Consolidée en un champ de View plutôt qu'un local de haut niveau
+-- (2026-09-02, limite des 200 locaux par chunk déjà serrée -- même souci que
+-- DraftFx plus loin, mais ce fichier était déjà pile à la limite : même 1
+-- SEUL local de plus la faisait déborder, voir son commentaire) : `View` est
+-- une table déjà existante, lui ajouter des champs ne coûte aucun local
+-- supplémentaire, contrairement à `local DeckBuilderFx`. Les fonctions
+-- internes ci-dessous restent des upvalues classiques d'un `do...end`.
+do
+  local GAP, LABEL_H, CARD_W_REF, SCROLLBAR_W = 10, 14, 78, 10
+  View._deck_builder_fx = { SCROLLBAR_W = SCROLLBAR_W }
+
+  -- Même formule que View.deck_view_layout (deck_view_layout, plus haut) :
+  -- carte à taille FIXE, colonnes adaptées à la largeur, défilement vertical
+  -- si le contenu déborde -- dupliquée ici plutôt que réutilisée telle quelle
+  -- (`View.deck_view_panel_rect` est un rect UNIQUE, pas paramétrable par zone).
+  local function layout(panel_rect, count)
+    local area_x, area_y = panel_rect.x + 10, panel_rect.y + 28
+    local area_w, area_h = panel_rect.w - 20, panel_rect.h - 38
+    local aspect = CARD_H / CARD_W
+    local card_w = CARD_W_REF
+    local card_h = card_w * aspect
+    local cell_w, cell_h = card_w + GAP, card_h + LABEL_H + GAP
+    local function compute(usable_w)
+      local cols = math.max(1, math.floor(usable_w / cell_w))
+      local rows = count > 0 and math.ceil(count / cols) or 0
+      return cols, rows, rows * cell_h
+    end
+    local cols, rows, content_h = compute(area_w)
+    local max_scroll = math.max(0, content_h - area_h)
+    if max_scroll > 0 then
+      cols, rows, content_h = compute(area_w - SCROLLBAR_W - 6)
+      max_scroll = math.max(0, content_h - area_h)
+    end
+    local grid_w = cols * cell_w
+    local ox = area_x + (area_w - (max_scroll > 0 and SCROLLBAR_W + 6 or 0) - grid_w) / 2
+    return {
+      cols = cols, rows = rows, card_w = card_w, card_h = card_h, cell_w = cell_w, cell_h = cell_h,
+      area_x = area_x, area_y = area_y, area_w = area_w, area_h = area_h, ox = ox,
+      content_h = content_h, max_scroll = max_scroll,
+    }
+  end
+  View._deck_builder_fx.layout = layout
+end
+
+function View.deck_builder_top_layout(controller)
+  local db = controller.deck_builder
+  return View._deck_builder_fx.layout(View.deck_builder_top_panel_rect, db and #db.top_defs or 0)
+end
+
+function View.deck_builder_bottom_layout(controller)
+  local db = controller.deck_builder
+  return View._deck_builder_fx.layout(View.deck_builder_bottom_panel_rect, db and #db.bottom_cards or 0)
+end
+
+-- Rect ÉCRAN d'une carte à `index` (1-based), défilement déjà appliqué --
+-- réutilisée à la fois par le rendu (draw_deck_builder) et par
+-- Controller:deck_builder_add/remove (positions de départ/arrivée des vols
+-- de carte, voir controller.card_anims/draw_card_flights).
+function View.deck_builder_rect_at(layout, scroll, index)
+  local col = (index - 1) % layout.cols
+  local row = math.floor((index - 1) / layout.cols)
+  return {
+    x = layout.ox + col * layout.cell_w, y = layout.area_y - scroll + row * layout.cell_h,
+    w = layout.card_w, h = layout.card_h,
+  }
+end
+
+-- Index (1-based) de la carte sous (x, y), ou nil -- hors zone visible
+-- (scissor, voir draw_deck_builder) ou hors grille (au-delà de `count`, ou
+-- dans un interstice entre 2 cartes). `scroll` DÉJÀ borné par l'appelant
+-- (Input.lua) via Controller:scroll_deck_builder, comme deck_view_scroll.
+function View.deck_builder_hit(layout, scroll, count, x, y)
+  if x < layout.area_x or x > layout.area_x + layout.area_w then return nil end
+  if y < layout.area_y or y > layout.area_y + layout.area_h then return nil end
+  local rel_x, rel_y = x - layout.ox, y - (layout.area_y - scroll)
+  if rel_x < 0 or rel_y < 0 then return nil end
+  local col = math.floor(rel_x / layout.cell_w)
+  local row = math.floor(rel_y / layout.cell_h)
+  if col < 0 or col >= layout.cols then return nil end
+  if (rel_x - col * layout.cell_w) > layout.card_w then return nil end
+  if (rel_y - row * layout.cell_h) > layout.card_h then return nil end
+  local index = row * layout.cols + col + 1
+  if index < 1 or index > count then return nil end
+  return index
 end
 
 -- Écran "La Forge" (2026-08-28, demande explicite -- remplace l'ancien
@@ -1869,6 +1973,54 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
   name_badge(def.name, 2, 22, w - 4, 16, palette.border, Theme.bg, 2, 1)
   RichText.draw(desc_text, 3, 42, w - 6, 10, desc_color or Theme.muted)
 
+  -- Type de carte (2026-09-03, demande explicite -- "Offensive" quand la
+  -- carte cible/agit sur des ennemis, "Support" quand elle cible/agit sur des
+  -- alliés, exceptionnellement les deux) : cellule dédiée juste au-dessus du
+  -- bandeau du nom de l'aventurier ci-dessous -- rouge (Theme.offensive) ou
+  -- bleue (Theme.support). Coins arrondis, 90% de la largeur de la carte
+  -- (2026-09-03, 2ᵉ demande explicite -- moins large que la carte, centrée) :
+  -- `band_x`/`band_w` ci-dessous. Les 2 rares cartes des 2 types affichent 2
+  -- PASTILLES ARRONDIES DISTINCTES côte à côte (pas une bande unique coupée
+  -- en 2 -- `love.graphics.rectangle` n'arrondit pas un seul côté d'un
+  -- rectangle, une bande coupée en 2 rectangles arrondis individuellement
+  -- laisserait 2 coins arrondis au milieu, pas une coupure nette) plutôt que
+  -- d'empiler 2 lignes (garde la bande à hauteur fixe dans tous les cas,
+  -- jamais de calcul de hauteur variable qui grignoterait sur la description
+  -- juste au-dessus). Pas de nouvelle locale de chunk (voir le commentaire
+  -- sur la limite des 200 locales près de CARD_W/CARD_H) : bande positionnée
+  -- en dur par rapport à `h`/`w`, comme le bandeau du nom de l'aventurier
+  -- juste en dessous.
+  if def.types then
+    local band_y = h - 16 - 2 - 11
+    local band_w = w * 0.9
+    local band_x = (w - band_w) / 2
+    local has_off, has_sup, has_ench = false, false, false
+    for _, t in ipairs(def.types) do
+      if t == "offensive" then has_off = true
+      elseif t == "support" then has_sup = true
+      elseif t == "enchantment" then has_ench = true end
+    end
+    -- Enchantement (2026-09-03, 3ᵉ type -- jamais combiné à Offensive/Support
+    -- par construction, voir cards.lua) : une seule pastille violette, même
+    -- traitement que le cas "un seul type" ci-dessous.
+    if has_ench then
+      set(Theme.enchantment)
+      love.graphics.rectangle("fill", band_x, band_y, band_w, 11, 4, 4)
+      text_v_centered("ENCHANTEMENT", band_x, band_y, band_w, 11, 7, Theme.bg)
+    elseif has_off and has_sup then
+      local gap = 2
+      local pill_w = (band_w - gap) / 2
+      set(Theme.offensive); love.graphics.rectangle("fill", band_x, band_y, pill_w, 11, 4, 4)
+      set(Theme.support); love.graphics.rectangle("fill", band_x + pill_w + gap, band_y, pill_w, 11, 4, 4)
+      text_v_centered("OFF", band_x, band_y, pill_w, 11, 7, Theme.bg)
+      text_v_centered("SUP", band_x + pill_w + gap, band_y, pill_w, 11, 7, Theme.bg)
+    elseif has_off or has_sup then
+      set(has_off and Theme.offensive or Theme.support)
+      love.graphics.rectangle("fill", band_x, band_y, band_w, 11, 4, 4)
+      text_v_centered(has_off and "OFFENSIVE" or "SUPPORT", band_x, band_y, band_w, 11, 8, Theme.bg)
+    end
+  end
+
   -- Origine de la carte (2026-08-20, demande explicite) : nom de l'aventurier
   -- qui l'a fournie -- lu depuis def.class_id (une classe = un seul héros,
   -- voir Heroes.class_name), pas un champ propre à chaque carte. Fond noir
@@ -2114,8 +2266,35 @@ local function draw_hand(controller)
       -- grande des deux) : survol 1.1->1.18, sélection 1.16->1.28.
       if is_pending then scale, lift = 1.28, 22 else scale, lift = 1.18, 14 end
     end
+    -- +20% (2026-09-03, demande explicite -- "les cartes dans la main
+    -- doivent être 20% plus grosses"), PUIS ENCORE +20% (même jour, 2ᵉ
+    -- demande explicite -- "les cartes peuvent être encore 20% plus
+    -- grosses", cumulatif sur le premier +20%, pas un remplacement -> 1.2*1.2
+    -- = 1.44) : PUR agrandissement visuel au moment du dessin, comme le
+    -- grossissement au survol/à la sélection ci-dessus (même mécanisme
+    -- push/scale/pop, juste une multiplication de plus) -- ne touche PAS `r`
+    -- (rect utilisé par View.hand_hit/le calcul des positions/HAND_Y/
+    -- BOTTOM_ROW_Y), donc aucune retombée sur le hit-test, l'espacement de
+    -- l'éventail ou la mise en page du reste de l'écran : exactement le même
+    -- compromis déjà accepté pour le survol/la sélection, dont le hit-test ne
+    -- suit pas non plus le grossissement (voir View.hand_hit, qui lit
+    -- toujours les rects de base). `lift` grandit proportionnellement pour
+    -- garder le même dégagement relatif au-dessus des cartes voisines une
+    -- fois la carte plus grosse.
+    scale = scale * 1.44
+    lift = lift * 1.44
+    -- Descendues de 24px (2026-09-03, demande explicite -- "descendre un peu
+    -- les cartes pour éviter qu'elles ne chevauchent les aventuriers") : le
+    -- grossissement ci-dessus grandit la carte AUTOUR de son centre (translate
+    -- puis scale), donc son bord haut remonte d'autant au-dessus de son ancien
+    -- rect -- assez pour toucher le bas de la rangée d'aventuriers (surtout
+    -- une carte survolée/sélectionnée, scale+lift combinés). Décalage ajouté
+    -- ici (dans le translate qui fixe l'ANCRE écran, le dernier appliqué --
+    -- donc en pixels écran réels, jamais mis à l'échelle par `scale`), pas sur
+    -- `r`/HAND_Y : même compromis que le +20%/+44% ci-dessus, pur ajustement
+    -- visuel qui ne touche pas le hit-test/la mise en page.
     love.graphics.push()
-    love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift)
+    love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift + 24)
     love.graphics.scale(scale, scale)
     -- La carte "spéciale" (survolée/sélectionnée) se redresse, comme dans
     -- Slay the Spire -- l'éventail ne concerne que les cartes au repos.
@@ -3759,8 +3938,11 @@ end
 local function draw_team_select(controller)
   local ts = controller.team_select
   Background.draw(nil, W, H)
-  text("Choisis ton équipe", 0, 18, W, 22, Theme.text)
-  text(#ts.selected_ids .. " / 4 aventuriers", 0, 44, W, 12, Theme.muted)
+  -- "Run Solo" (2026-09-02, demande explicite -- ts.max_team_size == 1) :
+  -- titre/compteur adaptés, tout le reste de l'écran (rangées/projecteur/
+  -- deck/auto-fill) reste identique, juste borné à 1 au lieu de 4.
+  text(ts.max_team_size == 1 and "Choisis ton aventurier" or "Choisis ton équipe", 0, 18, W, 22, Theme.text)
+  text(#ts.selected_ids .. " / " .. ts.max_team_size .. " aventurier" .. (ts.max_team_size > 1 and "s" or ""), 0, 44, W, 12, Theme.muted)
 
   -- Héros "en transit" entre 2 emplacements (2026-08-30, voir
   -- Controller:team_select_move_hero) : masqués de leur rangée d'origine ET
@@ -3829,7 +4011,7 @@ local function draw_team_select(controller)
     local already_in = false
     for _, sid in ipairs(ts.selected_ids) do if sid == ts.focused_id then already_in = true end end
     local vb = View.team_select_confirm_button
-    local blocked = (not already_in) and #ts.selected_ids >= 4
+    local blocked = (not already_in) and #ts.selected_ids >= ts.max_team_size
     set(blocked and Theme.panel or Theme.accent)
     love.graphics.rectangle("fill", vb.x, vb.y, vb.w, vb.h, 8, 8)
     text(already_in and "Retirer" or "Valider", vb.x, vb.y + 14, vb.w, 14, blocked and Theme.muted or Theme.bg, "center")
@@ -3869,7 +4051,7 @@ local function draw_team_select(controller)
   draw_team_deck(View.team_select_deck_rect(#ts.selected_ids), #ts.selected_ids * 3)
 
   local lb = View.team_select_launch_button
-  local ready = #ts.selected_ids == 4
+  local ready = #ts.selected_ids == ts.max_team_size
   if ready then
     local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 4)
     set(Theme.accent, 0.35 + 0.35 * pulse)
@@ -3888,10 +4070,13 @@ local function draw_team_select(controller)
   -- police énorme avant le tout premier correctif). Taille 16 -> 24
   -- (2026-08-30, demande explicite -- "doit être écrit beaucoup plus gros") :
   -- décalage remis à l'échelle dans la même proportion (16 -> 24).
-  -- Label "Affronter le boss" en mode "boss_test" (2026-09-02, demande
-  -- explicite) -- lb.label reste "Partir à l'aventure", la valeur par défaut
-  -- pour "infini"/"bounded".
-  local launch_label = ts.mode == "boss_test" and "Affronter\nle boss" or lb.label
+  -- Label "Affronter le boss"/"Construire son deck" en mode "boss_test"/
+  -- "solo" (2026-09-02, demande explicite) -- lb.label reste "Partir à
+  -- l'aventure", la valeur par défaut pour "infini"/"bounded".
+  local launch_label = lb.label
+  if ts.mode == "boss_test" then launch_label = "Affronter\nle boss"
+  elseif ts.mode == "solo" then launch_label = "Construire\nson deck"
+  end
   text(launch_label, lb.x, lb.y + lb.h / 2 - 24, lb.w, 24, ready and Theme.bg or Theme.muted, "center")
 
   -- "Auto-fill" (2026-09-02) : style plus discret que "Partir à l'aventure"
@@ -4075,6 +4260,126 @@ local function draw_boss_select(controller)
   draw_menu_style_button(View.boss_select_back_button)
 end
 
+-- Suite de View._deck_builder_fx (2026-09-02, voir sa 1ère moitié plus haut avec
+-- .layout) : rendu de l'écran, toujours consolidé dans le même unique local
+-- (`View._deck_builder_fx.draw`) pour la même raison (limite des 200 locaux).
+do
+  -- Ascenseur générique (extrait de draw_deck_view) : réutilisable par les 2
+  -- panneaux indépendants, juste paramétré par `layout`/`scroll`/`track_x`.
+  local function draw_scrollbar(layout, scroll, track_x)
+    if layout.max_scroll <= 0 then return end
+    set(Theme.panel_light)
+    love.graphics.rectangle("fill", track_x, layout.area_y, View._deck_builder_fx.SCROLLBAR_W, layout.area_h, 4, 4)
+    local thumb_h = math.max(24, layout.area_h * layout.area_h / layout.content_h)
+    local thumb_y = layout.area_y + (layout.area_h - thumb_h) * (scroll / layout.max_scroll)
+    set(Theme.accent)
+    love.graphics.rectangle("fill", track_x, thumb_y, View._deck_builder_fx.SCROLLBAR_W, thumb_h, 4, 4)
+  end
+
+  -- Une carte de la grille, recadrée au panneau (scissor, coordonnées ÉCRAN --
+  -- voir SCALE) et rendue via le canvas partagé (même idiome que
+  -- draw_deck_view, seul moyen d'appliquer un fondu d'alpha uniforme sur tout
+  -- le dessin de la carte -- `alpha` sert aux cartes en train de s'évanouir).
+  local function draw_card(def, rect, scissor_x, scissor_y, scissor_w, scissor_h, alpha)
+    love.graphics.setScissor()
+    love.graphics.push()
+    love.graphics.origin()
+    local prev_canvas = love.graphics.getCanvas()
+    card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+    love.graphics.setCanvas(card_flight_canvas)
+    love.graphics.clear(0, 0, 0, 0)
+    draw_card_face(def, CARD_W, CARD_H, def.cost, def.desc, Theme.muted, false)
+    love.graphics.setCanvas(prev_canvas)
+    love.graphics.pop()
+    love.graphics.setScissor(scissor_x, scissor_y, scissor_w, scissor_h)
+    love.graphics.setColor(1, 1, 1, alpha or 1)
+    love.graphics.draw(card_flight_canvas, rect.x, rect.y, 0, rect.w / CARD_W, rect.h / CARD_H)
+    love.graphics.setColor(1, 1, 1, 1)
+  end
+
+  -- Écran "Construis ton deck" ("Run Solo", 2026-09-02, demande explicite) :
+  -- panneau du haut (toutes les cartes de l'aventurier, cliquer = en ajouter
+  -- une copie en bas) et panneau du bas (le deck en construction, cliquer =
+  -- la retirer -- clic DROIT = bascule base/améliorée, voir
+  -- Input.mousepressed). `db.reflow_from`/`reflow_t` : capturés par
+  -- Controller:deck_builder_remove juste avant de retirer une carte --
+  -- pendant `reflow_duration`, les cartes RESTANTES glissent depuis leur
+  -- ANCIENNE position (celle d'avant le retrait) vers leur nouvelle, un seul
+  -- minuteur partagé (toutes les cartes affectées bougent en même temps, pas
+  -- la peine d'un minuteur par carte). `db.fading_cards` : la carte retirée
+  -- elle-même, qui s'évanouit sur place (alpha 1 -> 0) sans jamais rejoindre
+  -- la grille.
+  local function draw(controller)
+    local db = controller.deck_builder
+    if not db then return end
+    Background.draw(nil, W, H)
+    text("Construis ton deck", 0, 14, W, 22, Theme.text)
+
+    local top_layout = View.deck_builder_top_layout(controller)
+    local bottom_layout = View.deck_builder_bottom_layout(controller)
+    local top_scroll = math.max(0, math.min(top_layout.max_scroll, db.top_scroll or 0))
+    local bottom_scroll = math.max(0, math.min(bottom_layout.max_scroll, db.bottom_scroll or 0))
+
+    local tp = View.deck_builder_top_panel_rect
+    text(Heroes.class_name[db.hero_id] .. " -- clique pour ajouter une copie en bas.", tp.x, tp.y - 4, tp.w, 12, Theme.muted, "left")
+    local top_scissor_x, top_scissor_y = top_layout.area_x * SCALE, top_layout.area_y * SCALE
+    local top_scissor_w, top_scissor_h = top_layout.area_w * SCALE, top_layout.area_h * SCALE
+    love.graphics.setScissor(top_scissor_x, top_scissor_y, top_scissor_w, top_scissor_h)
+    for i, def in ipairs(db.top_defs) do
+      local rect = View.deck_builder_rect_at(top_layout, top_scroll, i)
+      draw_card(def, rect, top_scissor_x, top_scissor_y, top_scissor_w, top_scissor_h, 1)
+    end
+    love.graphics.setScissor()
+    draw_scrollbar(top_layout, top_scroll, top_layout.area_x + top_layout.area_w - View._deck_builder_fx.SCROLLBAR_W)
+
+    local bp = View.deck_builder_bottom_panel_rect
+    text("Ton deck (" .. #db.bottom_cards .. " -- " .. View.DECK_BUILDER_MIN_CARDS .. " minimum) -- clique pour retirer, clic droit pour améliorer/rétrograder.",
+      bp.x, bp.y - 4, bp.w, 12, Theme.muted, "left")
+    local bot_scissor_x, bot_scissor_y = bottom_layout.area_x * SCALE, bottom_layout.area_y * SCALE
+    local bot_scissor_w, bot_scissor_h = bottom_layout.area_w * SCALE, bottom_layout.area_h * SCALE
+    love.graphics.setScissor(bot_scissor_x, bot_scissor_y, bot_scissor_w, bot_scissor_h)
+    local reflow_p = 1
+    if db.reflow_t and db.reflow_duration and db.reflow_t < db.reflow_duration then
+      reflow_p = db.reflow_t / db.reflow_duration
+    end
+    for i, entry in ipairs(db.bottom_cards) do
+      local target = View.deck_builder_rect_at(bottom_layout, bottom_scroll, i)
+      local rect = target
+      local from = db.reflow_from and db.reflow_from[entry.uid]
+      if from and reflow_p < 1 then
+        rect = {
+          x = from.x + (target.x - from.x) * reflow_p, y = from.y + (target.y - from.y) * reflow_p,
+          w = target.w, h = target.h,
+        }
+      end
+      draw_card(entry.def, rect, bot_scissor_x, bot_scissor_y, bot_scissor_w, bot_scissor_h, 1)
+    end
+    for _, f in ipairs(db.fading_cards) do
+      local p = math.min(1, f.t / f.duration)
+      draw_card(f.def, f.rect, bot_scissor_x, bot_scissor_y, bot_scissor_w, bot_scissor_h, 1 - p)
+    end
+    love.graphics.setScissor()
+    draw_scrollbar(bottom_layout, bottom_scroll, bottom_layout.area_x + bottom_layout.area_w - View._deck_builder_fx.SCROLLBAR_W)
+
+    draw_menu_style_button(View.deck_builder_back_button)
+    local ready = #db.bottom_cards >= View.DECK_BUILDER_MIN_CARDS
+    local tb = View.deck_builder_test_button
+    if ready then
+      local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 4)
+      set(Theme.accent, 0.35 + 0.35 * pulse)
+      love.graphics.rectangle("fill", tb.x - 5, tb.y - 5, tb.w + 10, tb.h + 10, 12, 12)
+    end
+    set(ready and Theme.heal or Theme.panel_light)
+    love.graphics.rectangle("fill", tb.x, tb.y, tb.w, tb.h, 10, 10)
+    set(ready and Theme.accent or Theme.muted); love.graphics.setLineWidth(3)
+    love.graphics.rectangle("line", tb.x, tb.y, tb.w, tb.h, 10, 10)
+    love.graphics.setLineWidth(1)
+    text(tb.label, tb.x, tb.y + tb.h / 2 - 12, tb.w, 24, ready and Theme.bg or Theme.muted, "center")
+  end
+
+  View._deck_builder_fx.draw = draw
+end
+
 -- Victoire sur le boss (2026-08-21, demande explicite -- "il faut enlever le
 -- draft de carte et le feu de camp après le boss") : ni draft ni feu de camp
 -- après ce combat-là, juste ce bref titre (même zoom que "Victoire !" côté
@@ -4120,7 +4425,11 @@ local function draw_boss_victory(controller)
   love.graphics.translate(-W / 2, -(H / 2 - 20))
   text("Victoire !", 0, H / 2 - 32, W, 24, Theme.text)
   love.graphics.pop()
-  text("Le Boss est vaincu !", 0, H / 2 + 10, W, 14, Theme.muted)
+  -- "Run Solo" (2026-09-02, demande explicite) : partage cet écran avec
+  -- "Tester un boss" (voir Controller:handle_combat_victory_now) -- sous-titre
+  -- adapté au mode, jamais "Boss" pour un simple combat aléatoire à 1 aventurier.
+  local subtitle = controller.run_mode == "solo_test" and "Combat remporté !" or "Le Boss est vaincu !"
+  text(subtitle, 0, H / 2 + 10, W, 14, Theme.muted)
 end
 
 --- Liste agrégée des cartes à afficher dans la fenêtre "voir le deck"
@@ -4335,6 +4644,10 @@ function View.draw(controller)
   if controller.screen == "menu" then draw_menu(controller); draw_pause_menu(controller); return end
   if controller.screen == "options" then draw_options(controller); draw_pause_menu(controller); return end
   if controller.screen == "boss_select" then draw_boss_select(controller); draw_tooltip(controller); draw_pause_menu(controller); return end
+  if controller.screen == "deck_builder" then
+    View._deck_builder_fx.draw(controller); draw_card_flights(controller); draw_tooltip(controller); draw_pause_menu(controller)
+    return
+  end
   if controller.screen == "bossVictory" then draw_boss_victory(controller); draw_pause_menu(controller); return end
   if controller.screen == "biome_intro" then draw_biome_intro(controller); draw_pause_menu(controller); return end
   if controller.screen == "team_select" then draw_team_select(controller); draw_deck_view(controller); draw_pause_menu(controller); return end

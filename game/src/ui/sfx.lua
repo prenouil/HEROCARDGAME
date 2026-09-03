@@ -199,6 +199,17 @@ BUILDERS.upgrade = function()
   })
 end
 
+-- "downgrade" -- écran "Construis ton deck" (2026-09-02, demande explicite --
+-- clic droit sur une carte améliorée pour repasser en version normale, "un
+-- petit son qui descend") : miroir exact de "upgrade" ci-dessus, mêmes 2
+-- notes carrées mais dans l'ordre inverse (aiguë -> grave).
+BUILDERS.downgrade = function()
+  return Chiptune.concat({
+    note(1318.51, 0.06, "square", 1.6, 0.4, 0.3),
+    note(1046.50, 0.16, "square", 1.2, 0.45, 0.3),
+  })
+end
+
 -- "forge_impact" -- conclusion de la fusion base -> améliorée à la Forge
 -- (2026-08-30, demande explicite -- "le mouvement de carte ... se conclue par
 -- un effet ou une animation") : DISTINCT de "eclat"/upgrade ci-dessus (joué
