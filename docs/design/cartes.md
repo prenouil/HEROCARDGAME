@@ -2,6 +2,8 @@
 
 Reconstruit depuis le code le 2026-08-30 (`game/src/data/cards.lua`, 36 cartes — 6 classes × 6), **mis à jour le 2026-09-02** suite à une session de rééquilibrage (Guerrier/Assassin/Nécromancien/Barde), **puis le 2026-09-03** avec l'ajout de 2 cartes "Enchantement" par classe (48 cartes au total désormais — 6 classes × 8) — voir les paragraphes de chaque classe pour le détail des écarts. Format repris de celui déjà utilisé par agent_content pour proposer des cartes : Nom | Classe | Palier | Coût | Mots-clés | Texte (base) | Texte amélioré.
 
+**Audit agent_doc du 2026-09-03** (relecture fraîche de `game/src/data/cards.lua` en entier suite à la session d'implémentation des Enchantements/de Riposte) : la colonne Type des 48 cartes et le texte des 12 nouveaux Enchantements, déjà rédigés dans cette passe, correspondent exactement au code — aucune correction nécessaire sur ces deux points. Un seul écart trouvé et corrigé : la ligne **Riposte** (Guerrier) portait encore l'ancien texte à un seul ennemi ("annule l'attaque... la moitié des dégâts en retour") alors que le code avait déjà été retravaillé pour toucher TOUS les ennemis qui visent le Guerrier ("annule TOUTES les attaques... à chaque ennemi") — le paragraphe de commentaire sous le tableau Guerrier décrivait déjà correctement ce changement, seule la cellule du tableau n'avait pas suivi.
+
 Notes de lecture :
 - **Palier** : "Départ" (fait partie du deck de départ de la classe si elle est sélectionnée en équipe) ou "Avancé" (obtenue en jeu via le Draft de fin de combat).
 - **Coût** : énergie (ressource d'équipe partagée, 3/tour) ; si la carte consomme en plus une ressource propre à sa classe, elle est notée à la suite (ex. "1 + 1 mana", "1 (+0-3 Corruption)" pour un coût variable plafonné). Si le coût change à l'amélioration (rare — seul cas actuel : "Coup de taille"), noté "base (amélioré)".
@@ -19,7 +21,7 @@ Notes de lecture :
 | Coup de taille | Départ | 1 (0 amélioré) | Offensive | melee, degats | Inflige 3 "epee" à tous les ennemis. | Coût 0. Inflige 3 "epee" à tous les ennemis. |
 | Coup Contandant | Avancé | 1 | Offensive | melee, degats | Inflige 4 "epee". Inflige 4 "epee" de plus si l'ennemi a du "bouclier" ou "Vulnerabilite". | Inflige 6 "epee". Inflige 6 "epee" de plus si l'ennemi a du "bouclier" ou "Vulnerabilite". |
 | Avalanche de coups | Avancé | 1 | Offensive | melee, degats | Inflige 4 "epee", son coût devient 0 jusqu'à la fin du combat. S'il tue la cible, revient en main. | Inflige 6 "epee", son coût devient 0 jusqu'à la fin du combat. S'il tue la cible, revient en main. |
-| Riposte | Avancé | 2 | Offensive + Support | melee, degats, defense | Si "cibleennemi", annule l'attaque et inflige la moitié des dégâts en retour. | Si "cibleennemi", annule l'attaque et inflige la totalité des dégâts en retour. |
+| Riposte | Avancé | 2 | Offensive + Support | melee, degats, defense | Si "cibleennemi", annule TOUTES les attaques et inflige la moitié des dégâts en retour à chaque ennemi. | Si "cibleennemi", annule TOUTES les attaques et inflige la totalité des dégâts en retour à chaque ennemi. |
 | Instinct du Chasseur | Avancé | 1 | Enchantement | enchantement | Gagne 4 "bouclier" à chaque coup porté à un ennemi. | Gagne 6 "bouclier" à chaque coup porté à un ennemi. |
 | Frénésie | Avancé | 2 | Enchantement | enchantement | +50% de dégâts par carte Offensive déjà jouée ce tour. | +75% de dégâts par carte Offensive déjà jouée ce tour. |
 

@@ -17,7 +17,9 @@ Chaque biome porte **une mécanique de gameplay lisible**, pas seulement un thè
 - **Canyon des Brigands** — biome du focus-fire : 4 de ses 5 ennemis (Bandit, Éclaireuse, Chef de Bande, Tireuse) ciblent systématiquement le héros au moins de PV (`target_mode = "lowest-hp"`, déterministe) plutôt que le tirage pondéré aléatoire des autres biomes — un héros déjà blessé y reste une cible prioritaire tant qu'il n'est pas soigné ou Camouflé, et Provocation/Discrétion n'y ont aucune prise sur ces 4 ennemis (elles ne jouent qu'en mode "random").
 - **Volcan** — biome de l'escalade : plusieurs ennemis (Salamandre, Golem de Magma, Vouivre, et le boss) gagnent régulièrement "Incandescence" (`kind = "buff-self"`, `status_key = "incandescence"`) — un statut **distinct de Puissance** (2026-09-02, renommé depuis un ancien détournement de Puissance sur ces 4 mêmes coups) : bonus **flat** (+X dégâts physiques, X = valeur actuelle, additionné avant tout multiplicateur — voir Glossaire), pas +25%/stack multiplicatif comme Puissance, et qui **ne redescend jamais tout seule** (même famille que Vol/Brûlure, volontairement absente de `Game.decay_end_of_turn_statuses`) — contrairement à Puissance elle-même, qui décroît désormais de 1 en fin de tour, symétriquement côté héros et côté ennemi. Cracheur de Braise et Élémentaire de Cendre posent en plus "Brûlure" (voir Glossaire), qui elle non plus ne décroît jamais seule. Un combat de Volcan qui s'éternise devient strictement plus dangereux à chaque tour — biome qui punit la lenteur, contrairement à la Forêt qui punit surtout l'absence de soin.
 
-Le mode "Infini" (hors périmètre de la mécanique de biomes, signalé dans le code comme "bientôt retiré du jeu") et "Tester le boss" au menu continuent d'utiliser le pool complet non filtré par biome — voir Composition de rencontre plus bas.
+Le mode "Infini" (hors périmètre de la mécanique de biomes) et "Tester un boss" au menu continuent d'utiliser le pool complet non filtré par biome — voir Composition de rencontre plus bas.
+
+> **Correction agent_doc du 2026-09-03** : le mode "Infini" est désormais **retiré du menu principal** (son code reste intact dans `game.lua`/`encounter.lua`, mais il n'est plus atteignable depuis l'écran "Menu" depuis le 2026-09-02 — voir `docs/design/modes.md`). Ce paragraphe le décrivait encore comme "bientôt retiré", ce qui était déjà faux au moment de cette relecture. Par ailleurs le bouton s'appelle "Tester **un** boss" (pas "le boss") — voir aussi la correction plus bas sur le fonctionnement de cet écran, qui a changé depuis la rédaction initiale de ce document.
 
 ### Encadré — Golem de Pierre : "Protection", une exception au moteur
 
@@ -89,7 +91,7 @@ Rencontre fixe, jamais mêlée à la génération aléatoire des combats communs
 | Catacombes | **Roi Squelette** (nouveau) |
 | Volcan | **Élémentaire de Feu** (nouveau) |
 
-"Tester le boss" au menu (aucun biome connu à ce stade) retombe sur un tirage aléatoire uniforme parmi les 4. Toujours niveau 1.
+"Tester un boss" au menu : depuis le 2026-09-02, le joueur choisit explicitement un des 4 boss (écran "Choisis un boss", une carte par biome avec portrait/infobulle) ET un niveau (réglage unique 1 à 9, boutons -/+) — ce n'est plus un tirage aléatoire ni toujours niveau 1. Détail complet de cet écran dans `docs/design/modes.md`, non répété ici.
 
 ### Homme Arbre 🌳 — avec 4 Pousses d'Arbre 🌱
 
@@ -151,7 +153,7 @@ Seul, comme l'Aigle Géant — aucun sbire.
 
 - **Taille** : 1 à 4 ennemis par combat (`MAX_ENEMIES_PER_COMBAT = 4`).
 - **Budget du combat n** : `round(20 × 1.12^(n-1))` (`BUDGET_BASE = 20`, `BUDGET_GROWTH = 0.12`) — inchangé depuis la dernière passe, toujours un placeholder à ajuster en playtest.
-- **Génération** : 40 tentatives (nombre d'ennemis 1-4, puis un ennemi au hasard dans le pool **confiné au biome du combat** pour chaque emplacement, niveau = `round((budget/nb d'emplacements) / coût de l'ennemi)`, minimum 1) — la composition dont le coût total colle le mieux au budget est retenue. Le mode "Infini" (pool complet, non filtré par biome) et "Tester le boss" (rencontre fixe, hors budget) restent les deux exceptions à ce filtrage par biome.
+- **Génération** : 40 tentatives (nombre d'ennemis 1-4, puis un ennemi au hasard dans le pool **confiné au biome du combat** pour chaque emplacement, niveau = `round((budget/nb d'emplacements) / coût de l'ennemi)`, minimum 1) — la composition dont le coût total colle le mieux au budget est retenue. Le mode "Infini" (pool complet, non filtré par biome), "Tester un boss" (rencontre fixe choisie par le joueur, hors budget) et "Run Solo" (rencontre aléatoire mais aussi non filtrée par biome — `Game.start_solo_run`/`start_next_combat` appellent `Encounter.generate_encounter` avec un biome `nil`, voir `docs/design/modes.md`) restent les exceptions à ce filtrage par biome.
 - **Scaling par niveau** : `LEVEL_GROWTH = 0.20` (+20% par niveau) appliqué à toute valeur de base ; `VALUE_VARIANCE = 0.20` (±20%) ajoute une variance aléatoire à chaque tirage.
 - **Ciblage** (`Encounter.pick_hero_target`) :
   - Un héros Camouflé est exclu du pool de cibles tant qu'un autre héros vivant non-Camouflé existe.

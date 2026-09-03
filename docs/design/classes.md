@@ -4,7 +4,7 @@ Reconstruit depuis le code le 2026-08-30 (`game/src/data/heroes.lua`). Remplace 
 
 ## Roster
 
-Catalogue de 6 aventuriers débloqués (`Heroes.defs`). À l'écran "Choisis ton équipe", le joueur en sélectionne 4 parmi les 6 pour composer une run — aucune classe n'est filtrée ou verrouillée à cet écran. Équipe par défaut (utilisée uniquement quand aucune sélection explicite n'est fournie, ex. "Tester le boss" au menu) : Guerrier, Paladin, Mage, Assassin.
+Catalogue de 6 aventuriers débloqués (`Heroes.defs`). À l'écran "Choisis ton équipe", le joueur en sélectionne 4 parmi les 6 pour composer une run — aucune classe n'est filtrée ou verrouillée à cet écran. Équipe par défaut (utilisée uniquement quand aucune sélection explicite n'est fournie, ex. "Tester un boss" au menu) : Guerrier, Paladin, Mage, Assassin. Exception : le mode "Run Solo" (2026-09-02) réduit cette sélection à **1 seul** aventurier — voir `docs/design/modes.md`.
 
 | Classe | Icône | PV de base | Ressource propre |
 |---|---|---|---|
