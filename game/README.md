@@ -16,11 +16,12 @@ love game
 ## Lancer les tests
 
 Le moteur de règles (`src/rules/*`, `src/data/*`) ne dépend d'aucune API LÖVE —
-il se teste avec [busted](https://lunarmodules.github.io/busted/) en Lua pur,
-depuis ce dossier :
+il se teste avec [busted](https://lunarmodules.github.io/busted/) en Lua pur.
+Les specs vivent dans `spec/` à la RACINE du repo (pas dans ce dossier `game/`)
+— voir `../README.md` pour le détail de l'installation (Lua/LuaRocks/Busted) et
+la raison de cet emplacement. Depuis la racine du repo :
 
 ```
-cd game
 busted
 ```
 
@@ -44,7 +45,6 @@ src/
                           theme.lua, fonts.lua
   util/
     sequencer.lua   -- remplace les chaînes async/await + setTimeout du JS
-tests/              -- specs busted (moteur de règles uniquement)
 libs/               -- vide pour l'instant — voir "Dépendances" ci-dessous
 assets/             -- illustrations pixel art générées par IA (2026-08-07, voir
                           tools/generate-batch.js) : characters/heroes,
