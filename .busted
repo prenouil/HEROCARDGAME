@@ -1,0 +1,11 @@
+-- Config Busted (2026-09-10, mise en place initiale -- voir spec/enchantements_spec.lua
+-- pour le premier lot de tests). `lpath` : les modules de règles s'appellent entre eux
+-- via `require("src.rules.combat")` etc., relatif au dossier `game/` (même convention
+-- que `package.path = "./?.lua;" .. package.path` utilisé jusqu'ici dans les scripts de
+-- test ad-hoc LÖVE, voir le harnais LÖVE de la session) -- Busted tourne depuis la racine
+-- du repo, donc on préfixe explicitement `game/`.
+return {
+  _all = {
+    lpath = "game/?.lua;game/?/init.lua",
+  },
+}
