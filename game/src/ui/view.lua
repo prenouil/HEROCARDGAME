@@ -59,22 +59,28 @@ local BOUNDED_COMBAT_COUNT = 8
 -- HERO_PORTRAIT_SIZE plus bas) : la carte grandit un peu pour absorber le
 -- portrait agrandi sans tasser le reste (badges, nom en bas côté héros).
 local UNIT_W, UNIT_H = 150, 168
--- 92x138 -> 102x153 (2026-09-12, demande explicite -- faire de la place à une
--- illustration par carte, "la chose la plus claire et la plus importante à
--- voir" sans nuire à la lisibilité du texte) : voir draw_card_face plus bas
--- pour la nouvelle disposition verticale (illustration entre le nom et la
--- description, désormais déplacée sous elle). Même ratio que l'ancien format
--- (92/138 = 102/153 = 2/3), +11% uniforme -- un premier essai à 110x180 a
--- débordé de l'écran à 2 endroits une fois RENDU (capture d'écran, pas
--- calculé à l'aveugle) : le bouton "Fin de tour" sous la main (BOTTOM_ROW_Y =
--- HAND_Y + CARD_H + ...) dépassait le bas de la fenêtre de ~18px (HAND_Y =
--- 480 est un choix explicite d'une session antérieure, pas rediscuté ici), et
--- la 2e rangée de cartes de l'écran d'équipe (TEAM_CARD_Y) laissait moins de
--- place que nécessaire à la rangée "Ton équipe" (TEAM_HERO_H) avant le bas
--- d'écran. 102x153 tient dans les deux budgets avec une marge réelle (~9px
--- et ~40px respectivement) -- toujours plus grand qu'avant, juste pas au
--- chiffre de départ.
-local CARD_W, CARD_H = 102, 153
+-- 92x138 -> 102x153 -> 122x184 (2026-09-12, demande explicite -- faire de la
+-- place à une illustration par carte, "la chose la plus claire et la plus
+-- importante à voir" sans nuire à la lisibilité du texte) : voir
+-- draw_card_face plus bas pour la disposition. Puis +20% explicite (même
+-- session, 2ᵉ demande) : 102*1.2=122.4, 153*1.2=183.6, arrondis -- même ratio
+-- que toujours (2/3). Un essai précédent gardait la main à part, plus petite
+-- (102x153 -- HAND_Y=480 n'avait pas la place pour du 122x184 sans faire
+-- déborder "Fin de tour") -- 3ᵉ demande explicite, même session, revient
+-- dessus : "je préfère que les cartes soient plus grandes aussi ici [en
+-- main]". La main utilise donc directement CARD_W/CARD_H comme tout le
+-- reste désormais -- voir HAND_Y plus bas (descendue en conséquence) et
+-- BOTTOM_ROW_Y (découplé de la main, ancré sur les piles à la place, pour
+-- que "Fin de tour" n'ait pas à suivre la main vers le bas).
+local CARD_W, CARD_H = 122, 184
+
+-- Canvas réutilisé pour toutes les cartes dessinées à une taille différente de
+-- leur taille canonique (CARD_W/CARD_H) -- vol de carte, pile pioche/défausse,
+-- deck-view, grille du deck-builder : dessiné une fois à CARD_W/CARD_H
+-- (police/proportions inchangées), puis reposé à l'échelle voulue via
+-- `love.graphics.draw(canvas, x, y, 0, w/CARD_W, h/CARD_H)`.
+local card_flight_canvas
+
 -- Taille/rendu des cartes de draft (écran de victoire) : voir DraftFx,
 -- regroupé sous UNE SEULE locale de chunk (au lieu d'une poignée éparses --
 -- W/H, canvas de fondu, fonctions front/fading/flight) -- ce fichier flirtait
@@ -157,9 +163,18 @@ local HAND_OVERLAP_GAP = -CARD_W * 0.22
 -- "beaucoup plus bas", après un premier +15px jugé insuffisant) : 419->450.
 -- 450->480 (2026-08-31, passage 1280x720) : les 60px de hauteur en plus
 -- permettent de redonner de l'air ici ET de restaurer "Fin de tour" à sa
--- taille 88x74 d'avant le tassement forcé par l'ancien H=660 (voir
--- END_TURN_BTN_W/H plus bas).
-local HAND_Y = 480
+-- taille 88x74 d'avant le tassement forcé par l'ancien H=660.
+-- 480->505 (2026-09-12, la main affiche maintenant CARD_H=184, +31 -- 3ᵉ
+-- demande explicite, même session -- "il faut aussi les descendre") :
+-- assez pour garder une marge des 2 côtés une fois la carte du CENTRE
+-- (celle qui monte le plus haut une fois sélectionnée, scale 1.28 + lift 22,
+-- voir draw_one) sous la rangée de héros (HERO_ROW_Y+UNIT_H=452, ~20px de
+-- marge à 505) ET la carte la plus en BORD de main (celle qui descend le
+-- plus avec l'éventail, HAND_FAN_DROP) au-dessus du bas d'écran (~17px de
+-- marge à 505+198) -- vérifié au rendu, fenêtre étroite entre les 2
+-- contraintes (quelques pixels de chaque côté). "Fin de tour" n'a PLUS à
+-- suivre (voir BOTTOM_ROW_Y, découplé de HAND_Y désormais).
+local HAND_Y = 505
 
 local function hand_row_fan(count, y)
   local rects = centered_row(count, CARD_W, CARD_H, y, HAND_OVERLAP_GAP)
@@ -233,8 +248,7 @@ end
 -- Réduites de 50% (2026-08-27, demande explicite) : la pioche/défausse
 -- n'ont plus besoin d'être au gabarit d'une carte pour se lire comme une
 -- pile -- l'effet d'épaisseur (draw_pile) et le texte "PIOCHE : X"/
--- "DEFAUSSE : X" suffisent. CARD_W/CARD_H restent la taille des cartes
--- elles-mêmes (main, vol pioche<->main), inchangée.
+-- "DEFAUSSE : X" suffisent.
 local PILE_W, PILE_H = CARD_W * 0.5, CARD_H * 0.5
 View.deck_pile_rect = { x = 20, y = HAND_Y, w = PILE_W, h = PILE_H }
 View.discard_pile_rect = { x = W - 20 - PILE_W, y = HAND_Y, w = PILE_W, h = PILE_H }
@@ -242,9 +256,8 @@ View.discard_pile_rect = { x = W - 20 - PILE_W, y = HAND_Y, w = PILE_W, h = PILE
 -- "Voir le deck" (2026-08-30, demande explicite -- une fenêtre listant TOUTES
 -- les cartes possédées, ouvrable aussi bien en cliquant la pioche/la défausse
 -- elles-mêmes -- voir Input.mousepressed_tap/arrow -- que ce bouton dédié) :
--- casé dans l'espace resté libre entre le bas de la pioche (519) et la
--- rangée "Recommencer..."/"victoire instantanée" (BOTTOM_ROW_Y, 592) --
--- jamais chevauché, voir draw_deck_view/View.deck_view_cards pour le contenu.
+-- juste sous la pioche, voir draw_deck_view/View.deck_view_cards pour le
+-- contenu.
 -- Moins large, plus haut, sur 2 lignes (2026-08-30, demande explicite) :
 -- 96x20 -> 64x40, texte "Voir le\ndeck" plutôt qu'une seule ligne large.
 -- Rebaptisé "Deck", 1 seule ligne, largeur alignée sur la pioche (2026-09-02,
@@ -285,14 +298,17 @@ View.energy_display_rect = {
 -- (HERO_ROW_Y-28) et la rangée de héros (HERO_ROW_Y), 14px de haut seulement.
 View.gold_display_rect = { x = 20, y = HERO_ROW_Y - 14, w = 120, h = 14 }
 
--- Rangée de boutons du bas ancrée sur la MAIN (2026-08-27) -- HAND_Y + CARD_H,
--- PAS sur la pioche/défausse, qui ont été réduites de 50% : sans ce
--- découplage, les boutons auraient suivi les piles vers le haut et laissé un
--- grand vide entre eux et la main. Suit automatiquement HAND_Y (voir
--- ci-dessus) si la main redescend encore. Marge resserrée à 4px (était 8) --
--- HAND_Y étant descendue beaucoup plus bas, chaque pixel du budget vertical
--- restant compte pour que "Fin de tour" tienne encore à l'écran (H=660).
-local BOTTOM_ROW_Y = HAND_Y + CARD_H + 4
+-- Découplées de la MAIN (2026-09-12, 4ᵉ demande explicite, même session --
+-- "le bouton fin de tour n'a pas de raison de descendre... il doit remonter
+-- juste en dessous de la défausse") : ancrées chacune sur SA pile, PAS sur
+-- HAND_Y+hauteur de carte comme avant -- la main affiche maintenant CARD_H
+-- en entier (122x184, voir son commentaire) et grandir ne doit plus repousser
+-- ces boutons vers le bas, ils n'ont aucune raison de suivre. Colonne
+-- gauche : juste sous le bouton "Deck" (lui-même juste sous la pioche).
+-- Colonne droite ("Fin de tour") : juste sous la défausse. Pas de nouvelle
+-- locale de chunk pour ces 2 ancrages (ce fichier est déjà PILE à la limite
+-- dure de Lua, voir le commentaire près de CARD_W/CARD_H) -- inlinés
+-- directement à chaque usage ci-dessous.
 
 -- "Recommencer ce tour"/"Recommencer le combat" (repositionnés/rapetissés au
 -- fil de plusieurs playtests, voir l'historique) : ancrés à gauche sous la
@@ -304,10 +320,11 @@ local BOTTOM_ROW_Y = HAND_Y + CARD_H + 4
 -- le budget vertical n'est plus aussi serré qu'avec l'ancien H=660.
 local RESTART_BTN_W, RESTART_BTN_H, RESTART_BTN_GAP = 96, 20, 4
 View.restart_turn_button = {
-  x = View.deck_pile_rect.x, y = BOTTOM_ROW_Y, w = RESTART_BTN_W, h = RESTART_BTN_H, label = "Recommencer ce tour",
+  x = View.deck_pile_rect.x, y = View.deck_view_button.y + View.deck_view_button.h + 6,
+  w = RESTART_BTN_W, h = RESTART_BTN_H, label = "Recommencer ce tour",
 }
 View.restart_button = {
-  x = View.deck_pile_rect.x, y = BOTTOM_ROW_Y + RESTART_BTN_H + RESTART_BTN_GAP, w = RESTART_BTN_W, h = RESTART_BTN_H,
+  x = View.deck_pile_rect.x, y = View.restart_turn_button.y + RESTART_BTN_H + RESTART_BTN_GAP, w = RESTART_BTN_W, h = RESTART_BTN_H,
   label = "Recommencer le combat",
 }
 -- Outil de test discret (2026-08-08) : termine le combat en cours par une
@@ -317,23 +334,21 @@ View.instant_victory_button = {
   label = "victoire instantanée",
 }
 
--- Agrandi (2026-08-24, demande explicite -- "un peu plus gros") : 76x64 -> 88x74.
--- Rerapetissé un peu (2026-08-27, 74->64) : contrainte de budget vertical,
--- pas une demande -- HAND_Y a été descendue beaucoup plus bas pour "la main
--- doit être beaucoup plus bas", et le bouton ne tenait plus sous elle sans
--- déborder de l'écran (H=660) autrement. Reste nettement plus carré que le
--- tout premier gabarit (140x26).
--- Toujours centré sur la pioche/défausse même réduites (2026-08-27) : plus
--- large que la pile elle-même désormais, déborde symétriquement de part et
--- d'autre -- purement cosmétique, n'affecte pas la zone cliquable de la pile.
--- Restauré à 88x74 (2026-08-31, passage 1280x720) : c'était sa taille avant
--- le rétrécissement forcé (88x74->88x64, 2026-08-27) par manque de budget
--- vertical sous l'ancien H=660 -- HAND_Y descendue à 480 laisse maintenant
--- assez de place pour revenir à la taille d'origine.
-local END_TURN_BTN_W, END_TURN_BTN_H = 88, 74
+-- Carré (2026-09-12, demande explicite -- "il doit reprendre sa forme
+-- carrée") : W=H=88, possible maintenant qu'il n'est plus coincé sous la
+-- main (ancré sous la défausse, bien plus de budget vertical disponible
+-- qu'avant -- voir plus haut). Historique de la largeur 88 (jamais remise en
+-- cause) : 76->88 (2026-08-24, "un peu plus gros"), la hauteur avait ensuite
+-- dû rétrécir à 64 puis remonter à 74 par contrainte de budget sous l'ancien
+-- H=660/la main -- cette contrainte a disparu avec le découplage ci-dessus,
+-- d'où le retour à un vrai carré.
+-- Toujours centré sur la défausse (2026-08-27) : plus large qu'elle
+-- désormais, déborde symétriquement de part et d'autre -- purement
+-- cosmétique, n'affecte pas la zone cliquable de la pile.
+local END_TURN_BTN_W, END_TURN_BTN_H = 88, 88
 View.end_turn_button = {
   x = View.discard_pile_rect.x + View.discard_pile_rect.w / 2 - END_TURN_BTN_W / 2,
-  y = BOTTOM_ROW_Y,
+  y = View.discard_pile_rect.y + View.discard_pile_rect.h + 8,
   w = END_TURN_BTN_W, h = END_TURN_BTN_H, label = "Fin de tour",
 }
 
@@ -662,15 +677,14 @@ local TEAM_AVAILABLE_Y = 66
 -- rangée de cartes (TEAM_CARD_Y) et cette rangée, avec les 60px de hauteur
 -- en plus -- tout le reste de la colonne (projecteur/boutons Annuler-Valider)
 -- se termine bien avant (y=488), aucun risque de chevauchement.
--- Reste à 560 (2026-09-12, cartes agrandies 92x138 -> 102x153 pour
--- l'illustration) : un essai à 110x180 avait forcé 560->602 pour garder la
--- 2e rangée de cartes (TEAM_CARD_Y) sans chevauchement, mais ce chiffre
--- débordait ensuite lui-même du bas d'écran (602+TEAM_HERO_H=722 > 720,
--- vu au rendu réel) -- CARD_H redescendu à 153 (voir son commentaire)
--- redonne à cette rangée toute la marge qu'elle avait déjà (2e rangée de
--- cartes désormais à y=532 au lieu de 502 à l'origine, encore ~28px sous
--- son ancienne marge de confort).
-local TEAM_BOTTOM_Y = 560
+-- 560 -> 590 (2026-09-12, CARD_H canonique agrandi une 2e fois, 153->184,
+-- +20% explicite -- voir son commentaire) : la 2e rangée de cartes
+-- (TEAM_CARD_Y, ci-dessous) grandit avec elle, direct sur cette rangée. Pas
+-- de retour à 602 (déjà tenté pour l'essai à 110x180 -- débordait à son tour
+-- du bas d'écran, 602+TEAM_HERO_H=722>720) : cette fois TEAM_CARD_Y et
+-- TEAM_CARD_ROW_GAP sont AUSSI resserrés (voir leurs commentaires) pour que
+-- 590 (590+TEAM_HERO_H=710, 10px de marge sous 720) suffise. Vérifié au rendu.
+local TEAM_BOTTOM_Y = 590
 local TEAM_PARTY_LEFT = 170
 
 -- Emplacements FIXES, un par héros du roster complet (2026-08-30, bug signalé
@@ -756,8 +770,16 @@ View.team_select_confirm_button = {
 -- et plus rien à droite, ce centrage reste largement à l'écart des deux
 -- côtés (vérifié -- rangée de 3 : x330-630 ; la 4ᵉ carte seule, rangée 2 :
 -- x434-526).
-local TEAM_CARD_Y = 210
-local TEAM_CARD_ROW_GAP = 16
+-- 210 -> 190, 16 -> 8 (2026-09-12, CARD_H canonique 153->184, +20% explicite) :
+-- resserrés pour que la 2e rangée (row2_bottom = TEAM_CARD_Y + 2*CARD_H +
+-- TEAM_CARD_ROW_GAP = 190+368+8 = 566) laisse assez de marge à la rangée
+-- "Ton équipe"/TEAM_BOTTOM_Y juste en dessous (label à 590-16=574, 8px de
+-- clearance) -- voir le commentaire sur TEAM_BOTTOM_Y. Le projecteur
+-- (View.team_select_spotlight_rect, y=200 fixe) démarre désormais 10px sous
+-- le haut de la rangée 1 des cartes (190) au lieu d'être aligné -- écart
+-- mineur, à revoir si le rendu le montre disgracieux.
+local TEAM_CARD_Y = 190
+local TEAM_CARD_ROW_GAP = 8
 local TEAM_CARD_ROW1_MAX = 3
 function View.team_select_card_rects(count)
   local rects = {}
@@ -1968,62 +1990,36 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
   love.graphics.rectangle("line", 3, 3, w - 6, h - 6, 8, 8)
   love.graphics.setLineWidth(1)
 
-  set(cost_insufficient and Theme.hp or Theme.energy); love.graphics.circle("fill", 14, 12, 9)
-  set(Theme.bg or { 0.05, 0.1, 0.1 })
-  love.graphics.setFont(Fonts.get(11)); love.graphics.printf(tostring(cost_text), 4, 6, 20, "center")
-
-  if def.mana_cost then
-    set(mana_insufficient and Theme.hp or Theme.mana); love.graphics.circle("fill", 32, 12, 7)
-    set(Theme.bg or { 0.05, 0.1, 0.1 })
-    love.graphics.setFont(Fonts.get(9))
-    love.graphics.printf(tostring(def.mana_cost), 26, 8, 12, "center")
-  end
-
-  -- Coût variable en Corruption (2026-08-29, Nécromancien -- "1 (+X, 0-N
-  -- Corruption)") : pastille OVALE (jamais ronde comme énergie/mana, demande
-  -- explicite -- doit se distinguer d'un coup d'œil d'un coût FIXE) --
-  -- affiche le PLAFOND en dur ("X(0-3)"), jamais la valeur actuellement
-  -- disponible -- c'est le TEXTE de la carte (desc_text, substitué par
-  -- l'appelant, voir draw_hand) qui porte le X recalculé en temps réel,
-  -- jamais cette pastille.
-  if def.corruption_cost_cap then
-    set(Theme.corruption); love.graphics.ellipse("fill", 40, 12, 16, 8)
-    set(Theme.bg or { 0.05, 0.1, 0.1 })
-    love.graphics.setFont(Fonts.get(8))
-    love.graphics.printf("X(0-" .. def.corruption_cost_cap .. ")", 24, 8, 32, "center")
-  end
-
-  name_badge(def.name, 2, 22, w - 4, 16, palette.border, Theme.bg, 2, 1)
+  -- Bas de la bande de type, calculé tôt (2026-09-12) : la description
+  -- (plus bas) a besoin de savoir où elle s'arrête AVANT d'être dessinée,
+  -- pour rétrécir sa police si besoin plutôt que de chevaucher cette bande.
+  local band_y = h - 2 - 11
 
   -- Illustration (2026-09-12, demande explicite -- "la chose la plus claire
   -- et la plus importante à voir", sans nuire aux autres informations) :
-  -- juste sous le nom, le bloc le plus grand de la carte (voir le
-  -- commentaire plus bas sur le %, réduit depuis le premier essai pour
-  -- laisser la place aux descriptions les plus longues du jeu).
+  -- dessinée EN PREMIER, quasi plein cadre -- les pastilles de coût et le
+  -- cartouche nom/classe (plus bas) se posent PAR-DESSUS elle (2e demande
+  -- explicite, même session -- "peuvent être posés par-dessus l'illustration"
+  -- pour les coûts additionnels ; le nom suit le même principe, sinon il n'y
+  -- aurait plus de place pour une illustration digne de ce nom).
+  -- +20% (2026-09-12, 3ᵉ demande explicite, même session -- "les illustrations
+  -- peuvent être plus grandes en hauteur") : 91 -> 109 (91*1.2=109.2, arrondi).
   -- `Sprites.card(def.code)` renvoie nil tant qu'aucun fichier
   -- `assets/cards/<code>.png` n'existe (repli déjà géré par Sprites.load,
   -- jamais d'erreur -- génération des 48 illustrations volontairement HORS
   -- de cette tâche, voir le plan) : simple aplat neutre en attendant, jamais
   -- une icône de classe ni un texte "manquant" -- juste un espace réservé qui
   -- devient la vraie image dès qu'un fichier apparaît, sans autre changement
-  -- de code. `Sprites.draw_cover` (nouveau, voir sprites.lua) découpe
-  -- l'image en Quad pour REMPLIR tout le cadre façon "cover" CSS (rogne au
-  -- besoin, jamais de déformation) -- pas de `love.graphics.setScissor` ici :
-  -- ses coordonnées sont TOUJOURS en pixels ÉCRAN absolus, jamais affectées
-  -- par la transformation en cours (or cette fonction est appelée aussi bien
-  -- depuis un canvas remis à l'origine QUE directement sous un
-  -- translate/scale/rotate, ex. la main -- un scissor codé en dur ici
-  -- rognerait n'importe quoi selon le point d'appel). Le découpage Quad de
-  -- `Sprites.draw_cover` opère en espace TEXTURE, jamais en espace écran :
-  -- correct quel que soit l'appelant.
-  -- 39% -> 28% -> 20% (2026-09-12, régression trouvée au rendu -- plusieurs
-  -- descriptions parmi les plus longues du jeu (Riposte, Infranchissable +,
-  -- Assassinat) débordaient carrément SOUS le bas de la carte à 39%, jusque
-  -- sur la carte suivante à la Forge -- 28% réduisait le débordement mais
-  -- pas assez pour ces cas-là. Toujours le bloc le plus grand de la carte,
-  -- juste moins gourmand -- voir aussi la taille de police réduite sur la
-  -- description juste en dessous, 2e levier actionné pour le même problème.
-  local art_x, art_y, art_w, art_h = 6, 40, w - 12, math.floor(h * 0.20)
+  -- de code. `Sprites.draw_cover` (voir sprites.lua) découpe l'image en Quad
+  -- pour REMPLIR tout le cadre façon "cover" CSS (rogne au besoin, jamais de
+  -- déformation) -- pas de `love.graphics.setScissor` ici : ses coordonnées
+  -- sont TOUJOURS en pixels ÉCRAN absolus, jamais affectées par la
+  -- transformation en cours (or cette fonction est appelée aussi bien depuis
+  -- un canvas remis à l'origine QUE directement sous un translate/scale/
+  -- rotate) -- un scissor codé en dur ici rognerait n'importe quoi selon le
+  -- point d'appel. Le découpage Quad de `Sprites.draw_cover` opère en espace
+  -- TEXTURE, jamais en espace écran : correct quel que soit l'appelant.
+  local art_x, art_y, art_w, art_h = 4, 4, w - 8, 109
   local art = Sprites.card(def.code)
   if art then
     Sprites.draw_cover(art, art_x, art_y, art_w, art_h)
@@ -2033,38 +2029,136 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
   set(palette.border); love.graphics.setLineWidth(1)
   love.graphics.rectangle("line", art_x, art_y, art_w, art_h, 4, 4)
 
-  -- Description (2026-09-12, déplacée sous l'illustration -- suivait le nom
-  -- directement avant) : zone plus étroite qu'avant (illustration en plus),
-  -- police 10->9 (2e levier, voir le commentaire sur art_h ci-dessus) pour
-  -- que les descriptions les plus longues du jeu (Riposte, Infranchissable +)
-  -- restent DANS la carte -- vérifié au rendu avec ces cas précis. Si un
-  -- texte déborde quand même, il chevauche visuellement la bande de type
-  -- juste en dessous plutôt que de planter (même dégradation gracieuse déjà
-  -- acceptée pour le bandeau de nom d'aventurier plus bas, voir son
-  -- commentaire) -- à surveiller au rendu, pas un risque nouveau.
-  RichText.draw(desc_text, 3, art_y + art_h + 4, w - 6, 9, desc_color or Theme.muted)
+  -- Coûts (2026-09-12, demande explicite -- "les coûts additionnels doivent
+  -- être situés en colonne, dessous le coût en énergie") : l'énergie garde sa
+  -- position/taille EXACTE d'avant (14,12,r9 -- "cela ne doit pas influencer
+  -- la taille... des différents éléments") ; mana/Corruption (mutuellement
+  -- exclusifs en pratique, voir cards.lua -- jamais 2 en même temps sur une
+  -- carte) descendent SOUS elle plutôt qu'à côté, alignés sur son bord gauche
+  -- (x=5). Dessinés APRÈS l'illustration pour rester lisibles par-dessus
+  -- (fond opaque de la pastille elle-même, comme avant).
+  set(cost_insufficient and Theme.hp or Theme.energy); love.graphics.circle("fill", 14, 12, 9)
+  set(Theme.bg or { 0.05, 0.1, 0.1 })
+  love.graphics.setFont(Fonts.get(11)); love.graphics.printf(tostring(cost_text), 4, 6, 20, "center")
+
+  if def.mana_cost then
+    set(mana_insufficient and Theme.hp or Theme.mana); love.graphics.circle("fill", 14, 33, 7)
+    set(Theme.bg or { 0.05, 0.1, 0.1 })
+    love.graphics.setFont(Fonts.get(9))
+    love.graphics.printf(tostring(def.mana_cost), 8, 29, 12, "center")
+  end
+
+  -- Coût variable en Corruption (2026-08-29, Nécromancien -- "1 (+X, 0-N
+  -- Corruption)") : pastille OVALE (jamais ronde comme énergie/mana, demande
+  -- explicite -- doit se distinguer d'un coup d'œil d'un coût FIXE) --
+  -- affiche le PLAFOND en dur ("X(0-3)"), jamais la valeur actuellement
+  -- disponible -- c'est le TEXTE de la carte (desc_text, substitué par
+  -- l'appelant, voir draw_hand) qui porte le X recalculé en temps réel,
+  -- jamais cette pastille. Centre décalé à x=22 (pas 14 comme énergie/mana --
+  -- plus large, rx=16) pour garder le même bord gauche (x=5) que les 2 pastilles
+  -- rondes au-dessus plutôt que de déborder du bord de la carte.
+  if def.corruption_cost_cap then
+    set(Theme.corruption); love.graphics.ellipse("fill", 22, 33, 16, 8)
+    set(Theme.bg or { 0.05, 0.1, 0.1 })
+    love.graphics.setFont(Fonts.get(8))
+    love.graphics.printf("X(0-" .. def.corruption_cost_cap .. ")", 6, 29, 32, "center")
+  end
+
+  -- Nom + classe (2026-09-12, demande explicite -- "le nom de la carte doit
+  -- être situé en haut, sur la même ligne que le coût en énergie... décentré,
+  -- centré sur la droite du coût en énergie") : démarre juste après la plus
+  -- large des pastilles présentes sur CETTE carte (2ᵉ demande explicite, même
+  -- session -- "il reste de la place inutilisée entre le coût et le nom" :
+  -- x=40 fixe, pensé pour la rare pastille de Corruption (bord droit x=38),
+  -- gaspillait cette place sur toutes les AUTRES cartes) -- x=26 suffit dès
+  -- que seules énergie/mana sont présentes (bord droit x=21 ou 23), x=40
+  -- seulement si Corruption. Cartouche à 2 lignes, fusionnant l'ex-bandeau
+  -- "nom de l'aventurier" du bas de carte (3ᵉ demande explicite -- "le nom de
+  -- la classe doit maintenant apparaître en dessous du nom de la carte, dans
+  -- la même cartouche, entouré de -").
+  -- Nom JAMAIS sur 2 lignes (4ᵉ demande explicite -- "si cela arrive, on
+  -- scale down la taille de la police jusqu'à ce que cela rentre") : cherche
+  -- la plus grande taille (16 en partant, jamais plus grande -- "cela ne doit
+  -- pas influencer la taille de la police" tant que ça rentre) qui tient sur
+  -- UNE ligne dans NAME_W, jusqu'à un plancher de 7 (même taille que la
+  -- ligne de classe juste en dessous -- déjà le plus petit texte du jeu,
+  -- pas la peine de descendre encore pour le nom, l'élément le plus
+  -- important de la carte). Testé sur les 96 faces du jeu (base + "+") :
+  -- seules 2 ("+ Combattant expérimenté +", "+ Communion des morts +" à
+  -- l'époque -- les 2 plus longs noms de base, alourdis par le suffixe "+")
+  -- ne tenaient pas à taille 7 -- renommées "Combat aguerri"/"Lien morbide"
+  -- (2026-09-12, demande explicite, voir cards.lua) suite au signalement en
+  -- console (5ᵉ demande explicite --
+  -- "dans tous les cas, il faut me le signaler pour que je change le texte")
+  -- plutôt que de continuer à rétrécir vers l'illisible.
+  local hero_name = Heroes.class_name[def.class_id]
+  local NAME_X = def.corruption_cost_cap and 40 or 26
+  local NAME_Y, NAME_W = 3, w - NAME_X - 3
+  local name_size = 16
+  local name_font = Fonts.get(name_size)
+  while name_size > 7 and name_font:getWidth(def.name) > NAME_W do
+    name_size = name_size - 1
+    name_font = Fonts.get(name_size)
+  end
+  if name_font:getWidth(def.name) > NAME_W then
+    print(("[carte] %s (%s) : nom trop long pour tenir sur 1 ligne meme a taille %d (%dpx > %dpx) -- a raccourcir")
+      :format(def.name, def.code, name_size, math.ceil(name_font:getWidth(def.name)), NAME_W))
+  end
+  local class_font = Fonts.get(7)
+  local NAME_H = 3 + name_font:getHeight() + (hero_name and (2 + class_font:getHeight()) or 0) + 3
+  set(palette.border)
+  love.graphics.rectangle("fill", NAME_X, NAME_Y, NAME_W, NAME_H, 4, 4)
+  set(Theme.black); love.graphics.setLineWidth(2)
+  love.graphics.rectangle("line", NAME_X, NAME_Y, NAME_W, NAME_H, 4, 4)
+  love.graphics.setLineWidth(1)
+  text(def.name, NAME_X, NAME_Y + 3, NAME_W, name_size, Theme.bg, "center")
+  if hero_name then
+    text("- " .. hero_name .. " -", NAME_X, NAME_Y + 3 + name_font:getHeight() + 2, NAME_W, 7, Theme.bg, "center")
+  end
+
+  -- Description (2026-09-12, sous l'illustration) : rétrécie automatiquement
+  -- (5ᵉ/6ᵉ demandes explicites -- "si certains textes dépassent, il faut
+  -- downscale la police d'écriture jusqu'à ce que cela rentre... dans tous
+  -- les cas, il faut me le signaler pour que je change le texte") -- part de
+  -- 9 (taille normale, inchangée pour l'immense majorité des cartes), essaie
+  -- des tailles décroissantes jusqu'à ce que `RichText.measure_height`
+  -- (mesure SANS dessiner, voir richtext.lua) tienne dans le budget vertical
+  -- réel (jusqu'au haut de la bande de type, `band_y`, moins une petite
+  -- marge) -- jamais de chevauchement "gracieux" accepté cette fois, un
+  -- plancher de 6 à la place. Si même 6 ne suffit pas, signalé en console
+  -- (texte encore plus long que le pire cas déjà rencontré ce jour --
+  -- Riposte/Assassinat, déjà raccourcis) plutôt que de laisser déborder.
+  local desc_y = art_y + art_h + 4
+  local desc_budget_h = band_y - desc_y - 2
+  local desc_size = 9
+  while desc_size > 6 and RichText.measure_height(desc_text, w - 6, desc_size) > desc_budget_h do
+    desc_size = desc_size - 1
+  end
+  if RichText.measure_height(desc_text, w - 6, desc_size) > desc_budget_h then
+    print(("[carte] %s (%s) : description deborde encore a taille %d (%.0fpx > %.0fpx budget) -- a raccourcir")
+      :format(def.name, def.code, desc_size, RichText.measure_height(desc_text, w - 6, desc_size), desc_budget_h))
+  end
+  RichText.draw(desc_text, 3, desc_y, w - 6, desc_size, desc_color or Theme.muted)
 
   -- Type de carte (2026-09-03, demande explicite -- "Offensive" quand la
   -- carte cible/agit sur des ennemis, "Support" quand elle cible/agit sur des
-  -- alliés, exceptionnellement les deux) : cellule dédiée juste au-dessus du
-  -- bandeau du nom de l'aventurier ci-dessous -- rouge (Theme.offensive) ou
-  -- bleue (Theme.support). Coins arrondis, 90% de la largeur de la carte
-  -- (2026-09-03, 2ᵉ demande explicite -- moins large que la carte, centrée) :
-  -- `band_x`/`band_w` ci-dessous. Les 2 rares cartes des 2 types affichent 2
-  -- PASTILLES ARRONDIES DISTINCTES côte à côte (pas une bande unique coupée
-  -- en 2 -- `love.graphics.rectangle` n'arrondit pas un seul côté d'un
-  -- rectangle, une bande coupée en 2 rectangles arrondis individuellement
-  -- laisserait 2 coins arrondis au milieu, pas une coupure nette) plutôt que
-  -- d'empiler 2 lignes (garde la bande à hauteur fixe dans tous les cas,
-  -- jamais de calcul de hauteur variable qui grignoterait sur la description
-  -- juste au-dessus). Pas de nouvelle locale de chunk (voir le commentaire
-  -- sur la limite des 200 locales près de CARD_W/CARD_H) : bande positionnée
-  -- en dur par rapport à `h`/`w`, comme le bandeau du nom de l'aventurier
-  -- juste en dessous.
+  -- alliés, exceptionnellement les deux) -- rouge (Theme.offensive) ou bleue
+  -- (Theme.support). Coins arrondis, 90% de la largeur de la carte (2026-09-03,
+  -- 2ᵉ demande explicite -- moins large que la carte, centrée) : `band_x`/
+  -- `band_w` ci-dessous. Les 2 rares cartes des 2 types affichent 2 PASTILLES
+  -- ARRONDIES DISTINCTES côte à côte (pas une bande unique coupée en 2 --
+  -- `love.graphics.rectangle` n'arrondit pas un seul côté d'un rectangle, une
+  -- bande coupée en 2 rectangles arrondis individuellement laisserait 2
+  -- coins arrondis au milieu, pas une coupure nette) plutôt que d'empiler 2
+  -- lignes (garde la bande à hauteur fixe dans tous les cas). Tout en bas de
+  -- la carte désormais (2026-09-12, demande explicite -- "le type est situé
+  -- tout en bas") : l'ex-bandeau "nom de l'aventurier" qui occupait ce coin
+  -- a été fusionné dans le cartouche du haut (voir NAME_X/Y/W/H ci-dessus),
+  -- donc plus rien à éviter ici -- juste une petite marge (2px) sous la
+  -- bande pour laisser le contour arrondi de la carte se voir. `band_y`
+  -- calculé tout en haut de la fonction désormais (la description en a
+  -- besoin en premier, voir plus haut).
   if def.types then
-    -- 2026-09-12 : `16` -> `12`, le bandeau de nom d'aventurier juste en
-    -- dessous a été réduit (12->8 de hauteur + 4 de marge, voir plus bas).
-    local band_y = h - 12 - 2 - 11
     local band_w = w * 0.9
     local band_x = (w - band_w) / 2
     local has_off, has_sup, has_ench = false, false, false
@@ -2092,25 +2186,6 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
       love.graphics.rectangle("fill", band_x, band_y, band_w, 11, 4, 4)
       text_v_centered(has_off and "OFFENSIVE" or "SUPPORT", band_x, band_y, band_w, 11, 8, Theme.bg)
     end
-  end
-
-  -- Origine de la carte (2026-08-20, demande explicite) : nom de l'aventurier
-  -- qui l'a fournie -- lu depuis def.class_id (une classe = un seul héros,
-  -- voir Heroes.class_name), pas un champ propre à chaque carte. Fond noir
-  -- translucide dessous (même principe que la pastille de coût) pour rester
-  -- lisible même si la description déborde jusqu'en bas de la carte. Centré,
-  -- police agrandie (2026-08-24, demande explicite -- avant, aligné à droite
-  -- en tout petit, 8px). Remonté de 4px (2026-08-24, bug signalé -- flush
-  -- avec le bas mangeait le liseré arrondi du cadre) : marge visible sous la
-  -- bande pour laisser le contour se voir. Réduite (2026-09-12, demande
-  -- explicite -- "fait doublon avec la couleur de bordure/fond qui identifie
-  -- déjà la classe") : 12->8 de hauteur, police 10->7, toujours là (juste
-  -- plus discrète) pour les joueurs qui n'ont pas encore mémorisé la palette.
-  local hero_name = Heroes.class_name[def.class_id]
-  if hero_name then
-    set(Theme.black, 0.55)
-    love.graphics.rectangle("fill", 0, h - 12, w, 8)
-    text_v_centered(hero_name, 0, h - 12, w, 8, 7, palette.border)
   end
 
   draw_tooltip_hint(w, h)
@@ -2343,16 +2418,15 @@ local function draw_hand(controller)
       if is_pending then scale, lift = 1.28, 22 else scale, lift = 1.18, 14 end
     end
     -- Le grossissement cosmétique fixe (+44%, ajouté le 2026-09-03 pour
-    -- rendre lisible une carte 92x138) est retiré le 2026-09-12 : la carte
-    -- elle-même est désormais 102x153 (voir CARD_W/CARD_H, +11% par rapport à
-    -- l'ancien format) -- vérifié au rendu (capture d'écran) que le texte
-    -- reste lisible en main sans ce multiplicateur fixe, qui ferait déborder
-    -- le bas de l'écran (BOTTOM_ROW_Y dépend directement de CARD_H) ou
-    -- chevaucher la rangée de héros au-dessus si réintroduit. Le
-    -- grossissement au survol/à la sélection ci-dessus (1.18/1.28) suffit sur
-    -- une base déjà plus grande. Le décalage vers le bas de +24px (même
-    -- demande du 2026-09-03, "ne pas chevaucher les aventuriers") compensait
-    -- spécifiquement CE grossissement fixe -- retiré avec lui.
+    -- rendre lisible une carte 92x138) est retiré le 2026-09-12 -- la main
+    -- affiche désormais CARD_W/CARD_H en entier (122x184, 4ᵉ demande
+    -- explicite, même session -- "je préfère que les cartes soient plus
+    -- grandes aussi ici") : plus besoin d'aucun multiplicateur, ni du détour
+    -- par canvas un temps utilisé ici pour afficher la main plus petite que
+    -- la taille canonique (retiré avec lui -- r.w/r.h VALENT CARD_W/CARD_H
+    -- maintenant, un dessin direct suffit, voir draw_card_face plus bas).
+    -- Le grossissement au survol/à la sélection ci-dessus (1.18/1.28) reste
+    -- géré normalement par translate/scale.
     love.graphics.push()
     love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift)
     love.graphics.scale(scale, scale)
@@ -2677,7 +2751,11 @@ end
 
 -- Canvas réutilisé pour toutes les cartes en vol, à toutes les frames -- créé à la
 -- volée (lazy) une seule fois, jamais une allocation de Canvas par carte par frame.
-local card_flight_canvas
+-- Déclaré plus haut dans le fichier (2026-09-12, voir près de CARD_W/CARD_H) --
+-- draw_one (draw_hand) en a maintenant besoin lui aussi pour poser la carte en
+-- main à HAND_CARD_W/H tout en la dessinant à la taille canonique CARD_W/CARD_H,
+-- et draw_hand est défini plus haut dans ce fichier que cette ligne (la portée
+-- lexicale d'un local ne remonte pas avant sa déclaration).
 
 -- Cartes qui volent de la pioche vers la main (arrivée) ou de la main vers la
 -- défausse (départ) -- port de flyGhost()/animateDrawnCards()/animateDiscardedCards()
@@ -4805,10 +4883,12 @@ function View.draw(controller)
 
   draw_hand(controller)
   draw_bottom_controls(controller)
-  -- 632->662 (2026-08-31, passage 1280x720) : suit le même décalage que la
-  -- rangée de boutons du bas (HAND_Y/BOTTOM_ROW_Y), pour rester à la même
-  -- hauteur relative entre la colonne de boutons et "Fin de tour".
-  text(hint_text(controller), 0, 662, W, 10, Theme.muted)
+  -- 662 -> 462 (2026-09-12, la main affiche maintenant CARD_H en entier,
+  -- 122x184 -- son bas descend désormais jusqu'à ~689-703 selon l'éventail,
+  -- bien plus bas que 662) : remonté dans l'espace resté libre entre la
+  -- rangée de héros (HERO_ROW_Y+UNIT_H=452) et la main (HAND_Y=505), seul
+  -- endroit où ce indice ne risque plus de se faire recouvrir par une carte.
+  text(hint_text(controller), 0, 462, W, 10, Theme.muted)
 
   if controller.screen == "defeat" then
     set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, W, H)

@@ -43,15 +43,13 @@ local function tokenize(raw_text)
   return atoms
 end
 
---- Dessine `raw_text` (texte de carte AVANT render_card_text, mots-clés encore
--- entre guillemets) dans la zone (x, y, w), icônes de mots-clés inline, lignes
--- centrées. Retourne la hauteur totale dessinée (pour empiler d'autres éléments
--- derrière si besoin).
-function RichText.draw(raw_text, x, y, w, size, color)
-  local font = Fonts.get(size)
-  love.graphics.setFont(font)
+--- Découpe `raw_text` en lignes tenant dans `w` à la police `font` -- partagé
+-- entre RichText.draw (dessin) et RichText.measure_height (mesure seule, sans
+-- rien dessiner -- 2026-09-12, nécessaire pour le rétrécissement automatique
+-- de la description quand elle déborde, voir draw_card_face) : même
+-- découpage exact dans les 2 cas, jamais 2 calculs qui pourraient diverger.
+local function wrap(raw_text, w, font)
   local space_w = font:getWidth(" ")
-  local line_h = font:getHeight() * 1.15
   local icon_w = font:getHeight()
 
   local function icon_visual_width(atom)
@@ -80,6 +78,31 @@ function RichText.draw(raw_text, x, y, w, size, color)
     end
   end
   if #current > 0 then lines[#lines + 1] = current end
+  return lines, space_w, icon_w, atom_width
+end
+
+--- Hauteur totale que prendrait `raw_text` si dessiné via RichText.draw avec
+-- les mêmes `w`/`size`, SANS rien dessiner (2026-09-12, voir draw_card_face --
+-- rétrécissement automatique de la description quand elle ne tient pas dans
+-- sa zone : il faut pouvoir tester plusieurs tailles de police avant de
+-- dessiner la bonne, un aller-retour dessiné à chaque taille serait à la
+-- fois plus lent et visuellement instable -- superposition d'un instant).
+function RichText.measure_height(raw_text, w, size)
+  local font = Fonts.get(size)
+  local line_h = font:getHeight() * 1.15
+  local lines = wrap(raw_text, w, font)
+  return #lines * line_h
+end
+
+--- Dessine `raw_text` (texte de carte AVANT render_card_text, mots-clés encore
+-- entre guillemets) dans la zone (x, y, w), icônes de mots-clés inline, lignes
+-- centrées. Retourne la hauteur totale dessinée (pour empiler d'autres éléments
+-- derrière si besoin).
+function RichText.draw(raw_text, x, y, w, size, color)
+  local font = Fonts.get(size)
+  love.graphics.setFont(font)
+  local line_h = font:getHeight() * 1.15
+  local lines, space_w, icon_w, atom_width = wrap(raw_text, w, font)
 
   local cr, cg, cb = color[1], color[2], color[3]
   local ly = y

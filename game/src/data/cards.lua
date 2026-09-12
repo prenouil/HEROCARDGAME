@@ -67,7 +67,10 @@ Cards.list = {
     -- un ennemi ou un allié, `ctx.target` est résolu avant l'effet comme pour
     -- "enemy"/"ally" -- l'effet distingue les deux via Combat.hero_by_id
     -- (present côté héros seulement, jamais côté ennemi).
-    code = "coup-direct-guerrier", name = "Combattant expérimenté", class_id = "guerrier", tier = "depart", cost = 0,
+    -- Renommée "Combat aguerri" (2026-09-12, demande explicite -- nom trop
+    -- long pour tenir sur 1 ligne dans le nouveau cartouche de carte, voir
+    -- draw_card_face dans view.lua) : code interne inchangé.
+    code = "coup-direct-guerrier", name = "Combat aguerri", class_id = "guerrier", tier = "depart", cost = 0,
     cats = { "melee", "degats", "defense" }, dmg_type = "physique", target = "enemy-or-ally",
     -- Type (2026-09-03, demande explicite) : "cible un ennemi (dégâts) OU un
     -- allié (bouclier)" -- les 2 branches sont un choix explicite du joueur,
@@ -832,7 +835,7 @@ Cards.list = {
     -- Type (2026-09-03) : dual -- dégâts à l'ennemi (Offensive) ET soin à
     -- soi proportionnel à la Corruption dépensée (Support), substantiel
     -- (2-3 PV par point, pas un à-côté), contrairement au mana incidental de
-    -- Main de feu -- comparable à Combattant expérimenté/Assassinat.
+    -- Main de feu -- comparable à Combat aguerri/Assassinat.
     types = { "offensive", "support" },
     desc = 'Inflige 6 "necrose" à un ennemi. Se soigne de 2*X.',
     effect = function(ctx)
@@ -972,7 +975,10 @@ Cards.list = {
     },
   },
   {
-    code = "communion-morts", name = "Communion des morts", class_id = "necromancien", tier = "avance", cost = 1,
+    -- Renommée "Lien morbide" (2026-09-12, demande explicite -- nom trop
+    -- long pour tenir sur 1 ligne dans le nouveau cartouche de carte, voir
+    -- draw_card_face dans view.lua) : code interne inchangé.
+    code = "communion-morts", name = "Lien morbide", class_id = "necromancien", tier = "avance", cost = 1,
     corruption_cost_cap = 6, heal_per_corruption = 2,
     cats = { "sort", "soin" }, dmg_type = nil, target = "self",
     types = { "support" },
