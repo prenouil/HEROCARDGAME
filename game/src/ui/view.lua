@@ -59,7 +59,22 @@ local BOUNDED_COMBAT_COUNT = 8
 -- HERO_PORTRAIT_SIZE plus bas) : la carte grandit un peu pour absorber le
 -- portrait agrandi sans tasser le reste (badges, nom en bas côté héros).
 local UNIT_W, UNIT_H = 150, 168
-local CARD_W, CARD_H = 92, 138
+-- 92x138 -> 102x153 (2026-09-12, demande explicite -- faire de la place à une
+-- illustration par carte, "la chose la plus claire et la plus importante à
+-- voir" sans nuire à la lisibilité du texte) : voir draw_card_face plus bas
+-- pour la nouvelle disposition verticale (illustration entre le nom et la
+-- description, désormais déplacée sous elle). Même ratio que l'ancien format
+-- (92/138 = 102/153 = 2/3), +11% uniforme -- un premier essai à 110x180 a
+-- débordé de l'écran à 2 endroits une fois RENDU (capture d'écran, pas
+-- calculé à l'aveugle) : le bouton "Fin de tour" sous la main (BOTTOM_ROW_Y =
+-- HAND_Y + CARD_H + ...) dépassait le bas de la fenêtre de ~18px (HAND_Y =
+-- 480 est un choix explicite d'une session antérieure, pas rediscuté ici), et
+-- la 2e rangée de cartes de l'écran d'équipe (TEAM_CARD_Y) laissait moins de
+-- place que nécessaire à la rangée "Ton équipe" (TEAM_HERO_H) avant le bas
+-- d'écran. 102x153 tient dans les deux budgets avec une marge réelle (~9px
+-- et ~40px respectivement) -- toujours plus grand qu'avant, juste pas au
+-- chiffre de départ.
+local CARD_W, CARD_H = 102, 153
 -- Taille/rendu des cartes de draft (écran de victoire) : voir DraftFx,
 -- regroupé sous UNE SEULE locale de chunk (au lieu d'une poignée éparses --
 -- W/H, canvas de fondu, fonctions front/fading/flight) -- ce fichier flirtait
@@ -647,6 +662,14 @@ local TEAM_AVAILABLE_Y = 66
 -- rangée de cartes (TEAM_CARD_Y) et cette rangée, avec les 60px de hauteur
 -- en plus -- tout le reste de la colonne (projecteur/boutons Annuler-Valider)
 -- se termine bien avant (y=488), aucun risque de chevauchement.
+-- Reste à 560 (2026-09-12, cartes agrandies 92x138 -> 102x153 pour
+-- l'illustration) : un essai à 110x180 avait forcé 560->602 pour garder la
+-- 2e rangée de cartes (TEAM_CARD_Y) sans chevauchement, mais ce chiffre
+-- débordait ensuite lui-même du bas d'écran (602+TEAM_HERO_H=722 > 720,
+-- vu au rendu réel) -- CARD_H redescendu à 153 (voir son commentaire)
+-- redonne à cette rangée toute la marge qu'elle avait déjà (2e rangée de
+-- cartes désormais à y=532 au lieu de 502 à l'origine, encore ~28px sous
+-- son ancienne marge de confort).
 local TEAM_BOTTOM_Y = 560
 local TEAM_PARTY_LEFT = 170
 
@@ -1971,7 +1994,55 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
   end
 
   name_badge(def.name, 2, 22, w - 4, 16, palette.border, Theme.bg, 2, 1)
-  RichText.draw(desc_text, 3, 42, w - 6, 10, desc_color or Theme.muted)
+
+  -- Illustration (2026-09-12, demande explicite -- "la chose la plus claire
+  -- et la plus importante à voir", sans nuire aux autres informations) :
+  -- juste sous le nom, le bloc le plus grand de la carte (voir le
+  -- commentaire plus bas sur le %, réduit depuis le premier essai pour
+  -- laisser la place aux descriptions les plus longues du jeu).
+  -- `Sprites.card(def.code)` renvoie nil tant qu'aucun fichier
+  -- `assets/cards/<code>.png` n'existe (repli déjà géré par Sprites.load,
+  -- jamais d'erreur -- génération des 48 illustrations volontairement HORS
+  -- de cette tâche, voir le plan) : simple aplat neutre en attendant, jamais
+  -- une icône de classe ni un texte "manquant" -- juste un espace réservé qui
+  -- devient la vraie image dès qu'un fichier apparaît, sans autre changement
+  -- de code. `Sprites.draw_cover` (nouveau, voir sprites.lua) découpe
+  -- l'image en Quad pour REMPLIR tout le cadre façon "cover" CSS (rogne au
+  -- besoin, jamais de déformation) -- pas de `love.graphics.setScissor` ici :
+  -- ses coordonnées sont TOUJOURS en pixels ÉCRAN absolus, jamais affectées
+  -- par la transformation en cours (or cette fonction est appelée aussi bien
+  -- depuis un canvas remis à l'origine QUE directement sous un
+  -- translate/scale/rotate, ex. la main -- un scissor codé en dur ici
+  -- rognerait n'importe quoi selon le point d'appel). Le découpage Quad de
+  -- `Sprites.draw_cover` opère en espace TEXTURE, jamais en espace écran :
+  -- correct quel que soit l'appelant.
+  -- 39% -> 28% -> 20% (2026-09-12, régression trouvée au rendu -- plusieurs
+  -- descriptions parmi les plus longues du jeu (Riposte, Infranchissable +,
+  -- Assassinat) débordaient carrément SOUS le bas de la carte à 39%, jusque
+  -- sur la carte suivante à la Forge -- 28% réduisait le débordement mais
+  -- pas assez pour ces cas-là. Toujours le bloc le plus grand de la carte,
+  -- juste moins gourmand -- voir aussi la taille de police réduite sur la
+  -- description juste en dessous, 2e levier actionné pour le même problème.
+  local art_x, art_y, art_w, art_h = 6, 40, w - 12, math.floor(h * 0.20)
+  local art = Sprites.card(def.code)
+  if art then
+    Sprites.draw_cover(art, art_x, art_y, art_w, art_h)
+  else
+    set(Theme.panel_light); love.graphics.rectangle("fill", art_x, art_y, art_w, art_h, 4, 4)
+  end
+  set(palette.border); love.graphics.setLineWidth(1)
+  love.graphics.rectangle("line", art_x, art_y, art_w, art_h, 4, 4)
+
+  -- Description (2026-09-12, déplacée sous l'illustration -- suivait le nom
+  -- directement avant) : zone plus étroite qu'avant (illustration en plus),
+  -- police 10->9 (2e levier, voir le commentaire sur art_h ci-dessus) pour
+  -- que les descriptions les plus longues du jeu (Riposte, Infranchissable +)
+  -- restent DANS la carte -- vérifié au rendu avec ces cas précis. Si un
+  -- texte déborde quand même, il chevauche visuellement la bande de type
+  -- juste en dessous plutôt que de planter (même dégradation gracieuse déjà
+  -- acceptée pour le bandeau de nom d'aventurier plus bas, voir son
+  -- commentaire) -- à surveiller au rendu, pas un risque nouveau.
+  RichText.draw(desc_text, 3, art_y + art_h + 4, w - 6, 9, desc_color or Theme.muted)
 
   -- Type de carte (2026-09-03, demande explicite -- "Offensive" quand la
   -- carte cible/agit sur des ennemis, "Support" quand elle cible/agit sur des
@@ -1991,7 +2062,9 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
   -- en dur par rapport à `h`/`w`, comme le bandeau du nom de l'aventurier
   -- juste en dessous.
   if def.types then
-    local band_y = h - 16 - 2 - 11
+    -- 2026-09-12 : `16` -> `12`, le bandeau de nom d'aventurier juste en
+    -- dessous a été réduit (12->8 de hauteur + 4 de marge, voir plus bas).
+    local band_y = h - 12 - 2 - 11
     local band_w = w * 0.9
     local band_x = (w - band_w) / 2
     local has_off, has_sup, has_ench = false, false, false
@@ -2029,12 +2102,15 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
   -- police agrandie (2026-08-24, demande explicite -- avant, aligné à droite
   -- en tout petit, 8px). Remonté de 4px (2026-08-24, bug signalé -- flush
   -- avec le bas mangeait le liseré arrondi du cadre) : marge visible sous la
-  -- bande pour laisser le contour se voir.
+  -- bande pour laisser le contour se voir. Réduite (2026-09-12, demande
+  -- explicite -- "fait doublon avec la couleur de bordure/fond qui identifie
+  -- déjà la classe") : 12->8 de hauteur, police 10->7, toujours là (juste
+  -- plus discrète) pour les joueurs qui n'ont pas encore mémorisé la palette.
   local hero_name = Heroes.class_name[def.class_id]
   if hero_name then
     set(Theme.black, 0.55)
-    love.graphics.rectangle("fill", 0, h - 16, w, 12)
-    text(hero_name, 0, h - 15, w, 10, palette.border, "center")
+    love.graphics.rectangle("fill", 0, h - 12, w, 8)
+    text_v_centered(hero_name, 0, h - 12, w, 8, 7, palette.border)
   end
 
   draw_tooltip_hint(w, h)
@@ -2266,35 +2342,19 @@ local function draw_hand(controller)
       -- grande des deux) : survol 1.1->1.18, sélection 1.16->1.28.
       if is_pending then scale, lift = 1.28, 22 else scale, lift = 1.18, 14 end
     end
-    -- +20% (2026-09-03, demande explicite -- "les cartes dans la main
-    -- doivent être 20% plus grosses"), PUIS ENCORE +20% (même jour, 2ᵉ
-    -- demande explicite -- "les cartes peuvent être encore 20% plus
-    -- grosses", cumulatif sur le premier +20%, pas un remplacement -> 1.2*1.2
-    -- = 1.44) : PUR agrandissement visuel au moment du dessin, comme le
-    -- grossissement au survol/à la sélection ci-dessus (même mécanisme
-    -- push/scale/pop, juste une multiplication de plus) -- ne touche PAS `r`
-    -- (rect utilisé par View.hand_hit/le calcul des positions/HAND_Y/
-    -- BOTTOM_ROW_Y), donc aucune retombée sur le hit-test, l'espacement de
-    -- l'éventail ou la mise en page du reste de l'écran : exactement le même
-    -- compromis déjà accepté pour le survol/la sélection, dont le hit-test ne
-    -- suit pas non plus le grossissement (voir View.hand_hit, qui lit
-    -- toujours les rects de base). `lift` grandit proportionnellement pour
-    -- garder le même dégagement relatif au-dessus des cartes voisines une
-    -- fois la carte plus grosse.
-    scale = scale * 1.44
-    lift = lift * 1.44
-    -- Descendues de 24px (2026-09-03, demande explicite -- "descendre un peu
-    -- les cartes pour éviter qu'elles ne chevauchent les aventuriers") : le
-    -- grossissement ci-dessus grandit la carte AUTOUR de son centre (translate
-    -- puis scale), donc son bord haut remonte d'autant au-dessus de son ancien
-    -- rect -- assez pour toucher le bas de la rangée d'aventuriers (surtout
-    -- une carte survolée/sélectionnée, scale+lift combinés). Décalage ajouté
-    -- ici (dans le translate qui fixe l'ANCRE écran, le dernier appliqué --
-    -- donc en pixels écran réels, jamais mis à l'échelle par `scale`), pas sur
-    -- `r`/HAND_Y : même compromis que le +20%/+44% ci-dessus, pur ajustement
-    -- visuel qui ne touche pas le hit-test/la mise en page.
+    -- Le grossissement cosmétique fixe (+44%, ajouté le 2026-09-03 pour
+    -- rendre lisible une carte 92x138) est retiré le 2026-09-12 : la carte
+    -- elle-même est désormais 102x153 (voir CARD_W/CARD_H, +11% par rapport à
+    -- l'ancien format) -- vérifié au rendu (capture d'écran) que le texte
+    -- reste lisible en main sans ce multiplicateur fixe, qui ferait déborder
+    -- le bas de l'écran (BOTTOM_ROW_Y dépend directement de CARD_H) ou
+    -- chevaucher la rangée de héros au-dessus si réintroduit. Le
+    -- grossissement au survol/à la sélection ci-dessus (1.18/1.28) suffit sur
+    -- une base déjà plus grande. Le décalage vers le bas de +24px (même
+    -- demande du 2026-09-03, "ne pas chevaucher les aventuriers") compensait
+    -- spécifiquement CE grossissement fixe -- retiré avec lui.
     love.graphics.push()
-    love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift + 24)
+    love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift)
     love.graphics.scale(scale, scale)
     -- La carte "spéciale" (survolée/sélectionnée) se redresse, comme dans
     -- Slay the Spire -- l'éventail ne concerne que les cartes au repos.

@@ -94,6 +94,18 @@ function Sprites.keyword(key)
   return load("icons/keywords/" .. key .. ".png")
 end
 
+-- Illustration de carte (2026-09-12, demande explicite -- redesign de la
+-- carte pour "reconnaître au premier coup d'œil et anticiper l'effet") :
+-- même patron que Sprites.enemy ci-dessus, clé = `def.code` (déjà unique par
+-- carte dans cards.lua, aucun nouveau champ de données nécessaire). Une
+-- carte de base et son amélioration partagent le MÊME fichier (demande
+-- explicite -- l'amélioration n'aura qu'un effet "foil" en plus, hors scope
+-- de cette tâche) : `Cards.upgraded_def` garde `code` inchangé, donc
+-- `def.code` désigne déjà la bonne image sans rien de plus à faire ici.
+function Sprites.card(code)
+  return load("cards/" .. code .. ".png")
+end
+
 --- Dessine `entry` (retour de Sprites.hero/enemy/status/keyword) centrée en
 -- (cx, cy), mise à l'échelle pour tenir dans un diamètre 2*r sans déformation
 -- (ratio conservé, l'image source est carrée de toute façon -- 512x512 --
@@ -103,6 +115,36 @@ function Sprites.draw_centered(entry, cx, cy, r)
   local iw, ih = img:getDimensions()
   local scale = (2 * r) / math.max(iw, ih)
   love.graphics.draw(img, cx, cy, 0, scale, scale, iw / 2, ih / 2)
+end
+
+--- Dessine `entry` pour REMPLIR tout le rectangle `x,y,w,h`, façon "cover"
+-- CSS (2026-09-12, illustration de carte -- Sprites.draw_centered ci-dessus
+-- est pensée pour un portrait ROND, cale le plus grand côté dans un diamètre ;
+-- une illustration de carte est un cadre RECTANGULAIRE, jamais de bande vide
+-- acceptable sur un bord). Rogne l'excédent via un Quad calculé en ESPACE
+-- TEXTURE (coordonnées de l'image source), jamais via love.graphics.setScissor
+-- (dont les coordonnées sont TOUJOURS en pixels écran absolus, donc fausses
+-- dès que l'appelant dessine sous une transformation -- draw_card_face,
+-- seul appelant à ce jour, tourne aussi bien depuis un canvas remis à
+-- l'origine QUE directement sous un translate/scale/rotate, ex. la main) --
+-- un Quad reste correct quel que soit l'appelant, par construction.
+function Sprites.draw_cover(entry, x, y, w, h)
+  local img = entry.image
+  local iw, ih = img:getDimensions()
+  local target_aspect, src_aspect = w / h, iw / ih
+  local sx, sy, sw, sh
+  if src_aspect > target_aspect then
+    -- Image plus large que la cible (proportionnellement) : rogne les côtés.
+    sh, sw = ih, ih * target_aspect
+    sx, sy = (iw - sw) / 2, 0
+  else
+    -- Image plus haute que la cible : rogne le haut et le bas.
+    sw, sh = iw, iw / target_aspect
+    sx, sy = 0, (ih - sh) / 2
+  end
+  local quad = love.graphics.newQuad(sx, sy, sw, sh, iw, ih)
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(img, quad, x, y, 0, w / sw, h / sh)
 end
 
 --- Dimensions (largeur, hauteur) occupées par le contenu RÉEL de `entry` (sa

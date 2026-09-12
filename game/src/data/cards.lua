@@ -206,7 +206,11 @@ Cards.list = {
     -- déjà -- annule l'attaque (protège le Guerrier, Support) ET inflige les
     -- dégâts en retour à l'ennemi (Offensive), les 2 dans le MÊME geste.
     types = { "offensive", "support" },
-    desc = 'Si "cibleennemi", annule TOUTES les attaques et inflige la moitié des dégâts en retour à chaque ennemi.',
+    -- Raccourcie (2026-09-12, redesign de la carte -- zone de texte réduite) :
+    -- même effet (toutes les attaques annulées, un par un ennemi), texte
+    -- resserré pour tenir dans le nouveau gabarit (débordait sous la carte
+    -- au rendu -- c'était la description la plus longue du jeu).
+    desc = 'Annule chaque attaque de "cibleennemi", renvoie la moitié des dégâts.',
     effect = function(ctx)
       local count = 0
       for _, e in ipairs(ctx.state.enemies) do
@@ -225,7 +229,7 @@ Cards.list = {
       end
     end,
     upgrade = {
-      desc = 'Si "cibleennemi", annule TOUTES les attaques et inflige la totalité des dégâts en retour à chaque ennemi.',
+      desc = 'Annule chaque attaque de "cibleennemi", renvoie la totalité des dégâts.',
       effect = function(ctx)
         local count = 0
         for _, e in ipairs(ctx.state.enemies) do
@@ -735,7 +739,11 @@ Cards.list = {
     -- mineur comme le mana de Main de feu -- une des 2 branches EST le
     -- Support, comparable en poids à l'autre.
     types = { "offensive", "support" },
-    desc = 'Si Camouflé, inflige 12 "epee", sinon gagne "Discrétion" 5, "Puissance" 2 et Assassinat va sur le dessus du deck. "Furtif"',
+    -- Raccourcie (2026-09-12, redesign de la carte -- illustration + zone de
+    -- texte réduite) : même effet, texte resserré pour tenir dans le nouveau
+    -- gabarit (c'était la description la plus longue du jeu, débordait
+    -- visiblement de la carte au rendu).
+    desc = 'Camouflé : 12 "epee". Sinon : "Discrétion" 5, "Puissance" 2, remonte sur le deck. "Furtif"',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
       if (ctx.hero.camoufle or 0) > 0 then
@@ -748,7 +756,7 @@ Cards.list = {
       end
     end,
     upgrade = {
-      desc = 'Si Camouflé, inflige 18 "epee", sinon gagne "Discrétion" 10, "Puissance" 2 et Assassinat va sur le dessus du deck. "Furtif"',
+      desc = 'Camouflé : 18 "epee". Sinon : "Discrétion" 10, "Puissance" 2, remonte sur le deck. "Furtif"',
       effect = function(ctx)
         Game = Game or require("src.rules.game")
         if (ctx.hero.camoufle or 0) > 0 then

@@ -48,7 +48,11 @@ src/
 libs/               -- vide pour l'instant — voir "Dépendances" ci-dessous
 assets/             -- illustrations pixel art générées par IA (2026-08-07, voir
                           tools/generate-batch.js) : characters/heroes,
-                          characters/enemies, icons/keywords, icons/status.
+                          characters/enemies, icons/keywords, icons/status,
+                          cards/ (2026-09-12, illustration par carte, clé =
+                          `def.code` -- une carte de base et son amélioration
+                          partagent le même fichier, pas encore généré à ce
+                          stade, voir Sprites.card/draw_cover).
                           Chargées par src/ui/sprites.lua (filtre "nearest"
                           obligatoire), avec repli automatique sur les
                           silhouettes vectorielles de src/ui/icons.lua si un
