@@ -554,7 +554,17 @@ function Controller.new()
   -- the Spire -- devenu le défaut (2026-08-09, retour positif du porteur de
   -- projet après playtest), "tap" reste disponible via le bouton de bascule.
   self.input_mode = "arrow"
-  self.arrow_hand_hover_uid = nil -- carte de la main survolée en mode "arrow" (agrandissement immédiat, sans délai de tooltip)
+  self.arrow_hand_hover_uid = nil -- carte de la main survolée en mode "arrow"
+  -- Grossissement ANIMÉ, pas immédiat (2026-09-12, demande explicite -- "je
+  -- préfère qu'il y ait une animation qui déplace la carte depuis sa position
+  -- légèrement penchée vers sa position droite, tout en appliquant le zoom
+  -- qui grossit la carte petit à petit... l'effet doit être le même, mais à
+  -- l'inverse" en sortie de survol) : 0..1 par uid, calculé chaque frame dans
+  -- Controller:update (voir update_hand_pop_amounts plus bas) -- 0 = position
+  -- de repos (penchée, taille normale), 1 = pleinement redressée/agrandie.
+  -- draw_one (view.lua) interpole l'échelle/le décalage/la rotation à partir
+  -- de cette seule valeur, jamais un bascule tout-ou-rien.
+  self.hand_pop_amount = {}
   -- Plus de run démarré automatiquement (2026-08-21, demande explicite --
   -- l'appli s'ouvre désormais sur le menu principal) : `self:reset_run(mode)`
   -- n'est appelé qu'au clic sur "Jouer un run"/"Mode infini", voir Input.mousepressed --
@@ -2011,8 +2021,42 @@ function Controller:react_to_status_decay(before)
   for _, e in ipairs(self.state.enemies) do react(e) end
 end
 
+-- Vitesse d'animation du grossissement au survol de la main (2026-09-12,
+-- demande explicite -- voir hand_pop_amount, Controller.new) : progression
+-- par seconde -- un aller (ou un retour) complet 0->1 prend donc ~1/7e de
+-- seconde, assez rapide pour rester réactif, assez lent pour qu'on VOIE le
+-- mouvement (l'ancien comportement, un bascule instantané, est justement ce
+-- qui est corrigé ici).
+local HAND_POP_ANIM_SPEED = 7
+
+--- Anime `self.hand_pop_amount[uid]` de chaque carte en main vers 0 (repos,
+-- position penchée/taille normale) ou 1 (survolée/sélectionnée, redressée/
+-- agrandie) à vitesse CONSTANTE -- jamais un saut, voir le commentaire de
+-- hand_pop_amount dans Controller.new. draw_one (view.lua) interpole
+-- l'échelle/le décalage vertical/la rotation à partir de cette seule valeur.
+-- Seulement en mode "arrow" (2026-08-09, le grossissement au survol est une
+-- amélioration spécifique à ce mode, voir arrow_hand_hover_uid) : en mode
+-- "tap", `special_uid` reste nil et toutes les valeurs retombent à 0 comme
+-- avant (aucune carte de la main ne grossit).
+function Controller:update_hand_pop_amounts(dt)
+  local special_uid = (self.input_mode == "arrow")
+    and ((self.state.pending and self.state.pending.uid) or self.arrow_hand_hover_uid)
+    or nil
+  local step = HAND_POP_ANIM_SPEED * dt
+  for _, c in ipairs(self.state.hand) do
+    local target = (c.uid == special_uid) and 1 or 0
+    local current = self.hand_pop_amount[c.uid] or 0
+    if current < target then
+      self.hand_pop_amount[c.uid] = math.min(target, current + step)
+    elseif current > target then
+      self.hand_pop_amount[c.uid] = math.max(target, current - step)
+    end
+  end
+end
+
 function Controller:update(dt)
   self.seq:update(dt)
+  self:update_hand_pop_amounts(dt)
   for id, a in pairs(self.anim) do
     a.t = a.t + dt
     local limit = (a.kind == "shake") and ANIM_SHAKE or ANIM_PULSE

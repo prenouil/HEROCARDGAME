@@ -1222,9 +1222,12 @@ function Cards.upgraded_def(def)
   assert(def.upgrade, "carte non améliorable : " .. tostring(def.code))
   local up = {}
   for k, v in pairs(def) do up[k] = v end
-  -- "+ Nom +" (2026-09-02, demande explicite -- avant : suffixe seul) : un
-  -- "+" de chaque côté, jamais un seul derrière.
-  up.name = "+ " .. def.name .. " +"
+  -- Nom SANS "+" (2026-09-12, demande explicite -- remplace le système de
+  -- "+ Nom +" adopté le 2026-09-02) : le nom reste identique à la base,
+  -- `is_upgraded` (déjà posé plus bas) est désormais le seul signal --
+  -- draw_card_face (view.lua) l'affiche en gras et dans une teinte grise
+  -- distincte plutôt que d'ajouter des symboles autour du texte.
+  up.name = def.name
   up.desc = def.upgrade.desc
   up.effect = def.upgrade.effect
   up.is_upgraded = true

@@ -2104,16 +2104,33 @@ local function draw_card_face(def, w, h, cost_text, desc_text, desc_color, highl
     print(("[carte] %s (%s) : nom trop long pour tenir sur 1 ligne meme a taille %d (%dpx > %dpx) -- a raccourcir")
       :format(def.name, def.code, name_size, math.ceil(name_font:getWidth(def.name)), NAME_W))
   end
+  -- Classe remontée, plus collée au nom (2026-09-12, demande explicite --
+  -- "peut être un petit peu remontée") : espace entre les 2 lignes 2px -> 0,
+  -- la hauteur naturelle de la police suffit déjà à les distinguer.
+  local CLASS_GAP = 0
   local class_font = Fonts.get(7)
-  local NAME_H = 3 + name_font:getHeight() + (hero_name and (2 + class_font:getHeight()) or 0) + 3
+  local NAME_H = 3 + name_font:getHeight() + (hero_name and (CLASS_GAP + class_font:getHeight()) or 0) + 3
   set(palette.border)
   love.graphics.rectangle("fill", NAME_X, NAME_Y, NAME_W, NAME_H, 4, 4)
   set(Theme.black); love.graphics.setLineWidth(2)
   love.graphics.rectangle("line", NAME_X, NAME_Y, NAME_W, NAME_H, 4, 4)
   love.graphics.setLineWidth(1)
-  text(def.name, NAME_X, NAME_Y + 3, NAME_W, name_size, Theme.bg, "center")
+  -- Carte améliorée : nom en gras + teinte grise distincte plutôt que les
+  -- "+" ajoutés autour du texte (2026-09-12, demande explicite -- remplace
+  -- le système "+ Nom +", voir Cards.upgraded_def dans cards.lua). Pas de
+  -- variante grasse dans la police du jeu (m5x7, voir fonts.lua) : "gras"
+  -- simulé en dessinant le texte 2 fois avec 1px de décalage horizontal,
+  -- technique classique en pixel art faute de vraie police grasse. Gris
+  -- foncé proche de Theme.bg (utilisé pour le nom normal) mais bien
+  -- distinct au premier coup d'œil -- littéral plutôt qu'une nouvelle
+  -- couleur dans theme.lua, seul appelant à ce jour.
+  local name_color = def.is_upgraded and { 0.204, 0.192, 0.227 } or Theme.bg
+  text(def.name, NAME_X, NAME_Y + 3, NAME_W, name_size, name_color, "center")
+  if def.is_upgraded then
+    text(def.name, NAME_X + 1, NAME_Y + 3, NAME_W, name_size, name_color, "center")
+  end
   if hero_name then
-    text("- " .. hero_name .. " -", NAME_X, NAME_Y + 3 + name_font:getHeight() + 2, NAME_W, 7, Theme.bg, "center")
+    text("- " .. hero_name .. " -", NAME_X, NAME_Y + 3 + name_font:getHeight() + CLASS_GAP, NAME_W, 7, Theme.bg, "center")
   end
 
   -- Description (2026-09-12, sous l'illustration) : rétrécie automatiquement
@@ -2336,12 +2353,14 @@ local function draw_hand(controller)
   end
 
   -- Mode "flèche" (2026-08-09) : la carte sélectionnée reste posée en avant
-  -- tant qu'elle est en attente, et la carte survolée grossit immédiatement
-  -- (pas de délai -- contrairement au tooltip) -- inspiré de Slay the Spire.
-  -- Dessinée en deux passes pour que la carte "spéciale" reste au-dessus de
-  -- ses voisines une fois agrandie.
-  local arrow_mode = controller.input_mode == "arrow"
-  local special_uid = arrow_mode and ((state.pending and state.pending.uid) or controller.arrow_hand_hover_uid) or nil
+  -- tant qu'elle est en attente, et la carte survolée grossit -- 2026-09-12,
+  -- demande explicite : ANIMÉ (position + taille), plus un bascule immédiat,
+  -- voir Controller:update_hand_pop_amounts/hand_pop_amount. Dessinée en deux
+  -- passes pour que toute carte EN COURS DE TRANSITION (pas seulement celle
+  -- pleinement agrandie) reste au-dessus de ses voisines -- sans ça, une
+  -- carte qui redescend depuis "agrandie" repasserait brutalement derrière
+  -- ses voisines dès que le survol s'arrête, AVANT même d'avoir fini de
+  -- rapetisser.
 
   -- Le fantôme de vol pioche->main est un fondu qui part de rien ; s'il
   -- survole une carte déjà dessinée à pleine opacité à sa position d'arrivée,
@@ -2357,10 +2376,11 @@ local function draw_hand(controller)
   -- jamais 2 calculs séparés qui pourraient diverger.
   local hiding_uids = View.hand_hiding_uids(controller)
 
-  local function draw_one(c, popped)
+  local function draw_one(c)
     local r = rects[c.uid]
     local def = c.def
     local is_pending = state.pending and state.pending.uid == c.uid
+    local pop = controller.hand_pop_amount[c.uid] or 0
     -- Aperçu de dégâts (voir preview_desc ci-dessus) : seulement sur LA carte
     -- sélectionnée. Deux étapes : héros pas encore assigné -> on prévisualise
     -- celui survolé (pas de cible connue, la Vulnérabilité n'entre pas encore
@@ -2410,29 +2430,27 @@ local function draw_hand(controller)
     -- cette carte ne redeviendra jouable à aucun prix ce combat-ci -- signal
     -- distinct du rouge ci-dessus (manque temporaire de ressource).
     local owner_defeated = not owner or owner.hp <= 0
-    local scale, lift = 1, 0
-    if popped then
-      -- Grossies (2026-08-27, demande explicite -- "un peu plus grosse au
-      -- survol", la carte sélectionnée doit suivre pour rester la plus
-      -- grande des deux) : survol 1.1->1.18, sélection 1.16->1.28.
-      if is_pending then scale, lift = 1.28, 22 else scale, lift = 1.18, 14 end
-    end
-    -- Le grossissement cosmétique fixe (+44%, ajouté le 2026-09-03 pour
-    -- rendre lisible une carte 92x138) est retiré le 2026-09-12 -- la main
-    -- affiche désormais CARD_W/CARD_H en entier (122x184, 4ᵉ demande
-    -- explicite, même session -- "je préfère que les cartes soient plus
-    -- grandes aussi ici") : plus besoin d'aucun multiplicateur, ni du détour
-    -- par canvas un temps utilisé ici pour afficher la main plus petite que
-    -- la taille canonique (retiré avec lui -- r.w/r.h VALENT CARD_W/CARD_H
-    -- maintenant, un dessin direct suffit, voir draw_card_face plus bas).
-    -- Le grossissement au survol/à la sélection ci-dessus (1.18/1.28) reste
-    -- géré normalement par translate/scale.
+    -- Grossies (2026-08-27, demande explicite -- "un peu plus grosse au
+    -- survol", la carte sélectionnée doit suivre pour rester la plus grande
+    -- des deux) puis réaugmenté (2026-09-12, 5ᵉ demande explicite, même
+    -- session -- "le ratio de zoom du survol... doit être augmenté pour
+    -- avoir des cartes encore plus grosses") : survol 1.18->1.35, sélection
+    -- 1.28->1.55. `pop` (0..1, voir Controller:update_hand_pop_amounts)
+    -- interpole en continu vers cette cible plutôt que d'y sauter -- même
+    -- valeur pilote l'échelle, le décalage vertical ET le redressement de la
+    -- rotation ci-dessous, en même temps, dans les 2 sens (demande explicite
+    -- -- "l'effet doit être le même, mais à l'inverse" en sortie de survol).
+    local target_scale, target_lift = 1.35, 18
+    if is_pending then target_scale, target_lift = 1.55, 28 end
+    local scale = 1 + (target_scale - 1) * pop
+    local lift = target_lift * pop
     love.graphics.push()
     love.graphics.translate(r.x + r.w / 2, r.y + r.h / 2 - lift)
     love.graphics.scale(scale, scale)
     -- La carte "spéciale" (survolée/sélectionnée) se redresse, comme dans
     -- Slay the Spire -- l'éventail ne concerne que les cartes au repos.
-    if not popped and r.fan_angle then love.graphics.rotate(r.fan_angle) end
+    -- Angle interpolé vers 0 avec `pop` (ci-dessus), jamais un bascule net.
+    if r.fan_angle then love.graphics.rotate(r.fan_angle * (1 - pop)) end
     love.graphics.translate(-r.w / 2, -r.h / 2)
 
     -- La sélection (`is_pending`) reste exclusivement signalée par l'or de
@@ -2445,12 +2463,10 @@ local function draw_hand(controller)
   end
 
   for _, c in ipairs(state.hand) do
-    if c.uid ~= special_uid and not hiding_uids[c.uid] then draw_one(c, false) end
+    if (controller.hand_pop_amount[c.uid] or 0) <= 0 and not hiding_uids[c.uid] then draw_one(c) end
   end
-  if special_uid and not hiding_uids[special_uid] then
-    for _, c in ipairs(state.hand) do
-      if c.uid == special_uid then draw_one(c, true); break end
-    end
+  for _, c in ipairs(state.hand) do
+    if (controller.hand_pop_amount[c.uid] or 0) > 0 and not hiding_uids[c.uid] then draw_one(c) end
   end
   return rects
 end
@@ -3512,12 +3528,13 @@ local function draw_faded_card_back(class_id, count, x, y, alpha)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
---- Version "+" à afficher pour `def` -- protège contre un double-suffixe
+--- Version améliorée à afficher pour `def` -- protège contre un double-appel
 -- (2026-08-28) : la carte CHOISIE a déjà son `instance.def` remplacé par
 -- Forge.apply_upgrade au moment où ce module la dessine encore une fois pour
--- l'anim de fondu des autres (voir draw_forge) -- Cards.upgraded_def sur un
--- def déjà "+" (is_upgraded) doublerait le suffixe " +", donc on renvoie le
--- def tel quel dans ce cas plutôt que de le repasser par Cards.upgraded_def.
+-- l'anim de fondu des autres (voir draw_forge) -- `Cards.upgraded_def` fait
+-- `assert(def.upgrade, ...)` et un def déjà amélioré (`is_upgraded`) ne porte
+-- plus ce champ, donc un second appel planterait -- on renvoie le def tel
+-- quel dans ce cas plutôt que de le repasser par Cards.upgraded_def.
 local function forge_preview_def(def)
   return def.is_upgraded and def or Cards.upgraded_def(def)
 end
