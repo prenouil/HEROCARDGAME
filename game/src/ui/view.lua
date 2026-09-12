@@ -2473,16 +2473,31 @@ end
 
 local function draw_bottom_controls(controller)
   local b1, b2, b4 = View.end_turn_button, View.restart_button, View.restart_turn_button
+  -- Retour visuel du clic (2026-09-12, demande explicite -- "le bouton
+  -- réagit avec un feedback visuel... (0.5s), puis les cartes se
+  -- défaussent") : `end_turn_feedback_t`/`end_turn_feedback_duration` (voir
+  -- Controller:end_turn) pilotent un "punch" d'échelle -- part de 1, culmine
+  -- à mi-fenêtre (sinus, jamais un aller-retour linéaire qui aurait un pic
+  -- anguleux), revient à 1 pile à la fin -- ET un flash de couleur (blanc ->
+  -- Theme.accent, lerp_color déjà utilisé ailleurs pour un fondu de teinte)
+  -- sur toute la fenêtre. `feedback_p` nil tant qu'aucun clic n'est en cours
+  -- (le bouton reste rigoureusement identique à avant dans ce cas).
+  local feedback_p = controller.end_turn_feedback_t
+    and math.min(1, controller.end_turn_feedback_t / controller.end_turn_feedback_duration)
+  local punch_scale = feedback_p and (1 + 0.14 * math.sin(math.pi * feedback_p)) or 1
+  local fill_color = feedback_p and lerp_color(Theme.white, Theme.accent, feedback_p) or Theme.accent
   -- Bouton carré agrandi (2026-08-24, demande explicite -- "un peu plus gros",
   -- voir END_TURN_BTN_W/H) : centrage vertical approximatif pour un libellé
   -- qui peut retomber sur 2 lignes ("Fin de" / "tour") dans une largeur étroite.
-  set(Theme.accent); love.graphics.rectangle("fill", b1.x, b1.y, b1.w, b1.h, 8, 8)
-  set(Theme.bg); love.graphics.setFont(Fonts.get(13)); love.graphics.printf(b1.label, b1.x, b1.y + b1.h / 2 - 10, b1.w, "center")
+  love.graphics.push()
+  love.graphics.translate(b1.x + b1.w / 2, b1.y + b1.h / 2)
+  love.graphics.scale(punch_scale, punch_scale)
+  love.graphics.translate(-b1.w / 2, -b1.h / 2)
+  set(fill_color); love.graphics.rectangle("fill", 0, 0, b1.w, b1.h, 8, 8)
+  set(Theme.bg); love.graphics.setFont(Fonts.get(13)); love.graphics.printf(b1.label, 0, b1.h / 2 - 10, b1.w, "center")
   -- "?" d'infobulle (2026-08-28, demande explicite -- même indice que sur les
   -- autres éléments à infobulle) : Theme.bg (sombre) plutôt que le blanc par
   -- défaut, pour rester lisible sur ce fond doré (voir draw_tooltip_hint).
-  love.graphics.push()
-  love.graphics.translate(b1.x, b1.y)
   draw_tooltip_hint(b1.w, b1.h, Theme.bg)
   love.graphics.pop()
   -- Boutons rerapetissés (2026-08-24, demande explicite -- encore trop gros) :
@@ -2784,7 +2799,30 @@ end
 -- les tracés du dessin de carte) -- plus un simple rectangle-fantôme avec le nom.
 local function draw_card_flights(controller)
   for _, a in ipairs(controller.card_anims) do
-    if a.elapsed >= a.delay then
+    -- Immobile à SA position d'origine tant que son tour n'est pas venu
+    -- (2026-09-12, demande explicite -- "elle attend que toutes les
+    -- animations de l'effet se finissent, puis elle se déplace vers la
+    -- défausse") : `a.hold_visible` (voir Controller:maybe_animate_played_
+    -- discard) distingue ce cas d'un délai de pioche/remélange ordinaire (où
+    -- rester invisible tant que le délai n'est pas passé EST le comportement
+    -- voulu -- la carte n'a encore "rien à montrer", elle n'a pas encore été
+    -- piochée) : une carte jouée, elle, existe déjà pleinement et doit rester
+    -- visible à sa place le temps que les animations de son effet jouent,
+    -- sans quoi elle disparaîtrait brutalement de la main avant même de
+    -- s'envoler.
+    if a.elapsed < a.delay and a.hold_visible and a.def then
+      card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
+      love.graphics.push()
+      love.graphics.origin()
+      local prev_canvas = love.graphics.getCanvas()
+      love.graphics.setCanvas(card_flight_canvas)
+      love.graphics.clear(0, 0, 0, 0)
+      draw_card_face(a.def, CARD_W, CARD_H, a.def.cost, a.def.desc, Theme.muted, false)
+      love.graphics.setCanvas(prev_canvas)
+      love.graphics.pop()
+      love.graphics.setColor(1, 1, 1, 1)
+      love.graphics.draw(card_flight_canvas, a.from.x, a.from.y, 0, a.from.w / CARD_W, a.from.h / CARD_H)
+    elseif a.elapsed >= a.delay then
       local p = math.min(1, (a.elapsed - a.delay) / a.duration)
       -- "Amnésie" (2026-08-28, demande explicite -- "se disperse en cendre") :
       -- la carte ne VOLE nulle part (`a.dissolve`, voir Controller:

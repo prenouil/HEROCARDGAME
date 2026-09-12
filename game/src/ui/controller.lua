@@ -39,6 +39,14 @@ local FLIGHT_DURATION = 0.38 -- s, calque sur FLIGHT_MS (380ms) du prototype -- 
 -- geste fréquent en cours de tour, doit rester vif) ; la pioche et la défausse de fin de
 -- tour ont chacune leur propre rythme plus lent ci-dessous (2026-08-21, séquence d'onboarding).
 
+-- "Fin de tour" (2026-09-12, demande explicite -- "le bouton réagit avec un
+-- feedback visuel et sonore (0.5s), puis les cartes se défaussent") : déclarée
+-- ICI (pas juste à côté de Controller:end_turn, bien plus bas dans ce fichier)
+-- parce que Controller.new (tout en haut) initialise déjà self.end_turn_
+-- feedback_duration avec cette valeur -- la portée lexicale d'un local ne
+-- remonte pas avant sa déclaration.
+local END_TURN_FEEDBACK_DURATION = 0.5
+
 -- Séquence de début/fin de tour redécoupée en étapes lisibles (2026-08-21,
 -- demande explicite -- onboarding) : chaque beat attend le précédent plutôt que
 -- de se chevaucher, pour que le regard du joueur puisse suivre "énergie -> pioche
@@ -565,6 +573,22 @@ function Controller.new()
   -- draw_one (view.lua) interpole l'échelle/le décalage/la rotation à partir
   -- de cette seule valeur, jamais un bascule tout-ou-rien.
   self.hand_pop_amount = {}
+  -- Verrou de main (2026-09-12, demande explicite -- "elle attend que toutes
+  -- les animations de l'effet se finissent, puis elle se déplace vers la
+  -- défausse, puis, ensuite, on rend la main au joueur") : posé le temps que
+  -- les animations de l'effet ET le vol de la carte vers la défausse jouent
+  -- (voir Controller:resolve_target, qui l'enchaîne via self.seq), retiré
+  -- juste avant Controller:after_card_resolved. Lu uniquement par
+  -- Controller:select_card -- le survol/la sélection d'une cible en attente
+  -- restent inchangés, seul le CHOIX D'UNE NOUVELLE carte est bloqué.
+  self.hand_locked = false
+  -- Retour visuel/sonore de "Fin de tour" AVANT la vraie défausse (2026-09-12,
+  -- demande explicite) : nil tant qu'aucun clic n'est en cours ; sinon compte
+  -- de 0 à end_turn_feedback_duration (voir Controller:update/end_turn) --
+  -- lu par draw_bottom_controls (view.lua) pour animer le bouton (léger
+  -- "punch" d'échelle + flash de couleur) pendant cette fenêtre.
+  self.end_turn_feedback_t = nil
+  self.end_turn_feedback_duration = END_TURN_FEEDBACK_DURATION
   -- Plus de run démarré automatiquement (2026-08-21, demande explicite --
   -- l'appli s'ouvre désormais sur le menu principal) : `self:reset_run(mode)`
   -- n'est appelé qu'au clic sur "Jouer un run"/"Mode infini", voir Input.mousepressed --
@@ -1580,23 +1604,31 @@ end
 -- Amnésie finit dans state.exhausted, jamais state.discard (voir
 -- Game.finish_card) -- sans ce détour, elle ne recevrait AUCUNE animation du
 -- tout (juste retirée de la main en silence).
-function Controller:maybe_animate_played_discard(played_uid, hand_before)
+-- `hold_duration` (optionnel, 2026-09-12, demande explicite -- "elle attend
+-- que toutes les animations de l'effet se finissent, puis elle se déplace
+-- vers la défausse") : la carte reste visible/immobile à `origin` ce
+-- temps-là (`hold_visible`, voir draw_card_flights dans view.lua) avant de
+-- s'envoler -- sans ça, elle disparaîtrait de la main dès l'appel (déjà
+-- retirée de state.hand par Game.resolve_pending à ce stade), avant même que
+-- les dégâts/soins/statuts de son propre effet aient fini de s'afficher.
+function Controller:maybe_animate_played_discard(played_uid, hand_before, hold_duration)
   if not played_uid then return end
+  hold_duration = hold_duration or 0
   local hand_rects = View.hand_rects_for(hand_before)
   local origin = hand_rects[played_uid]
   if not origin then return end
   local last_exhausted = self.state.exhausted[#self.state.exhausted]
   if last_exhausted and last_exhausted.uid == played_uid then
-    self:play_amnesie_vanish(origin, last_exhausted.def)
+    self:play_amnesie_vanish(origin, last_exhausted.def, hold_duration)
     return
   end
   local last = self.state.discard[#self.state.discard]
   if not last or last.uid ~= played_uid then return end -- pas parti en défausse (main/dessus du deck/pas encore résolu)
   self.card_anims[#self.card_anims + 1] = {
-    from = origin, to = View.discard_pile_rect, elapsed = 0, delay = 0,
+    from = origin, to = View.discard_pile_rect, elapsed = 0, delay = hold_duration, hold_visible = true,
     duration = FLIGHT_DURATION, fade_in = false, def = last.def,
   }
-  Sfx.play("flup")
+  self:schedule_sfx("flup", hold_duration)
 end
 
 --- Capture PV + statuts de toutes les unités -- même principe que l'ancien
@@ -1711,14 +1743,17 @@ end
 -- lus en priorité sur les valeurs par défaut (voir leur commentaire côté
 -- view.lua). `gravity` négative = dérive vers le HAUT (cendres qui
 -- s'envolent), jamais une vraie chute comme le burst d'impact au combat.
-function Controller:spawn_ash(rect, color, count, gravity)
+-- `delay` (optionnel, 2026-09-12, voir Controller:play_amnesie_vanish --
+-- même besoin d'attendre les animations de l'effet avant de disperser la
+-- carte) : même idiome `t` négatif que Controller:spawn_impact ci-dessus.
+function Controller:spawn_ash(rect, color, count, gravity, delay)
   for _ = 1, count do
     local angle = math.random() * math.pi * 2
     local speed = 15 + math.random() * 35
     self.particles[#self.particles + 1] = {
       x = rect.x + math.random() * rect.w, y = rect.y + math.random() * rect.h,
       vx = math.cos(angle) * speed, vy = math.sin(angle) * speed - 20,
-      t = 0, color = color, gravity = gravity,
+      t = -(delay or 0), color = color, gravity = gravity,
     }
   end
 end
@@ -1728,13 +1763,20 @@ end
 -- (elle ne rejoint jamais state.discard, voir state.exhausted dans game.lua)
 -- -- juste un rétrécissement/fondu SUR PLACE (voir le cas `a.dissolve` dans
 -- draw_card_flights, view.lua) + un burst de cendres grises par-dessus.
-function Controller:play_amnesie_vanish(rect, def)
+-- `hold_duration` (optionnel, 2026-09-12, demande explicite -- "elle attend
+-- que toutes les animations de l'effet se finissent" avant de partir, même
+-- principe que Controller:maybe_animate_played_discard) : la carte reste
+-- visible/immobile à `rect` ce temps-là (`hold_visible`, voir son
+-- commentaire dans draw_card_flights) avant de commencer à se disperser ;
+-- cendres et son du son suivent le même délai pour rester synchronisés.
+function Controller:play_amnesie_vanish(rect, def, hold_duration)
+  hold_duration = hold_duration or 0
   self.card_anims[#self.card_anims + 1] = {
-    from = rect, to = rect, elapsed = 0, delay = 0,
+    from = rect, to = rect, elapsed = 0, delay = hold_duration, hold_visible = true,
     duration = ASH_DISSOLVE_DURATION, dissolve = true, def = def,
   }
-  self:spawn_ash(rect, Theme.ash, ASH_PARTICLE_COUNT, -30)
-  Sfx.play("ash")
+  self:spawn_ash(rect, Theme.ash, ASH_PARTICLE_COUNT, -30, hold_duration)
+  self:schedule_sfx("ash", hold_duration)
 end
 
 -- `delay` (optionnel, 2026-08-30, demande explicite -- "si il y a plusieurs
@@ -1927,6 +1969,14 @@ function Controller:react_to_diff(before, opts)
   -- `delay`) : une unité qui ne gagne finalement rien ne consomme jamais de
   -- rang dans l'ordre d'apparition.
   local affected_count = 0
+  -- Durée totale (delai + durée) du plus long effet déclenché ici (2026-09-12,
+  -- demande explicite -- "elle attend que toutes les animations de l'effet se
+  -- finissent, puis elle se déplace vers la défausse") : renvoyée à l'appelant
+  -- (voir Controller:resolve_target) pour savoir combien de temps attendre
+  -- avant de lancer le vol de la carte jouée vers la défausse. Les autres
+  -- appelants de react_to_diff (fin de tour, résolution ennemie...) ignorent
+  -- simplement cette valeur de retour -- ils gèrent déjà leur propre pause.
+  local max_end = 0
   local function react(u)
     local b = before[u.id]
     if not b then return end
@@ -1961,8 +2011,10 @@ function Controller:react_to_diff(before, opts)
       self:spawn_floater(u.id, u.hp - b.hp, "damage", dmg_delay)
       self:spawn_impact(u.id, dmg_delay)
       if not hit_played then self:schedule_sfx(hit_sfx, dmg_delay); hit_played = true end
+      max_end = math.max(max_end, dmg_delay + math.max(ANIM_SHAKE, self.floater_duration))
     elseif u.hp > b.hp then
       self:spawn_floater(u.id, u.hp - b.hp, "heal")
+      max_end = math.max(max_end, self.floater_duration)
     end
     -- Discrétion (2026-08-28, demande explicite -- "un effet qui indique la
     -- valeur, comme pour un gain de PV") : flottant dédié sur TOUTE hausse,
@@ -1971,9 +2023,14 @@ function Controller:react_to_diff(before, opts)
     -- couvre TOUTES d'un coup, jamais un site d'appel par source.
     if u.discretion and b.discretion and u.discretion > b.discretion then
       self:spawn_floater(u.id, u.discretion - b.discretion, "discretion")
+      max_end = math.max(max_end, self.floater_duration)
     end
     for _, k in ipairs(STATUS_KEYS) do
-      if (u[k] or 0) > b[k] then self:pop_status(u.id, k, unit_delay()) end
+      if (u[k] or 0) > b[k] then
+        local d = unit_delay()
+        self:pop_status(u.id, k, d)
+        max_end = math.max(max_end, d + self.status_pop_duration)
+      end
     end
     -- Gain vs absorption, désormais 2 sons ET 2 visuels distincts (2026-09-02,
     -- demande explicite -- "le son est un 'wouch' montant avec le bouclier
@@ -1981,15 +2038,20 @@ function Controller:react_to_diff(before, opts)
     -- distinction visuelle vit dans draw_shield_fx (view.lua, sur `s.amount`,
     -- déjà la donnée qui sépare les 2 cas) -- ici, seul le SON change de nom.
     if shield_gained then
-      self:spawn_shield_fx(u.id, nil, unit_delay())
+      local d = unit_delay()
+      self:spawn_shield_fx(u.id, nil, d)
       if not shield_played then Sfx.play("shield_gain"); shield_played = true end
+      max_end = math.max(max_end, d + self.shield_fx_duration)
     elseif shield_absorbed_hit then
-      self:spawn_shield_fx(u.id, absorbed, unit_delay())
+      local d = unit_delay()
+      self:spawn_shield_fx(u.id, absorbed, d)
       if not shield_played then Sfx.play("shield"); shield_played = true end
+      max_end = math.max(max_end, d + self.shield_fx_duration)
     end
   end
   for _, h in ipairs(self.state.heroes) do react(h) end
   for _, e in ipairs(self.state.enemies) do react(e) end
+  return max_end
 end
 
 --- Décroissance de fin de tour (2026-08-30, demande explicite -- "tous les
@@ -2057,6 +2119,13 @@ end
 function Controller:update(dt)
   self.seq:update(dt)
   self:update_hand_pop_amounts(dt)
+  -- Retour "Fin de tour" (2026-09-12, voir end_turn_feedback_t/Controller:end_turn) :
+  -- simple compteur, jamais remis à nil ici -- c'est le self.seq poussé par
+  -- Controller:end_turn qui le fait, une fois end_turn_feedback_duration
+  -- écoulée ET la vraie défausse lancée.
+  if self.end_turn_feedback_t then
+    self.end_turn_feedback_t = self.end_turn_feedback_t + dt
+  end
   for id, a in pairs(self.anim) do
     a.t = a.t + dt
     local limit = (a.kind == "shake") and ANIM_SHAKE or ANIM_PULSE
@@ -2345,6 +2414,10 @@ end
 -- résolution réelle vivent donc entièrement dans ces deux fonctions, jamais ici.
 function Controller:select_card(uid)
   if self.screen ~= "playing" or self.state.over then return end
+  -- Main verrouillée (2026-09-12, voir hand_locked/Controller:resolve_target) :
+  -- la carte précédente est encore en train de jouer ses animations ou de
+  -- voler vers la défausse -- pas de nouvelle sélection avant que ce soit fini.
+  if self.hand_locked then return end
   Game.select_card(self.state, uid)
 end
 
@@ -2366,6 +2439,18 @@ function Controller:confirm_pending()
   self:resolve_target(pending.awaiting_confirm_kind, target_id)
 end
 
+-- Attend la fin des animations de l'effet AVANT de faire partir la carte
+-- vers la défausse, PUIS attend la fin de son vol avant de rendre la main au
+-- joueur (2026-09-12, demande explicite -- avant, la carte partait vers la
+-- défausse dès cet appel, en même temps que les dégâts/soins/statuts de son
+-- propre effet commençaient tout juste à s'animer) : `react_to_diff` et
+-- `consume_drawn_animation` renvoient chacun la durée totale de ce qu'ils
+-- viennent de programmer (même idiome que Controller:play_enemy_entrance_
+-- sequence) -- le plus long des deux (plus le pulse du héros lui-même,
+-- ANIM_PULSE) fixe le temps d'attente avant que la carte s'envole (voir
+-- hold_duration, Controller:maybe_animate_played_discard). `hand_locked`
+-- (voir Controller:select_card) empêche de choisir une AUTRE carte entre-temps
+-- -- levé seulement une fois le vol vers la défausse terminé.
 function Controller:resolve_target(kind, target_id)
   local pending = self.state.pending
   if not pending or not pending.hero_id then return end
@@ -2374,10 +2459,21 @@ function Controller:resolve_target(kind, target_id)
   self:pulse(pending.hero_id, "pulse-up")
   local before = self:snapshot_units()
   Game.resolve_pending(self.state, kind, target_id)
-  self:react_to_diff(before, { dmg_type = dmg_type })
-  self:maybe_animate_played_discard(played_uid, hand_before)
-  self:consume_drawn_animation() -- Clairvoyance pioche 1 carte dans son effet
-  self:after_card_resolved()
+  local effects_duration = self:react_to_diff(before, { dmg_type = dmg_type })
+  local draw_duration = self:consume_drawn_animation() -- Clairvoyance pioche 1 carte dans son effet
+  local hold_duration = math.max(ANIM_PULSE, effects_duration, draw_duration)
+  self:maybe_animate_played_discard(played_uid, hand_before, hold_duration)
+  self.hand_locked = true
+  local self_ = self
+  -- max(FLIGHT_DURATION, ASH_DISSOLVE_DURATION) : resolve_target ne sait pas
+  -- à l'avance si la carte va s'envoler vers la défausse ou se disperser en
+  -- cendres (Amnésie, voir maybe_animate_played_discard) -- couvre les 2 cas
+  -- plutôt que de lever le verrou un peu trop tôt sur le 2ᵉ.
+  self.seq:push(function() end, hold_duration + math.max(FLIGHT_DURATION, ASH_DISSOLVE_DURATION))
+  self.seq:push(function()
+    self_.hand_locked = false
+    self_:after_card_resolved()
+  end)
 end
 
 function Controller:after_card_resolved()
@@ -2386,6 +2482,30 @@ end
 
 -- ---------- fin de tour ----------
 
+--- Point d'entrée du clic sur "Fin de tour" (2026-09-12, demande explicite --
+-- "le bouton réagit avec un feedback visuel et sonore (0.5s), puis les
+-- cartes se défaussent") : la vraie résolution (ex-corps de cette fonction,
+-- voir end_turn_now juste en dessous) est différée de END_TURN_FEEDBACK_
+-- DURATION -- end_turn_feedback_t (mis à jour dans Controller:update) pilote
+-- le "punch" d'échelle + flash de couleur du bouton pendant l'attente (voir
+-- draw_bottom_controls, view.lua). Ignore un 2ᵉ clic pendant que le premier
+-- est encore en cours (feedback OU hand_locked, posé par end_turn_now via
+-- resolve_target pour toute autre raison) plutôt que d'empiler 2 défausses.
+function Controller:end_turn()
+  if self.screen ~= "playing" or self.state.over then return end
+  if self.end_turn_feedback_t or self.hand_locked then return end
+  self.end_turn_feedback_t = 0
+  self.hand_locked = true
+  Sfx.play("flush")
+  local self_ = self
+  self.seq:push(function() end, self.end_turn_feedback_duration)
+  self.seq:push(function()
+    self_.end_turn_feedback_t = nil
+    self_.hand_locked = false
+    self_:end_turn_now()
+  end)
+end
+
 -- Défausse de fin de tour puis résolution des monstres, avec une pause dédiée
 -- entre les deux (2026-08-21, demande explicite -- avant, la défausse ne
 -- faisait qu'animer pendant que la résolution des monstres démarrait déjà en
@@ -2393,7 +2513,7 @@ end
 -- seul événement confus). `animate_discard_snapshot` renvoie la durée totale
 -- de son propre vol -- on l'attend, PLUS END_TURN_TO_ENEMY_RESOLUTION_PAUSE,
 -- avant de lancer la suite.
-function Controller:end_turn()
+function Controller:end_turn_now()
   local hand_before = Game.shallow_copy(self.state.hand)
   -- Discrétion "Furtif" (2026-08-28) : Game.end_turn_requested accorde +2
   -- Discrétion par carte Furtif restée en main (voir
