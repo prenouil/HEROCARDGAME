@@ -2333,6 +2333,16 @@ local function draw_pile(rect, icon, label, count)
   love.graphics.pop()
 end
 
+-- Grossissement survol/sélection de la main -- valeurs partagées entre
+-- draw_one (ci-dessous, carte encore en main) et draw_card_flights (2026-09-12,
+-- demande explicite -- "quand [la carte jouée] attend, elle redevient
+-- instantanément petite" -- doit reprendre EXACTEMENT le même grossissement
+-- pour redescendre progressivement depuis là, voir HOLD_SETTLE_DURATION plus
+-- bas). Champ de `View` (déjà une locale existante) plutôt qu'une nouvelle
+-- locale de chunk : ce fichier est déjà PILE à la limite dure de Lua (200
+-- locales par chunk, voir le commentaire près de CARD_W/CARD_H).
+View._hand_pop = { hover_scale = 1.35, hover_lift = 18, selected_scale = 1.55, selected_lift = 28 }
+
 local function draw_hand(controller)
   local state = controller.state
   local rects = View.hand_rects(state)
@@ -2440,8 +2450,8 @@ local function draw_hand(controller)
     -- valeur pilote l'échelle, le décalage vertical ET le redressement de la
     -- rotation ci-dessous, en même temps, dans les 2 sens (demande explicite
     -- -- "l'effet doit être le même, mais à l'inverse" en sortie de survol).
-    local target_scale, target_lift = 1.35, 18
-    if is_pending then target_scale, target_lift = 1.55, 28 end
+    local target_scale, target_lift = View._hand_pop.hover_scale, View._hand_pop.hover_lift
+    if is_pending then target_scale, target_lift = View._hand_pop.selected_scale, View._hand_pop.selected_lift end
     local scale = 1 + (target_scale - 1) * pop
     local lift = target_lift * pop
     love.graphics.push()
@@ -2811,6 +2821,24 @@ local function draw_card_flights(controller)
     -- sans quoi elle disparaîtrait brutalement de la main avant même de
     -- s'envoler.
     if a.elapsed < a.delay and a.hold_visible and a.def then
+      -- Reste GROSSE tout le temps de l'attente, jamais un retour à la
+      -- taille normale (2026-09-12, demande explicite -- "je ne veux pas
+      -- qu'elle redevienne petite après avoir été validée... il ne faut PAS
+      -- qu'elle redevienne petite") -- annule le comportement précédent
+      -- (redescente progressive) : la carte jouée est forcément sélectionnée
+      -- (is_pending) au moment du clic, elle GARDE cette taille "sélectionnée"
+      -- (voir View._hand_pop, mêmes valeurs que draw_one) pendant tout le
+      -- hold. Seul ajout : un petit "saut" de zoom rapide juste au moment de
+      -- la validation (2ᵉ demande explicite -- "une anim de validation, petit
+      -- saut de zoom grossissant rapide") -- bump sinusoïdal par-dessus cette
+      -- taille, part de 0, culmine vite, revient à 0 et n'y touche plus
+      -- (même idiome que le "punch" de "Fin de tour", draw_bottom_controls).
+      local VALIDATE_PUNCH_DURATION = 0.15
+      local VALIDATE_PUNCH_BUMP = 0.15
+      local punch_p = math.min(1, a.elapsed / VALIDATE_PUNCH_DURATION)
+      local punch_extra = VALIDATE_PUNCH_BUMP * math.sin(math.pi * punch_p)
+      local scale = View._hand_pop.selected_scale + punch_extra
+      local lift = View._hand_pop.selected_lift
       card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
       love.graphics.push()
       love.graphics.origin()
@@ -2821,9 +2849,32 @@ local function draw_card_flights(controller)
       love.graphics.setCanvas(prev_canvas)
       love.graphics.pop()
       love.graphics.setColor(1, 1, 1, 1)
-      love.graphics.draw(card_flight_canvas, a.from.x, a.from.y, 0, a.from.w / CARD_W, a.from.h / CARD_H)
+      local cx, cy = a.from.x + a.from.w / 2, a.from.y + a.from.h / 2 - lift
+      local w, h = a.from.w * scale, a.from.h * scale
+      love.graphics.draw(card_flight_canvas, cx - w / 2, cy - h / 2, 0, w / CARD_W, h / CARD_H)
     elseif a.elapsed >= a.delay then
       local p = math.min(1, (a.elapsed - a.delay) / a.duration)
+      -- Point de départ du vol/de la dissolution = la taille "validée"
+      -- (grossie) plutôt que la taille normale de `a.from`, pour les entrées
+      -- qui viennent de tenir en main ainsi (2026-09-12, `a.hold_visible` --
+      -- évite exactement le même saut nu, symétrique au correctif ci-dessus,
+      -- au moment PRÉCIS où le hold se termine et où ce bloc-ci prend le
+      -- relais -- sans ça, la carte rapetissait d'un coup à cet instant même
+      -- si elle restait grosse pendant tout le hold). Le "punch" de
+      -- validation (voir plus haut) est toujours retombé à 0 à ce stade (sa
+      -- durée, 0.15s, est toujours plus courte que le plancher de hold_duration,
+      -- ANIM_PULSE=0.38s côté Controller:resolve_target) : la taille de
+      -- départ ici est donc exactement celle du dernier frame du hold, sans
+      -- discontinuité. Les entrées SANS hold_visible (pioche, remélange...)
+      -- gardent `a.from` tel quel, comportement inchangé.
+      local from = a.from
+      if a.hold_visible then
+        local scale = View._hand_pop.selected_scale
+        local lift = View._hand_pop.selected_lift
+        local w, h = a.from.w * scale, a.from.h * scale
+        local cx, cy = a.from.x + a.from.w / 2, a.from.y + a.from.h / 2 - lift
+        from = { x = cx - w / 2, y = cy - h / 2, w = w, h = h }
+      end
       -- "Amnésie" (2026-08-28, demande explicite -- "se disperse en cendre") :
       -- la carte ne VOLE nulle part (`a.dissolve`, voir Controller:
       -- play_amnesie_vanish) -- elle ne rejoint jamais la défausse (voir
@@ -2834,8 +2885,8 @@ local function draw_card_flights(controller)
         local ease = p * p -- easeInQuad : démarre lentement, s'effondre vers la fin
         local scale = 1 - 0.35 * ease
         local alpha = 1 - ease
-        local cx, cy = a.from.x + a.from.w / 2, a.from.y + a.from.h / 2
-        local w, h = a.from.w * scale, a.from.h * scale
+        local cx, cy = from.x + from.w / 2, from.y + from.h / 2
+        local w, h = from.w * scale, from.h * scale
         if a.def then
           card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
           -- push/origin()/pop (2026-08-30, bug signalé -- "les cartes ne sont
@@ -2874,10 +2925,10 @@ local function draw_card_flights(controller)
       -- décélération simple (easeOutQuad), moins de raison d'y mettre du jeu.
       local ease = a.fade_in and ease_out_back(a.elapsed - a.delay, a.duration)
         or (1 - (1 - p) ^ 2) -- easeOutQuad, approxime le cubic-bezier CSS du prototype
-      local x = a.from.x + (a.to.x - a.from.x) * ease
-      local y = a.from.y + (a.to.y - a.from.y) * ease
-      local w = a.from.w + (a.to.w - a.from.w) * ease
-      local h = a.from.h + (a.to.h - a.from.h) * ease
+      local x = from.x + (a.to.x - from.x) * ease
+      local y = from.y + (a.to.y - from.y) * ease
+      local w = from.w + (a.to.w - from.w) * ease
+      local h = from.h + (a.to.h - from.h) * ease
       local alpha = a.fade_in and math.min(1, p * 1.6) or (1 - p * 0.8)
       if a.def then
         card_flight_canvas = card_flight_canvas or love.graphics.newCanvas(CARD_W, CARD_H)
