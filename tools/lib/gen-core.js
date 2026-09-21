@@ -19,7 +19,12 @@ const CHARACTER_STYLE_SUFFIX = ', Super Nintendo RPG character sprite in the sty
 // nettoyer puisqu'elle n'est pas blanche). Uniquement pour la grille "icon".
 const ICON_STYLE_SUFFIX = ', bold simple flat icon, thick black outline, high contrast, instantly recognizable clean silhouette, centered, no fine detail, no border, no frame, no vignette';
 const MODEL = '@cf/black-forest-labs/flux-1-schnell';
-const GRID_PRESETS = { icon: 32, character: 64 };
+// "card" = 96x96 (2026-09-14, illustrations de carte -- voir tools/pixelate-card.js,
+// qui post-traite des images générées à la main ailleurs, ex. Gemini, jamais via ce
+// pipeline Cloudflare) : comparé à 48/64/96/128 sur "Combat aguerri", choisi par le
+// porteur de projet -- une scène d'action (mains/arme/bouclier) a besoin d'un peu
+// plus de détail que "character" (portraits simples) pour rester lisible.
+const GRID_PRESETS = { icon: 32, character: 64, card: 96 };
 const FINAL_SIZE = 512;
 const WHITE_THRESHOLD = 230; // par canal
 const SMALL_ISLAND_MAX = 2; // taille max (en pixels de grille) d'une zone quasi-blanche protégée (probable reflet)
@@ -107,4 +112,4 @@ async function generateOne(subject, outPath, gridArg) {
   return { gridSize };
 }
 
-module.exports = { generateOne, loadEnv, stripBackground };
+module.exports = { generateOne, loadEnv, stripBackground, GRID_PRESETS, FINAL_SIZE };
