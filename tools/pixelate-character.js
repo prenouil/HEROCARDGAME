@@ -24,6 +24,12 @@
 // Si la source est une CAPTURE D'ÉCRAN de l'outil de génération (boutons/pagination
 // visibles autour de l'image, pas un export propre) : recadrer d'abord pour ne
 // garder que l'image elle-même, ce script ne le fait pas à sa place.
+//
+// Archive AUSSI la source brute (2026-09-22, demande explicite -- garder trace de
+// l'image Gemini telle que fournie, avant tout traitement) dans
+// archive/gemini-sources/heroes/<class_id>.png -- hors de game/, jamais empaqueté
+// dans le jeu. Écrase une archive précédente du même id (une regénération remplace
+// l'ancienne source, comme pour l'asset final lui-même).
 
 const fs = require('fs');
 const path = require('path');
@@ -45,11 +51,16 @@ async function main() {
   const outPath = path.join(__dirname, '..', 'game', 'assets', 'characters', 'heroes', `${classId}.png`);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
 
+  const archivePath = path.join(__dirname, '..', 'archive', 'gemini-sources', 'heroes', `${classId}.png`);
+  fs.mkdirSync(path.dirname(archivePath), { recursive: true });
+  fs.copyFileSync(inPath, archivePath);
+
   const small = await sharp(inPath).resize(gridSize, gridSize, { fit: 'cover', kernel: 'nearest' }).toBuffer();
   const transparent = await stripBackground(small, gridSize, gridSize);
   await sharp(transparent).resize(FINAL_SIZE, FINAL_SIZE, { kernel: 'nearest' }).toFile(outPath);
 
   console.log('OK ->', outPath, `(grille ${gridSize}x${gridSize}, détourée)`);
+  console.log('   archive source ->', archivePath);
 }
 
 main().catch((e) => { console.error('FAILED:', e.message); process.exit(1); });
