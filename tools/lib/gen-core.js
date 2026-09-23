@@ -23,8 +23,16 @@ const MODEL = '@cf/black-forest-labs/flux-1-schnell';
 // qui post-traite des images générées à la main ailleurs, ex. Gemini, jamais via ce
 // pipeline Cloudflare) : comparé à 48/64/96/128 sur "Combat aguerri", choisi par le
 // porteur de projet -- une scène d'action (mains/arme/bouclier) a besoin d'un peu
-// plus de détail que "character" (portraits simples) pour rester lisible.
-const GRID_PRESETS = { icon: 32, character: 64, card: 96 };
+// plus de détail que la grille "icon" pour rester lisible.
+// "enemy" = 96x96 (2026-09-23, demande explicite -- voir tools/pixelate-enemy.js) :
+// même raisonnement que "card" -- les silhouettes de bestiaire ont souvent une arme/
+// des ornements fins (arc, plumes, fissures de golem) qui se perdent à une grille
+// plus petite.
+// "character" = 96x96 aussi désormais (2026-09-23, demande explicite -- même
+// bénéfice de netteté que pour "enemy" ci-dessus, appliqué aux 6 portraits
+// d'aventurier via tools/pixelate-character.js) : était 64, seule la grille
+// "icon" (silhouettes de mots-clés, pas de tête/posture) reste plus petite.
+const GRID_PRESETS = { icon: 32, character: 96, card: 96, enemy: 96 };
 const FINAL_SIZE = 512;
 const WHITE_THRESHOLD = 230; // par canal
 const SMALL_ISLAND_MAX = 2; // taille max (en pixels de grille) d'une zone quasi-blanche protégée (probable reflet)

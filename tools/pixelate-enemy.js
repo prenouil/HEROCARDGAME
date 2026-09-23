@@ -1,8 +1,13 @@
 // Post-traitement pixel-art pour les sprites d'ennemi générés "à la main" via un
 // outil externe (Gemini, etc.) -- même principe que tools/pixelate-character.js
-// (downscale vers la grille "character" 64x64 PUIS agrandissement en "plus proche
-// voisin", détourage du fond quasi-blanc) mais écrit dans
-// game/assets/characters/enemies/<template_id>.png (voir Sprites.enemy, sprites.lua).
+// (downscale PUIS agrandissement en "plus proche voisin", détourage du fond
+// quasi-blanc) mais écrit dans game/assets/characters/enemies/<template_id>.png
+// (voir Sprites.enemy, sprites.lua).
+//
+// Grille "enemy" (96x96), PAS "character" (64x64, réservée aux 6 aventuriers) --
+// 2026-09-23, demande explicite : les silhouettes de bestiaire ont souvent une
+// arme/des ornements fins (arc, plumes, fissures de golem) qui se perdent à 64.
+// Voir GRID_PRESETS dans lib/gen-core.js.
 //
 // Usage : node tools/pixelate-enemy.js chemin/vers/image-source.png <template_id>
 // `template_id` = l'id de l'ennemi dans game/src/data/enemies.lua (ex. "gobelin",
@@ -34,7 +39,7 @@ async function main() {
     process.exit(1);
   }
 
-  const gridSize = GRID_PRESETS.character;
+  const gridSize = GRID_PRESETS.enemy;
   const outPath = path.join(__dirname, '..', 'game', 'assets', 'characters', 'enemies', `${templateId}.png`);
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
 
