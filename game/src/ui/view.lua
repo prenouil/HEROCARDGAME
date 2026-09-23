@@ -58,7 +58,16 @@ local BOUNDED_COMBAT_COUNT = 8
 -- +12 (2026-08-27, demande explicite -- portraits plus gros partout, voir
 -- HERO_PORTRAIT_SIZE plus bas) : la carte grandit un peu pour absorber le
 -- portrait agrandi sans tasser le reste (badges, nom en bas côté héros).
-local UNIT_W, UNIT_H = 150, 168
+-- HÉROS UNIQUEMENT depuis 2026-09-22 (demande explicite -- "les aventuriers
+-- doivent être plus gros, presque le double") : +46 de haut pour absorber
+-- HERO_PORTRAIT_SIZE 54->100 (même principe que le +12 ci-dessus) -- voir
+-- draw_hero pour le détail des éléments repoussés d'autant sous le portrait.
+-- Renommer cette locale en `HERO_UNIT_W/H` casserait la limite dure de Lua
+-- (200 locales par chunk, voir LUAI_MAXVARS -- déjà mentionnée pour DraftFx
+-- plus bas) : gardée telle quelle, mais ne sert plus QUE pour les héros --
+-- View.enemy_rects code désormais ses propres 150x168 en dur, pour ne plus
+-- dépendre de cette valeur qui grandit ici.
+local UNIT_W, UNIT_H = 150, 214
 -- 92x138 -> 102x153 -> 122x184 (2026-09-12, demande explicite -- faire de la
 -- place à une illustration par carte, "la chose la plus claire et la plus
 -- importante à voir" sans nuire à la lisibilité du texte) : voir
@@ -108,7 +117,10 @@ local function centered_row(count, item_w, item_h, y, gap)
 end
 
 function View.enemy_rects(state)
-  local rects = centered_row(#state.enemies, UNIT_W, UNIT_H, 54)
+  -- 150, 168 en dur (2026-09-22) : UNIT_W/UNIT_H ci-dessus a grandi pour les
+  -- héros seulement (portraits agrandis) -- l'ennemi garde sa taille de
+  -- panneau d'origine, jamais concerné par cette demande.
+  local rects = centered_row(#state.enemies, 150, 168, 54)
   local out = {}
   for i, e in ipairs(state.enemies) do out[e.id] = rects[i] end
   return out
@@ -120,7 +132,13 @@ end
 -- 270->284 (2026-09-02, demande explicite -- affichage des PO "sous Ta
 -- troupe") : +14 pour loger une 2ᵉ ligne (le HUD or) entre le label "Ta
 -- troupe" et la rangée de héros, voir draw_gold_display plus bas.
-local HERO_ROW_Y = 284
+-- 284->258 (2026-09-22, portraits de héros agrandis -- voir HERO_UNIT_H) :
+-- remonte de 26px pour récupérer la marge encore libre sous la rangée
+-- d'ennemis (qui s'arrête à 54+168=222, "Ta troupe"/le HUD or suivent au
+-- même décalage relatif -- HERO_ROW_Y-28/-14 -- donc restent à 8px de cette
+-- rangée, pas de chevauchement) et absorber une partie de la hauteur en plus
+-- du panneau héros sans repousser HAND_Y (voir son commentaire).
+local HERO_ROW_Y = 258
 
 function View.hero_rects(state)
   local rects = centered_row(#state.heroes, UNIT_W, UNIT_H, HERO_ROW_Y)
@@ -609,7 +627,11 @@ end
 -- couleur, jamais lisible sans survoler) -- portrait réduit (70->58) pour
 -- faire de la place à une barre de PV (même idiome que draw_hero) et jusqu'à
 -- 2 lignes de statut (bénédiction/malédiction déjà portées), voir draw_temple.
-local TEMPLE_HERO_W, TEMPLE_HERO_H = 130, 144
+-- 130x144 -> 150x198 (2026-09-22, portraits agrandis -- portrait_size
+-- 58->112, voir draw_temple) : TEMPLE_HERO_Y inchangé, marge suffisante des
+-- 2 côtés (rangée de statues d'effet au-dessus s'arrête bien avant,
+-- View.temple_confirm_button suit automatiquement en dessous).
+local TEMPLE_HERO_W, TEMPLE_HERO_H = 150, 198
 local TEMPLE_HERO_Y = 320 -- 300->320 (2026-08-31, passage 1280x720)
 function View.temple_hero_rects(controller)
   local rects = centered_row(#controller.state.heroes, TEMPLE_HERO_W, TEMPLE_HERO_H, TEMPLE_HERO_Y)
@@ -627,7 +649,10 @@ View.temple_confirm_button = {
 -- résout directement (pas de bouton "Confirmer" séparé, contrairement au
 -- Temple qui combine 2 choix) -- mêmes dimensions que la rangée du Temple,
 -- juste plus haute à l'écran (rien au-dessus, pas de statues).
-local CAMPFIRE_HERO_W, CAMPFIRE_HERO_H = 150, 170
+-- 150x170 -> 170x240 (2026-09-22, portraits agrandis -- portrait_size 70->140,
+-- voir draw_campfire) : CAMPFIRE_HERO_Y inchangé, marge largement suffisante
+-- au-dessus (texte d'intro) et en dessous (rien, résolution au clic direct).
+local CAMPFIRE_HERO_W, CAMPFIRE_HERO_H = 170, 240
 local CAMPFIRE_HERO_Y = 260 -- 240->260 (2026-08-31, passage 1280x720)
 function View.campfire_hero_rects(controller)
   local rects = centered_row(#controller.state.heroes, CAMPFIRE_HERO_W, CAMPFIRE_HERO_H, CAMPFIRE_HERO_Y)
@@ -643,7 +668,11 @@ end
 -- ce bouton déclenche maintenant le soin lui-même (voir Controller:
 -- choose_refuge_rest), pas de clic sur un aventurier individuel (toute
 -- l'équipe est soignée d'un coup, "pas de choix").
-local REFUGE_HERO_W, REFUGE_HERO_H = 150, 170
+-- 150x170 -> 170x240 (2026-09-22, portraits agrandis -- portrait_size 70->140,
+-- voir draw_refuge) : REFUGE_HERO_Y inchangé, View.refuge_rest_button suit
+-- automatiquement (formule relative à REFUGE_HERO_H), encore ~156px de marge
+-- avant le bas d'écran.
+local REFUGE_HERO_W, REFUGE_HERO_H = 170, 240
 local REFUGE_HERO_Y = 260 -- 240->260 (2026-08-31, passage 1280x720)
 function View.refuge_hero_rects(controller)
   local rects = centered_row(#controller.state.heroes, REFUGE_HERO_W, REFUGE_HERO_H, REFUGE_HERO_Y)
@@ -739,7 +768,13 @@ end
 -- marquer "c'est celui-ci qu'on regarde en ce moment". Reste ENTIÈREMENT
 -- sous la rangée du haut (qui s'arrête à TEAM_AVAILABLE_Y + TEAM_HERO_H =
 -- 186), quelle que soit la largeur de cette rangée.
-local TEAM_SPOTLIGHT_W, TEAM_SPOTLIGHT_H = 170, 190
+-- 170x190 -> 260x280 (2026-09-22, demande explicite -- "les aventuriers
+-- doivent être plus gros" -- portrait 130->220, voir draw_team_hero_slot) :
+-- bord gauche (TEAM_SPOTLIGHT_X) inchangé, le bord droit passe de 210 à 300,
+-- encore 30px avant la colonne de cartes de prévisualisation (~x330) --
+-- Annuler/Valider suivent automatiquement (formule relative à
+-- TEAM_SPOTLIGHT_H), largement assez de marge avant le bas d'écran.
+local TEAM_SPOTLIGHT_W, TEAM_SPOTLIGHT_H = 260, 280
 local TEAM_SPOTLIGHT_X = 40
 View.team_select_spotlight_rect = {
   x = TEAM_SPOTLIGHT_X, y = 200, w = TEAM_SPOTLIGHT_W, h = TEAM_SPOTLIGHT_H,
@@ -1331,7 +1366,12 @@ local function draw_hero(controller, h, r)
   -- de dessiner) -- sans ce paramètre, le portrait ne se serait PAS
   -- réellement estompé, seuls le panneau/le contour l'auraient fait.
   set(Theme.text, 1 - 0.55 * fade_p)
-  local HERO_PORTRAIT_SIZE = 54
+  -- 54->100 (2026-09-22, demande explicite -- "les aventuriers doivent être
+  -- plus gros, presque le double") : voir HERO_UNIT_H/HERO_ROW_Y plus haut
+  -- pour comment le panneau a été agrandi/repositionné pour absorber ce +46
+  -- sans repousser HAND_Y -- tout ce qui suit le portrait ci-dessous (barre
+  -- de PV, mana/discrétion, statuts) est décalé d'autant.
+  local HERO_PORTRAIT_SIZE = 100
   draw_class_icon(h.class_id, h.icon, h.label, 0, 4, r.w, HERO_PORTRAIT_SIZE, Theme.text, 1 - 0.55 * fade_p)
   -- Badges de bénédiction/malédiction du Temple (2026-08-28/29, demande
   -- explicite -- "représenté par une icone de statue de la bonne couleur, 1
@@ -1369,8 +1409,8 @@ local function draw_hero(controller, h, r)
   draw_defense_badge_big(h, r, name_y - 24)
   -- Barre de PV épaissie, valeur DEDANS plutôt qu'en dessous (2026-08-27,
   -- demande explicite) : texte superposé plutôt qu'une ligne à part.
-  hp_bar(8, 62, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
-  text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 62, r.w, 16, 10, Theme.text)
+  hp_bar(8, 108, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
+  text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", 0, 108, r.w, 16, 10, Theme.text)
 
   -- Mana (2026-08-20, ressource propre au Mage, voir hero.mana dans game.lua) :
   -- dans son propre cadre, juste sous sa jauge de PV -- seul le Mage a ce
@@ -1384,10 +1424,10 @@ local function draw_hero(controller, h, r)
     local mana_icon = Sprites.keyword("mana")
     if mana_icon then
       love.graphics.setColor(1, 1, 1, 1)
-      Sprites.draw_centered(mana_icon, r.w / 2 - 8, 85, 7)
-      text(tostring(h.mana), r.w / 2 + 2, 80, r.w / 2 - 2, 11, Theme.mana, "left")
+      Sprites.draw_centered(mana_icon, r.w / 2 - 8, 131, 7)
+      text(tostring(h.mana), r.w / 2 + 2, 126, r.w / 2 - 2, 11, Theme.mana, "left")
     else
-      text("MANA " .. tostring(h.mana), 0, 81, r.w, 9, Theme.mana)
+      text("MANA " .. tostring(h.mana), 0, 127, r.w, 9, Theme.mana)
     end
   end
   -- Discrétion (2026-08-24, ressource propre à l'Assassin, voir hero.discretion
@@ -1404,9 +1444,9 @@ local function draw_hero(controller, h, r)
   -- pas d'icône dédiée en jeu, contrairement à Mana/PO).
   if h.discretion ~= nil then
     if (h.camoufle or 0) > 0 then
-      text("CAMOUFLÉ", 0, 81, r.w, 9, Theme.discretion)
+      text("CAMOUFLÉ", 0, 127, r.w, 9, Theme.discretion)
     else
-      text("DISCRÉTION " .. tostring(h.discretion), 0, 81, r.w, 9, Theme.discretion)
+      text("DISCRÉTION " .. tostring(h.discretion), 0, 127, r.w, 9, Theme.discretion)
     end
   end
   -- Corruption (2026-08-29, ressource propre au Nécromancien, voir
@@ -1414,7 +1454,7 @@ local function draw_hero(controller, h, r)
   -- ci-dessus -- un seul des trois champs est jamais non-nil pour un héros
   -- donné, pas de collision possible.
   if h.corruption ~= nil then
-    text("CORR " .. tostring(h.corruption), 0, 81, r.w, 9, Theme.corruption)
+    text("CORR " .. tostring(h.corruption), 0, 127, r.w, 9, Theme.corruption)
   end
 
   -- Plus de bouton "Jouer" (2026-08-20) : sélectionner une carte assigne
@@ -1464,7 +1504,7 @@ local function draw_hero(controller, h, r)
     for _, entry in ipairs(h.scheduled_shields) do pending_total = pending_total + entry.amount end
     badges[#badges + 1] = { key = "shield_pending", abbr = "PROG", value = pending_total }
   end
-  draw_badge_row(badges, 0, 93, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
+  draw_badge_row(badges, 0, 139, r.w, 16, Theme.status, controller.status_pop[h.id], controller.status_pop_duration)
 
   -- Nom en bas du cadre (2026-08-27, demande explicite) : voir name_y calculé
   -- plus haut, juste après le portrait -- réutilisé aussi par draw_defense_badge_big
@@ -3809,19 +3849,22 @@ local function draw_campfire(controller)
     set(palette.border); love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
     love.graphics.setLineWidth(1)
-    local portrait_size = 70
+    -- 70->140 (2026-09-22, demande explicite -- "les aventuriers doivent
+    -- être plus gros, presque le double") : tout ce qui suit décalé de +70,
+    -- voir CAMPFIRE_HERO_H ci-dessus (panneau agrandi d'autant).
+    local portrait_size = 140
     draw_class_icon(h.class_id, h.icon, h.label, r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size, Theme.text)
-    name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+    name_badge(h.name, r.x + 8, r.y + 160, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
     -- Barre de PV normale, comme en combat (2026-08-30, bug signalé --
     -- "il faut ajouter les barres de vie normale") : remplace le simple
     -- texte "X/Y PV" -- même hp_bar/traînée qu'en combat (voir
     -- Controller:advance_trail), donc le soin (Combat.grant_heal, appelé au
     -- clic -- voir Controller:choose_campfire_hero) se voit désormais monter
     -- doucement ici aussi, gratuitement (même mécanisme partagé).
-    hp_bar(r.x + 8, r.y + 106, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
-    text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 106, r.w, 16, 10, Theme.text)
+    hp_bar(r.x + 8, r.y + 176, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
+    text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 176, r.w, 16, 10, Theme.text)
     local healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
-    text("+" .. healed .. " PV", r.x, r.y + 128, r.w, 13, Theme.heal, "center")
+    text("+" .. healed .. " PV", r.x, r.y + 198, r.w, 13, Theme.heal, "center")
   end
   end)
 end
@@ -3851,20 +3894,22 @@ local function draw_refuge(controller)
     set(palette.border); love.graphics.setLineWidth(2)
     love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
     love.graphics.setLineWidth(1)
-    local portrait_size = 70
+    -- 70->140 (2026-09-22, même correctif que draw_campfire -- voir son
+    -- commentaire) : tout ce qui suit décalé de +70.
+    local portrait_size = 140
     draw_class_icon(h.class_id, h.icon, h.label, r.x + (r.w - portrait_size) / 2, r.y + 14, portrait_size, portrait_size, Theme.text)
-    name_badge(h.name, r.x + 8, r.y + 90, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+    name_badge(h.name, r.x + 8, r.y + 160, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
     -- Barre de PV normale, comme en combat (2026-08-30, même correctif que
     -- draw_campfire ci-dessus) : voir son commentaire.
-    hp_bar(r.x + 8, r.y + 106, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
-    text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 106, r.w, 16, 10, Theme.text)
+    hp_bar(r.x + 8, r.y + 176, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
+    text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 176, r.w, 16, 10, Theme.text)
     local healed
     if rf.resolved then
       healed = rf.healed[h.id] or 0
     else
       healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
     end
-    text("+" .. healed .. " PV", r.x, r.y + 128, r.w, 13, Theme.heal, "center")
+    text("+" .. healed .. " PV", r.x, r.y + 198, r.w, 13, Theme.heal, "center")
   end
 
   local b = View.refuge_rest_button
@@ -3958,7 +4003,10 @@ local function draw_temple(controller)
       love.graphics.setLineWidth(selected and 4 or 2)
       love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 10, 10)
       love.graphics.setLineWidth(1)
-      local portrait_size = 58
+      -- 58->112 (2026-09-22, demande explicite -- "les aventuriers doivent
+      -- être plus gros, presque le double") : tout ce qui suit décalé de
+      -- +54, voir TEMPLE_HERO_H ci-dessus (panneau agrandi d'autant).
+      local portrait_size = 112
       draw_class_icon(h.class_id, h.icon, h.label,
         r.x + (r.w - portrait_size) / 2, r.y + 8, portrait_size, portrait_size,
         eligible and Theme.text or Theme.muted, hero_alpha)
@@ -3966,9 +4014,9 @@ local function draw_temple(controller)
       -- indiqués du tout, il faut tout montrer") : absent jusqu'ici de cet
       -- écran -- même idiome que draw_hero (barre + valeur dedans), juste
       -- sous le portrait rétréci (70->58 pour lui faire de la place).
-      hp_bar(r.x + 6, r.y + 68, r.w - 12, 14, h.hp / h.max_hp, h.hp / h.max_hp, Theme.hp)
-      text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp, r.x, r.y + 68, r.w, 14, 9, Theme.text)
-      name_badge(h.name, r.x + 8, r.y + 86, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
+      hp_bar(r.x + 6, r.y + 122, r.w - 12, 14, h.hp / h.max_hp, h.hp / h.max_hp, Theme.hp)
+      text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp, r.x, r.y + 122, r.w, 14, 9, Theme.text)
+      name_badge(h.name, r.x + 8, r.y + 140, r.w - 16, 12, palette.border, Theme.bg, 2, 3)
       -- Bénédiction/malédiction déjà portées, EN TOUTES LETTRES (2026-09-02,
       -- demande explicite -- "les bénédictions/malédictions, et tout autre
       -- statut que le joueur doit connaitre pour faire son choix") : avant,
@@ -3982,9 +4030,9 @@ local function draw_temple(controller)
       -- draw_hero) -- description complète toujours réservée à l'infobulle
       -- (tooltip_lines), pas dupliquée ici.
       if h.hp <= 0 then
-        text("Mort", r.x, r.y + 100, r.w, 11, Theme.muted)
+        text("Mort", r.x, r.y + 154, r.w, 11, Theme.muted)
       else
-        local status_y = r.y + 100
+        local status_y = r.y + 154
         if h.blessing then
           local blessing = Temple.by_id(h.blessing)
           if blessing then
@@ -4111,7 +4159,13 @@ local function draw_team_hero_slot(r, def, hover_t, focused, in_party)
   -- (TEAM_SPOTLIGHT_W/H, 170x190) que les cases des 2 rangées (TEAM_HERO_W/H,
   -- 108x120) -- `focused` distingue déjà les deux cas, pas besoin d'un
   -- paramètre supplémentaire.
-  local portrait_size = focused and 130 or 58
+  -- 130/58 -> 220/72 (2026-09-22, demande explicite -- "les aventuriers
+  -- doivent être plus gros, presque le double") : le projecteur grandit
+  -- avec sa case (TEAM_SPOTLIGHT_W/H ci-dessus) ; les 2 rangées gardent
+  -- TEAM_HERO_W/H inchangées -- la marge déjà libre entre le bas du
+  -- portrait et le name_badge ancré au bas de la case (26px) absorbe ce
+  -- +14 sans rien déplacer d'autre.
+  local portrait_size = focused and 220 or 72
   draw_class_icon(def.class_id, def.icon, def.label,
     r.x + (r.w - portrait_size) / 2, r.y + 10, portrait_size, portrait_size, Theme.text)
   name_badge(def.name, r.x + 6, r.y + r.h - 26, r.w - 12, 12, palette.border, Theme.bg, 2, 2)
