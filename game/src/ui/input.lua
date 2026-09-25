@@ -186,7 +186,13 @@ local function post_combat_click(controller, x, y)
       local rects = View.campfire_hero_rects(controller)
       for _, h in ipairs(controller.state.heroes) do
         local r = rects[h.id]
-        if r and View.point_in(r, x, y) then controller:choose_campfire_hero(h.id); return true end
+        -- Mort définitive (2026-09-25, pilier du sacrifice -- ancien
+        -- comportement voulu, pas un bug, devenu obsolète) : un aventurier
+        -- mort n'est plus une cible cliquable ici -- Controller:
+        -- choose_campfire_hero le refuse déjà, ce filtre évite en plus le
+        -- retour `true` (qui marquerait le clic "consommé") sur un portrait
+        -- qui ne fait plus rien.
+        if r and h.hp > 0 and View.point_in(r, x, y) then controller:choose_campfire_hero(h.id); return true end
       end
     end
     return true
@@ -545,7 +551,12 @@ local function post_combat_hovering(controller, x, y)
     local cf = controller.campfire
     if not cf or cf.resolved then return false end
     local rects = View.campfire_hero_rects(controller)
-    for _, r in pairs(rects) do if View.point_in(r, x, y) then return true end end
+    -- Mort définitive (2026-09-25) : un portrait mort ne doit pas non plus se
+    -- déclarer survolable-cliquable (curseur), même contrat que le commentaire
+    -- ci-dessus le promettait déjà pour "un portrait mort".
+    for _, h in ipairs(controller.state.heroes) do
+      if h.hp > 0 and View.point_in(rects[h.id], x, y) then return true end
+    end
     return false
   end
   if controller.screen == "refuge" then

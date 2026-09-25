@@ -62,13 +62,22 @@ return function(View, UI)
       -- draw_campfire) : voir son commentaire.
       UI.hp_bar(r.x + 8, r.y + 176, r.w - 16, 16, h.hp / h.max_hp, (controller.hp_trail[h.id] or h.hp) / h.max_hp, Theme.hp)
       UI.text_v_centered(math.max(0, h.hp) .. "/" .. h.max_hp .. " PV", r.x, r.y + 176, r.w, 16, 10, Theme.text)
-      local healed
-      if rf.resolved then
-        healed = rf.healed[h.id] or 0
+      -- Mort définitive (2026-09-25, pilier du sacrifice -- "les personnages
+      -- morts... doivent rester morts") : plus de prévision de soin sur un
+      -- aventurier mort (Controller:choose_refuge_rest ne le soigne plus) --
+      -- même mot ("Mort") que Temple.eligible_heroes/draw_temple, pour rester
+      -- cohérent dans toute l'UI.
+      if h.hp <= 0 then
+        UI.text("Mort", r.x, r.y + 198, r.w, 13, Theme.muted, "center")
       else
-        healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
+        local healed
+        if rf.resolved then
+          healed = rf.healed[h.id] or 0
+        else
+          healed = math.min(h.max_hp, h.hp + Combat.round(h.max_hp * 0.30)) - h.hp
+        end
+        UI.text("+" .. healed .. " PV", r.x, r.y + 198, r.w, 13, Theme.heal, "center")
       end
-      UI.text("+" .. healed .. " PV", r.x, r.y + 198, r.w, 13, Theme.heal, "center")
     end
 
     local b = View.refuge_rest_button

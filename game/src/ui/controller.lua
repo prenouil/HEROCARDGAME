@@ -2901,8 +2901,17 @@ end
 -- qui décide du CONTENU de la Forge/du Temple (state.rng.forge/temple,
 -- consommés seulement une fois l'écran vraiment entré).
 local function campfire_viable(state)
+  -- `h.hp > 0` (2026-09-25, demande explicite -- "les personnages morts...
+  -- doivent rester morts définitivement", pilier du sacrifice) : un aventurier
+  -- mort ne compte plus comme raison de proposer le feu de camp. Avant ce
+  -- pilier, le laisser compter était voulu (la résurrection via le feu de camp
+  -- était un comportement délibéré, pas un oubli) -- il repassait toujours
+  -- sous CAMPFIRE_VIABLE_HP_FRACTION (0 PV) et pouvait déclencher l'évènement
+  -- rien que pour ça. Ce comportement devient obsolète maintenant qu'un mort
+  -- ne doit plus jamais redevenir vivant (voir Controller:choose_campfire_hero,
+  -- même changement).
   for _, h in ipairs(state.heroes) do
-    if h.hp < h.max_hp * CAMPFIRE_VIABLE_HP_FRACTION then return true end
+    if h.hp > 0 and h.hp < h.max_hp * CAMPFIRE_VIABLE_HP_FRACTION then return true end
   end
   return false
 end
@@ -3010,7 +3019,15 @@ end
 function Controller:choose_campfire_hero(hero_id)
   if not campfire_choosable(self) then return end
   local hero = Combat.hero_by_id(self.state, hero_id)
-  if not hero then return end
+  -- Mort définitive (2026-09-25, pilier du sacrifice -- "les personnages
+  -- morts, qui ont lâché leur Legs/Héritage, doivent rester morts") : le feu
+  -- de camp ne doit plus faire office de résurrection. Ce n'était PAS un bug
+  -- jusqu'ici -- `Combat.grant_heal` sans garde sur `hp > 0` ramenait un
+  -- aventurier mort à 30% de ses PV max, et c'était le comportement voulu du
+  -- feu de camp avant ce pilier. Devenu obsolète, retiré ici. Garde en plus du
+  -- filtre côté Input.lua/View.campfire_hero_rects (défense en profondeur,
+  -- même précaution que Temple.eligible_heroes pour bénédiction/malédiction).
+  if not hero or hero.hp <= 0 then return end
   self.campfire.resolved = true
   -- Pas de flottant (2026-08-30) : Controller:spawn_floater se positionne via
   -- View.unit_rect, calé sur la rangée de héros DU COMBAT (HERO_ROW_Y) --
@@ -3066,10 +3083,16 @@ function Controller:choose_refuge_rest()
   if self.screen ~= "refuge" or not self.refuge or self.refuge.resolved then return end
   self.refuge.resolved = true
   for _, h in ipairs(self.state.heroes) do
-    local amount = Combat.grant_heal(h, h.max_hp * REFUGE_HEAL_FRACTION)
-    self.refuge.healed[h.id] = amount
-    if amount > 0 then
-      Combat.log(self.state, h.name .. " se repose au Refuge (+" .. amount .. " PV).", "heal")
+    -- Mort définitive (2026-09-25, même changement que Controller:
+    -- choose_campfire_hero -- pas un bug, un ancien comportement voulu
+    -- devenu obsolète) : un aventurier mort ne regagne plus jamais de PV au
+    -- Refuge -- `Combat.grant_heal` ne le filtre pas lui-même.
+    if h.hp > 0 then
+      local amount = Combat.grant_heal(h, h.max_hp * REFUGE_HEAL_FRACTION)
+      self.refuge.healed[h.id] = amount
+      if amount > 0 then
+        Combat.log(self.state, h.name .. " se repose au Refuge (+" .. amount .. " PV).", "heal")
+      end
     end
   end
   Sfx.play("heal")
