@@ -40,7 +40,19 @@ src/
                           game.lua      orchestrateur (tours, victoire/défaite, run)
   ui/               -- tout ce qui dépend de LÖVE :
                           controller.lua  colle les règles au rythme réel (Sequencer)
-                          view.lua        rendu + calcul des rectangles cliquables
+                          view/           rendu + calcul des rectangles cliquables,
+                                          un fichier par écran (2026-09-25, ex-view.lua
+                                          unique -- 5252 lignes, à deux doigts de la
+                                          limite dure de Lua de 200 locales par chunk) :
+                                          init.lua (aiguillage + assemblage),
+                                          common.lua (primitives partagées "UI"),
+                                          combat.lua (scène principale), cards.lua,
+                                          menu.lua, boss_select.lua, team_select.lua,
+                                          campfire.lua, refuge.lua, temple.lua, forge.lua,
+                                          deck_view.lua, deck_builder.lua, tooltip.lua,
+                                          victory.lua -- require("src.ui.view") résout
+                                          vers view/init.lua comme avant vers view.lua,
+                                          aucun appelant externe à changer.
                           input.lua       souris -> appels Controller
                           theme.lua, fonts.lua
   util/
