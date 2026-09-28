@@ -191,6 +191,12 @@ return function(View, UI)
   -- bouton "Ne rien prendre".
   View.victory_continue_button = { x = UI.W / 2 - 100, y = 610, w = 200, h = 44, label = "Continuer" }
 
+  -- Bouton discret "Debug" (2026-10-01, demande explicite -- "un bouton
+  -- supplémentaire discret, pour mes tests") : coin bas-gauche, hors de la
+  -- rangée de gains/draft -- volontairement petit et sans fond marqué, pour
+  -- ne jamais se confondre avec un vrai bouton de jeu.
+  View.debug_card_picker_button = { x = 12, y = UI.H - 24, w = 110, h = 16, label = "+ Debug : cartes" }
+
   --- Écran de victoire (combat normal, PAS boss -- voir draw_boss_victory
   -- plus bas pour ce cas) : titre en zoom + bump, gains PO/carte détachés
   -- (cliquables indépendamment), puis la rangée de draft une fois le gain
@@ -314,6 +320,12 @@ return function(View, UI)
       love.graphics.setLineWidth(1)
       UI.text(cb.label, cb.x, cb.y + 14, cb.w, 14, can_continue and Theme.bg or Theme.muted, "center")
     end
+
+    -- Bouton discret "Debug" (2026-10-01) : dessiné en dernier, tout en bas à
+    -- gauche -- jamais recouvert (rien d'autre ne descend aussi bas dans cet
+    -- écran), jamais au premier plan visuellement (juste du texte discret).
+    local db = View.debug_card_picker_button
+    UI.text(db.label, db.x, db.y, db.w, 12, Theme.muted, "left")
   end
 
   -- Victoire sur le boss (2026-08-21, demande explicite -- "il faut enlever le

@@ -1255,14 +1255,43 @@ return function(View, UI)
   -- cercles dorés concentriques centrés sur la carte (même idiome que le halo
   -- du menu principal, draw_menu_flourish) -- appelée AVANT draw_card_flights
   -- pour que la carte elle-même se dessine PAR-DESSUS cette lueur, pas dessous.
+  -- Fondu en entrée/sortie + légende (2026-10-01, bug signalé -- "on ne
+  -- comprend rien") : avant, le voile/la lueur apparaissaient et
+  -- disparaissaient d'un coup (alpha fixe tout du long, retiré net une fois
+  -- `duration` écoulée, voir Controller:update) -- ajoute un fondu court aux
+  -- 2 bouts pour que ce moment se lise comme une transition, pas un
+  -- clignotement. La légende (nom du héros + carte déposée) donne enfin un
+  -- sens au surgissement de cette carte, qui n'expliquait rien par
+  -- elle-même (son texte réel est encore "Ne fait rien...", voir cards.lua).
+  local DEATH_REVEAL_SPOTLIGHT_FADE = 0.3
   local function draw_death_reveal_spotlight(controller)
     local s = controller.death_reveal_spotlight
     if not s then return end
-    UI.set(Theme.black, 0.55)
+    local fade_in = math.min(1, s.elapsed / DEATH_REVEAL_SPOTLIGHT_FADE)
+    local fade_out = math.min(1, (s.duration - s.elapsed) / DEATH_REVEAL_SPOTLIGHT_FADE)
+    local alpha = math.max(0, math.min(fade_in, fade_out))
+    UI.set(Theme.black, 0.55 * alpha)
     love.graphics.rectangle("fill", 0, 0, UI.W, UI.H)
     for i = 4, 1, -1 do
-      UI.set(Theme.accent, 0.06 * i)
+      UI.set(Theme.accent, 0.06 * i * alpha)
       love.graphics.circle("fill", s.cx, s.cy, 90 + i * 30)
+    end
+    if s.hero_name then
+      local title = s.hero_name .. (s.voluntary and " s'est sacrifié." or " est tombé.")
+      -- Position ABSOLUE, pas relative à la taille de la carte (2026-10-01) :
+      -- DEATH_REVEAL_CARD_H n'existe que côté controller.lua (constante de
+      -- mise en scène de l'anim, pas de rendu) -- un point fixe près du haut
+      -- de l'écran reste largement au-dessus de la carte (centrée à l'écran,
+      -- 330px de haut) sans dépendre d'une constante d'un autre fichier.
+      local caption_y = 110
+      love.graphics.setFont(Fonts.get(20))
+      UI.set(Theme.text, alpha)
+      love.graphics.printf(title, 0, caption_y, UI.W, "center")
+      if s.card_name then
+        love.graphics.setFont(Fonts.get(13))
+        UI.set(Theme.muted, alpha)
+        love.graphics.printf(s.card_name .. " rejoint la défausse.", 0, caption_y + 28, UI.W, "center")
+      end
     end
   end
 
@@ -1692,6 +1721,7 @@ return function(View, UI)
     end
 
     View.draw_deck_view(controller)
+    View.draw_debug_card_picker(controller)
     View.draw_pause_menu(controller)
     -- "GO" tout en dernier (2026-09-30) : par-dessus absolument tout, même le
     -- menu pause/la fenêtre "voir le deck" -- c'est un signal ponctuel qui

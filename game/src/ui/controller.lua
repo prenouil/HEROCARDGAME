@@ -308,7 +308,10 @@ local GO_BANNER_DURATION = 1.1
 -- l'assombrissement du reste de l'écran (voir death_reveal_spotlight).
 local DEATH_REVEAL_CARD_W, DEATH_REVEAL_CARD_H = 220, 330 -- format "zoomé", plus grand qu'une carte normale
 local DEATH_REVEAL_APPEAR_DURATION = 0.5
-local DEATH_REVEAL_HOLD_DURATION = 0.6
+-- 0.6 -> 1.6 (2026-10-01, bug signalé -- "on ne comprend rien") : trop court
+-- pour lire à la fois la légende ("X est mort") et le texte de la carte
+-- elle-même avant qu'elle ne s'envole déjà vers la défausse.
+local DEATH_REVEAL_HOLD_DURATION = 1.6
 local DEATH_REVEAL_TRAVEL_DURATION = 1.4 -- "LENTEMENT", demande explicite -- nettement plus long qu'un vol de carte normal
 local DEATH_REVEAL_FLIP_STAGGER = 0.35 -- "une par une" -- délai entre 2 retournements consécutifs
 local DEATH_REVEAL_FLIP_DURATION = 0.5
@@ -398,6 +401,13 @@ function Controller.new()
   -- ici (la mise en page qui détermine max_scroll vit côté vue, pas côté
   -- contrôleur -- voir Controller:scroll_deck_view).
   self.deck_view_scroll = 0
+  -- Bouton discret de la fenêtre de draft, pour les tests (2026-10-01,
+  -- demande explicite -- "un bouton supplémentaire discret, pour mes tests,
+  -- qui me permet d'afficher toutes les cartes du jeu et de choisir celle
+  -- que je veux ajouter à mon deck") : `nil` fermé, `{ scroll = 0 }` ouvert --
+  -- voir Controller:open_debug_card_picker/close_debug_card_picker/
+  -- pick_debug_card et View.draw_debug_card_picker (view/debug_card_picker.lua).
+  self.debug_card_picker = nil
   self.run_mode = nil
   -- Dernière équipe lancée avec succès (2026-08-29, écran de choix
   -- d'équipe) : liste de 4 ids -- reconduite par "Rejouer" après une défaite
@@ -698,6 +708,37 @@ function Controller:close_deck_view()
   self.deck_view_open = false
 end
 
+-- ---------- bouton "debug" de la fenêtre de draft ----------
+
+--- Ouvre le sélecteur de test (2026-10-01, demande explicite -- "un bouton
+-- supplémentaire discret, pour mes tests, qui me permet d'afficher toutes
+-- les cartes du jeu et de choisir celle que je veux ajouter à mon deck") :
+-- réservé à la fenêtre de draft (écran victoire, voir le bouton dédié dans
+-- view/victory.lua) -- pas de sens ailleurs, `self.state.deck` n'existe que
+-- pendant un run en cours. Reste ouvert après un ajout (contrairement au
+-- draft normal) -- outil de test pensé pour en ajouter plusieurs d'affilée,
+-- fermé explicitement par le joueur.
+function Controller:open_debug_card_picker()
+  if self.screen ~= "victory" then return end
+  self.debug_card_picker = { scroll = 0 }
+end
+
+function Controller:close_debug_card_picker()
+  self.debug_card_picker = nil
+end
+
+--- Ajoute directement `def` (2026-10-01) au deck de la run en cours -- aucun
+-- vol/animation de récompense (ce n'est pas un gain de jeu, juste un outil de
+-- test), seulement un log dédié + le son de pioche déjà utilisé pour tout
+-- ajout de carte au deck (voir Controller:choose_draft_card/deck_builder_add).
+function Controller:pick_debug_card(def)
+  if not self.debug_card_picker or not def then return end
+  local uid = Game.next_uid(self.state)
+  self.state.deck[#self.state.deck + 1] = { uid = uid, def = def }
+  Combat.log(self.state, "[Debug] " .. def.name .. " ajoutée au deck.", "sys")
+  Sfx.play("flush")
+end
+
 -- ---------- menu pause ----------
 
 function Controller:close_pause_menu()
@@ -711,6 +752,10 @@ end
 -- fois) ; sinon bascule le menu pause (rouvre/referme -- fait aussi office
 -- de "Continuer" au clavier, sans repasser par le bouton).
 function Controller:handle_escape()
+  if self.debug_card_picker then
+    self:close_debug_card_picker()
+    return
+  end
   if self.deck_view_open then
     self:close_deck_view()
     return
@@ -744,6 +789,14 @@ function Controller:scroll_deck_view(dy)
   if not self.deck_view_open then return end
   local max_scroll = View.deck_view_layout(self).max_scroll
   self.deck_view_scroll = math.max(0, math.min(max_scroll, self.deck_view_scroll - dy * DECK_VIEW_SCROLL_STEP))
+end
+
+--- Molette du sélecteur de test (2026-10-01) : même formule que
+-- Controller:scroll_deck_view ci-dessus.
+function Controller:scroll_debug_card_picker(dy)
+  if not self.debug_card_picker then return end
+  local max_scroll = View.debug_card_picker_layout().max_scroll
+  self.debug_card_picker.scroll = math.max(0, math.min(max_scroll, self.debug_card_picker.scroll - dy * DECK_VIEW_SCROLL_STEP))
 end
 
 -- ---------- écran "Choisis ton équipe" ----------
@@ -1623,25 +1676,51 @@ function Controller:start_death_reveal(hero_id)
   self.hand_locked = true
   local t = 0 -- curseur de temps total, avance au fil des 3 temps
 
-  -- 1. Legs/Héritage : apparition (zoom + fondu, immobile) PUIS envol lent
-  -- vers la défausse -- 2 entrées card_anims consécutives (`from == to` sur
-  -- la 1ʳᵉ = aucun déplacement, juste fondu/échelle via ease_out_back).
+  -- 1. Legs/Héritage : apparition en VRAI zoom (petit -> grand) + fondu,
+  -- PUIS envol lent vers la défausse (2026-10-01, bug signalé -- "apparait
+  -- d'abord en grand, puis s'anime... on ne comprend rien" : avant, la 1ʳᵉ
+  -- entrée card_anims posait `from == to == big`, donc ease_out_back
+  -- interpolait entre 2 rects IDENTIQUES -- seul l'alpha montait, la carte
+  -- semblait jaillir déjà à pleine taille au lieu de sembler matérialiser).
   if reveal.legs_or_heritage then
     local big = {
       x = View.W / 2 - DEATH_REVEAL_CARD_W / 2, y = View.H / 2 - DEATH_REVEAL_CARD_H / 2,
       w = DEATH_REVEAL_CARD_W, h = DEATH_REVEAL_CARD_H,
     }
+    local cx, cy = big.x + big.w / 2, big.y + big.h / 2
+    local ZOOM_START_SCALE = 0.25
+    local zoom_from = {
+      x = cx - big.w * ZOOM_START_SCALE / 2, y = cy - big.h * ZOOM_START_SCALE / 2,
+      w = big.w * ZOOM_START_SCALE, h = big.h * ZOOM_START_SCALE,
+    }
     -- Assombrit le reste de l'écran + pose une lueur derrière la carte
     -- (2026-09-30, "ne se voit pas assez") : couvre l'apparition + la tenue +
     -- l'envol (la carte reste lisible même petite près de la défausse, sur un
-    -- fond plus sombre que la scène de combat).
+    -- fond plus sombre que la scène de combat). `hero_name`/`card_name`/
+    -- `voluntary` (2026-10-01, bug signalé -- "on ne comprend rien") : légende
+    -- affichée par draw_death_reveal_spotlight (view/combat.lua) -- ce moment
+    -- doit se lire comme "X est mort, son Legs/Héritage rejoint la défausse",
+    -- pas comme une carte anonyme qui surgit sans explication.
     self.death_reveal_spotlight = {
       elapsed = 0, duration = DEATH_REVEAL_APPEAR_DURATION + DEATH_REVEAL_HOLD_DURATION + DEATH_REVEAL_TRAVEL_DURATION,
-      cx = big.x + big.w / 2, cy = big.y + big.h / 2,
+      cx = cx, cy = cy,
+      hero_name = reveal.hero_name, card_name = reveal.legs_or_heritage.def.name,
+      voluntary = reveal.legs_or_heritage.voluntary,
     }
+    -- `duration = APPEAR + HOLD` (2026-10-01, bug signalé -- "puis s'anime...
+    -- on ne comprend rien") : PAS seulement APPEAR_DURATION -- Controller:update
+    -- purge toute entrée card_anims dès que `elapsed >= delay + duration` ; en
+    -- s'arrêtant à APPEAR_DURATION, cette entrée disparaissait ENTIÈREMENT
+    -- pendant toute la "tenue" (HOLD), avant même que le vol vers la défausse
+    -- (2ᵉ entrée, ci-dessous) ne démarre -- la carte semblait donc s'évaporer
+    -- puis réapparaître soudain déjà en train de voler. `ease_out_back`/`p`
+    -- sont tous 2 CLAMPÉS à 1 une fois `elapsed - delay >= duration_ écoulée`
+    -- (voir UI.ease_out_back/common.lua) : prolonger `duration` jusqu'à la fin
+    -- du HOLD ne rejoue donc PAS l'animation d'apparition, la carte reste
+    -- figée pile à `big`, pleinement opaque, pour tout le reste du HOLD.
     self.card_anims[#self.card_anims + 1] = {
-      from = big, to = big, elapsed = 0, delay = t,
-      duration = DEATH_REVEAL_APPEAR_DURATION, fade_in = true, def = reveal.legs_or_heritage.def,
+      from = zoom_from, to = big, elapsed = 0, delay = t,
+      duration = DEATH_REVEAL_APPEAR_DURATION + DEATH_REVEAL_HOLD_DURATION, fade_in = true, def = reveal.legs_or_heritage.def,
     }
     t = t + DEATH_REVEAL_APPEAR_DURATION + DEATH_REVEAL_HOLD_DURATION
     self.card_anims[#self.card_anims + 1] = {
@@ -2182,6 +2261,23 @@ function Controller:play_turn_start_sequence()
   if self_.state.last_drawn_uids then
     for _, uid in ipairs(self_.state.last_drawn_uids) do self_.pending_draw_uids[uid] = true end
   end
+  -- Même bug, même cause, sur le COMPTE de la pioche cette fois (2026-10-01,
+  -- retour explicite -- "les nombres affichés sur la pioche ne suivent pas
+  -- mes recommandations") : `deck_count_override` ne prenait le relais qu'à
+  -- l'intérieur de consume_drawn_animation, appelée seulement APRÈS l'attente
+  -- de l'anim d'énergie ci-dessous -- pendant toute cette attente,
+  -- `#state.deck` (déjà muté de façon synchrone par Game.start_turn, AVANT ce
+  -- beat) affichait donc déjà le compte FINAL post-remélange, avant même que
+  -- la 1ʳᵉ carte n'ait commencé à s'envoler -- puis l'affichage "reculait"
+  -- vers 2 -> 0 -> 10 en repartant de zéro une fois consume_drawn_animation
+  -- enfin lancée, au lieu d'enchaîner sans à-coup. Se pose ICI, dès ce beat,
+  -- sur le compte PRÉ-remélange (`last_draw_reshuffled_at` = le nombre de
+  -- cartes piochées avant que le deck ne tombe à 0, donc very exactement sa
+  -- taille AVANT cette pioche) : consume_drawn_animation part ensuite de la
+  -- même valeur (`#batch1`), aucun saut au point de jonction.
+  if self_.state.last_draw_reshuffled_at then
+    self_.deck_count_override = self_.state.last_draw_reshuffled_at
+  end
   self_:spawn_energy_turn_anim(self_.state.energy)
   self_.seq:push(function() end, TURN_ENERGY_ANIM_DURATION)
   self_.seq:push(function()
@@ -2591,6 +2687,29 @@ function Controller:update(dt)
       if not h.death_reveal_shown then
         h.death_reveal_shown = true
         local self_, hero_id = self, h.id
+        -- Fige IMMÉDIATEMENT l'apparence des cartes de MAIN déjà converties
+        -- (2026-10-01, bug signalé -- "les cartes du mort en main sont
+        -- immédiatement changées en Echo au lieu d'attendre leur tour") :
+        -- Game.process_hero_deaths a DÉJÀ muté `card.def` en Écho de façon
+        -- SYNCHRONE, bien avant que start_death_reveal (retardée de
+        -- HERO_DEATH_FADE_DURATION ci-dessous) ne peuple death_reveal_flip
+        -- pour de bon -- sans ce garde-fou posé ICI (même frame que la mort,
+        -- voir draw_one/view/combat.lua qui lit déjà death_reveal_flip),
+        -- `def` affichait le nouveau visage pendant toute cette attente, bien
+        -- avant même le début de la séquence dramatique. `delay = math.huge` :
+        -- reste figé sur `from_def` indéfiniment -- start_death_reveal
+        -- REMPLACE cette entrée par la vraie (avec son délai réel et sa durée
+        -- de retournement) une fois la séquence lancée, aucun accroc entre
+        -- les 2.
+        for _, reveal in ipairs(self_.state.last_death_reveals) do
+          if reveal.hero_id == hero_id then
+            for _, c in ipairs(reveal.converted) do
+              if c.pile == "hand" then
+                self_.death_reveal_flip[c.uid] = { from_def = c.from_def, elapsed = 0, delay = math.huge, duration = 0 }
+              end
+            end
+          end
+        end
         self.seq:push(function() end, HERO_DEATH_FADE_DURATION)
         self.seq:push(function() self_:start_death_reveal(hero_id) end)
       end

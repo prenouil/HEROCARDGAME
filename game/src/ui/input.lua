@@ -58,6 +58,33 @@ local function deck_view_hovering(controller, x, y)
   return View.point_in(View.deck_view_close_button, x, y) or not View.point_in(View.deck_view_panel_rect, x, y)
 end
 
+--- Sélecteur de test "toutes les cartes" (2026-10-01, demande explicite) :
+-- même priorité/schéma que deck_view_click juste au-dessus -- un clic sur
+-- "Fermer" OU en dehors du panneau le referme, un clic sur UNE CARTE l'ajoute
+-- au deck (voir Controller:pick_debug_card) sans jamais fermer l'overlay
+-- (outil de test, pensé pour en ajouter plusieurs d'affilée).
+local function debug_card_picker_click(controller, x, y)
+  if not controller.debug_card_picker then return false end
+  if View.point_in(View.debug_card_picker_close_button, x, y) or not View.point_in(View.debug_card_picker_panel_rect, x, y) then
+    controller:close_debug_card_picker()
+    return true
+  end
+  local layout = View.debug_card_picker_layout()
+  local scroll = math.max(0, math.min(layout.max_scroll, controller.debug_card_picker.scroll or 0))
+  for i, def in ipairs(layout.cards) do
+    if View.point_in(View.debug_card_picker_rect_at(i, scroll), x, y) then
+      controller:pick_debug_card(def)
+      break
+    end
+  end
+  return true
+end
+
+local function debug_card_picker_hovering(controller, x, y)
+  if not controller.debug_card_picker then return false end
+  return true -- overlay modal : tout le panneau réagit (cartes cliquables + fermeture)
+end
+
 -- Écrans "menu"/"options" (2026-08-21, demande explicite) : mêmes boutons
 -- quel que soit le mode d'entrée (tap/flèche), jamais de ciblage de carte en
 -- jeu -- factorisé une seule fois, comme feu_de_camp_hovering plus bas,
@@ -311,6 +338,7 @@ local function mousepressed_tap(controller, x, y, button)
   if button ~= 1 then return end
   if pause_menu_click(controller, x, y) then return end
   if deck_view_click(controller, x, y) then return end
+  if debug_card_picker_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
   if deck_builder_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
@@ -333,6 +361,10 @@ local function mousepressed_tap(controller, x, y, button)
   -- Controller:victory_continue -- même schéma défensif que draft_card_ready
   -- ci-dessous).
   if controller.screen == "victory" then
+    -- Bouton discret "Debug" (2026-10-01, demande explicite) : toujours actif
+    -- sur l'écran de draft, même avant que les gains ne soient affichés --
+    -- voir View.debug_card_picker_button (view/victory.lua).
+    if View.point_in(View.debug_card_picker_button, x, y) then controller:open_debug_card_picker(); return end
     if controller.victory_gains_shown then
       if not controller.victory_gold_collected and not controller.victory_gold_flying
         and View.point_in(View.victory_gold_rect, x, y) then
@@ -420,6 +452,7 @@ local function mousepressed_arrow(controller, x, y, button)
   if button ~= 1 then return end
   if pause_menu_click(controller, x, y) then return end
   if deck_view_click(controller, x, y) then return end
+  if debug_card_picker_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
   if deck_builder_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
@@ -442,6 +475,10 @@ local function mousepressed_arrow(controller, x, y, button)
   -- Controller:victory_continue -- même schéma défensif que draft_card_ready
   -- ci-dessous).
   if controller.screen == "victory" then
+    -- Bouton discret "Debug" (2026-10-01, demande explicite) : toujours actif
+    -- sur l'écran de draft, même avant que les gains ne soient affichés --
+    -- voir View.debug_card_picker_button (view/victory.lua).
+    if View.point_in(View.debug_card_picker_button, x, y) then controller:open_debug_card_picker(); return end
     if controller.victory_gains_shown then
       if not controller.victory_gold_collected and not controller.victory_gold_flying
         and View.point_in(View.victory_gold_rect, x, y) then
@@ -617,6 +654,7 @@ end
 local function is_hovering_clickable_tap(controller, x, y)
   if controller.pause_menu_open then return pause_menu_hovering(controller, x, y) end
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
+  if controller.debug_card_picker then return debug_card_picker_hovering(controller, x, y) end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
     return menu_hovering(controller, x, y)
   end
@@ -630,6 +668,7 @@ local function is_hovering_clickable_tap(controller, x, y)
   end
 
   if controller.screen == "victory" then
+    if View.point_in(View.debug_card_picker_button, x, y) then return true end
     if not controller.victory_gains_shown then return false end
     if not controller.victory_gold_collected and not controller.victory_gold_flying
       and View.point_in(View.victory_gold_rect, x, y) then return true end
@@ -678,6 +717,7 @@ end
 local function is_hovering_clickable_arrow(controller, x, y)
   if controller.pause_menu_open then return pause_menu_hovering(controller, x, y) end
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
+  if controller.debug_card_picker then return debug_card_picker_hovering(controller, x, y) end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
     return menu_hovering(controller, x, y)
   end
@@ -691,6 +731,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
   end
 
   if controller.screen == "victory" then
+    if View.point_in(View.debug_card_picker_button, x, y) then return true end
     if not controller.victory_gains_shown then return false end
     if not controller.victory_gold_collected and not controller.victory_gold_flying
       and View.point_in(View.victory_gold_rect, x, y) then return true end
@@ -741,6 +782,7 @@ end
 function Input.mousemoved(controller, x, y)
   if controller.pause_menu_open then controller:set_hover(nil, nil); return end
   if controller.deck_view_open then controller:set_hover(nil, nil); return end
+  if controller.debug_card_picker then controller:set_hover(nil, nil); return end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
     controller:set_hover(nil, nil)
     return
@@ -928,6 +970,7 @@ end
 -- déjà ce même garde-fou, doublé ici pour ne pas dépenser un appel pour rien).
 function Input.wheelmoved(controller, dx, dy)
   if controller.deck_view_open then controller:scroll_deck_view(dy); return end
+  if controller.debug_card_picker then controller:scroll_debug_card_picker(dy); return end
   -- Écran "Construis ton deck" (2026-09-02, demande explicite -- "la partie
   -- haute et la partie basse sont indépendantes, chacune leur ascenseur") :
   -- le panneau défilé dépend d'où le curseur se trouve AU MOMENT du cran de
