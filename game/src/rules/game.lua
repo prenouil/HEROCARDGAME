@@ -61,6 +61,89 @@ function Game.next_uid(state)
   return state.uid_counter
 end
 
+-- ---------- pilier du sacrifice (2026-09-28) : mise à mort / Legs / Héritage / Écho ----------
+-- Première passe MÉCANIQUE seulement (demande explicite de Zgrubulu -- "on
+-- code toutes les mécaniques, mais pas les textes des cartes") : les 4
+-- familles de cartes (voir src/data/cards.lua, codes "mise-a-mort-*"/
+-- "legs-*"/"heritage-*"/"echo-*") portent un texte volontairement générique,
+-- à réécrire plus tard sans toucher à la mécanique elle-même.
+
+--- Tue un héros de façon INCONDITIONNELLE (carte "Mise à mort") : jamais via
+-- Combat.deal_damage, qui applique l'absorption du Bouclier et les
+-- multiplicateurs de dégâts -- une mise à mort ne doit jamais pouvoir être
+-- esquivée/réduite. `voluntary` distingue une mort CHOISIE (génère un
+-- Héritage, voir Game.process_hero_deaths ci-dessous) d'une mort SUBIE
+-- (génère un simple Legs) -- un héros déjà mort ne peut pas changer de cause.
+function Game.kill_hero(state, hero, voluntary)
+  if hero.hp <= 0 then return end
+  hero.hp = 0
+  if voluntary then hero.died_voluntarily = true end
+  Combat.log(state, hero.name .. (voluntary and " se sacrifie." or " meurt."), "foe")
+end
+
+--- Remplace le `def` de toute carte ENCORE possédée par ce héros (deck/main/
+-- défausse) par l'Écho générique de sa classe -- tier amélioré si la carte
+-- d'origine l'était déjà (`def.is_upgraded`), de base sinon. La carte "Mise à
+-- mort" qui vient éventuellement de le tuer n'a jamais besoin d'être exclue
+-- explicitement ici : elle porte `epuisement` (voir Game.finish_card), donc
+-- elle a déjà quitté toute pile AVANT que cette fonction ne tourne.
+-- `reveal.converted` (2026-09-28, séquence dramatique de mort -- demande
+-- explicite) : une entrée par carte réellement convertie ({uid, pile,
+-- from_def}), `from_def` étant le def D'ORIGINE (avant conversion) -- seule
+-- façon pour Controller:start_death_reveal de savoir plus tard quelle
+-- illustration/texte animer en train de se retourner, `c.def` ayant déjà
+-- changé pour de bon dès cette fonction.
+local function convert_remaining_cards_to_echo(state, class_id, reveal)
+  local base_def = Cards.by_code("echo-" .. class_id)
+  local upgraded_def = Cards.by_code("echo-" .. class_id .. "-ameliore")
+  if not base_def then return end
+  local function convert(pile, pile_name)
+    for _, c in ipairs(pile) do
+      if c.def.class_id == class_id and c.def.code ~= base_def.code and c.def.code ~= upgraded_def.code then
+        reveal.converted[#reveal.converted + 1] = { uid = c.uid, pile = pile_name, from_def = c.def }
+        c.def = (c.def.is_upgraded and upgraded_def) or base_def
+      end
+    end
+  end
+  convert(state.deck, "deck")
+  convert(state.hand, "hand")
+  convert(state.discard, "discard")
+end
+
+--- Traite chaque mort de héros pas encore vue : dépose la carte Legs (mort
+-- subie) ou Héritage (mort volontaire, voir hero.died_voluntarily) DIRECTEMENT
+-- dans la défausse -- jamais dans la main, le joueur doit la repiocher avant
+-- de pouvoir la jouer (voir la discussion de design -- même timing que
+-- n'importe quelle carte défaussée/remélangée) -- puis convertit toutes les
+-- cartes restantes du défunt en Écho de sa classe. `death_processed` : garde
+-- d'idempotence, cette fonction est appelée depuis Game.check_defeat (voir son
+-- commentaire) à chaque point de la boucle de jeu où des PV ont pu changer --
+-- ne doit jamais reposer 2 fois le Legs/Héritage d'un même héros.
+function Game.process_hero_deaths(state)
+  for _, h in ipairs(state.heroes) do
+    if h.hp <= 0 and not h.death_processed then
+      h.death_processed = true
+      local reveal = { hero_id = h.id, hero_name = h.name, class_id = h.class_id, converted = {} }
+      -- Conversion en Écho AVANT de déposer le Legs/Héritage, jamais après
+      -- (2026-09-28, bug évité pendant l'écriture des tests) : sinon la carte
+      -- Legs/Héritage qu'on vient tout juste d'ajouter à la défausse -- de la
+      -- MÊME classe que le défunt par construction -- se ferait elle-même
+      -- reconvertir en Écho à l'instant où elle est posée.
+      convert_remaining_cards_to_echo(state, h.class_id, reveal)
+      local voluntary = h.died_voluntarily
+      local def = Cards.by_code((voluntary and "heritage-" or "legs-") .. h.class_id)
+      if def then
+        local card = { uid = Game.next_uid(state), def = def }
+        state.discard[#state.discard + 1] = card
+        reveal.legs_or_heritage = { uid = card.uid, def = def, voluntary = voluntary }
+        Combat.log(state, (voluntary and "Héritage" or "Legs") .. " de " .. h.name .. " rejoint la défausse.", "sys")
+      end
+      state.last_death_reveals = state.last_death_reveals or {}
+      state.last_death_reveals[#state.last_death_reveals + 1] = reveal
+    end
+  end
+end
+
 -- `mana` (2026-08-20, ressource propre au Mage) : nil pour les 3 autres classes
 -- -- jamais 0, pour que `Theme`/l'affichage puissent distinguer "n'a pas cette
 -- ressource" de "l'a épuisée". Valeur de départ 2, voir def du Mage dans
@@ -240,7 +323,16 @@ end
 -- plutôt qu'à côté de `zero_cost_def` -- Lua résout les locales du chunk
 -- dans l'ordre du fichier, une locale définie APRÈS son premier appel
 -- resterait invisible (résolue en global nil, voir l'erreur d'origine).
+-- `no_forge_upgrade` (2026-09-28, pilier du sacrifice) : les cartes Écho
+-- améliorées (`echo-<classe>-ameliore`) posent `is_upgraded=true` MAIS ne
+-- partagent PAS le code de leur "base" Écho (ce sont 2 identités de carte
+-- permanentes et distinctes, pas une paire base/Forge) -- donc pas de champ
+-- `.upgrade` dessus, et `Cards.upgraded_def(base)` plante (assert) si on
+-- tente quand même de les "réamélioré" ici. Ces cartes n'ont de toute façon
+-- aucun override temporaire de combat à annuler (elles ne sont jamais visées
+-- par `zero_cost_def`) -- on les laisse simplement inchangées.
 local function reset_temporary_card_state(card)
+  if card.def.no_forge_upgrade then return end
   local base = Cards.by_code(card.def.code)
   if not base then return end -- ne devrait jamais arriver, filet de sécurité
   card.def = card.def.is_upgraded and Cards.upgraded_def(base) or base
@@ -391,6 +483,16 @@ function Game.new_state()
     -- reset_temporary_card_state) -- mécanisme distinct et parallèle, pas une
     -- réutilisation.
     turn_free_uids = {},
+    -- Indice transitoire pour la UI (2026-09-28, pilier du sacrifice -- même
+    -- esprit que `last_drawn_uids`/`last_draw_reshuffled_at` ci-dessus) :
+    -- rempli par Game.process_hero_deaths à CHAQUE mort de héros -- ce que la
+    -- carte Legs/Héritage/Écho a fait exactement (uid/def de la carte
+    -- Legs/Héritage déposée, liste des cartes converties en Écho avec leur
+    -- def D'ORIGINE) -- consommé puis retiré par Controller:start_death_reveal
+    -- pour rejouer la séquence dramatique de mort. Jamais lu par les règles
+    -- elles-mêmes, uniquement par la vue -- une liste puisque rien n'empêche
+    -- 2 héros de mourir sur le même évènement (attaque de zone).
+    last_death_reveals = {},
   }
 end
 
@@ -1007,7 +1109,12 @@ function Game.select_card(state, uid)
   end
   for _, c in ipairs(state.hand) do
     if c.uid == uid then
-      local owner = Combat.hero_by_id(state, c.def.class_id)
+      -- `Combat.effective_owner`, pas `Combat.hero_by_id` directement
+      -- (2026-09-28, pilier du sacrifice) : voir son commentaire -- une carte
+      -- Legs/Héritage/Écho reste jouable même une fois son héros d'origine
+      -- mort. `c.def.owner_can_be_dead` (Écho seulement) : le défunt reste
+      -- lui-même son propre propriétaire au lieu de retomber sur un vivant.
+      local owner = Combat.effective_owner(state, c.def.class_id, c.def.owner_can_be_dead)
       if not owner or not Combat.can_play(state, owner, { def = c.def }) then return "refused" end
       state.pending = { uid = uid, def = c.def, hero_id = nil }
       Game.assign_hero(state, owner.id)
@@ -1032,7 +1139,10 @@ function Game.assign_hero(state, hero_id)
   if not pending then return false end
   local hero = Combat.hero_by_id(state, hero_id)
   local def = pending.def
-  if not hero or hero.hp <= 0 then return false end
+  -- `def.owner_can_be_dead` (2026-09-28, carte Écho -- voir
+  -- Combat.effective_owner/Combat.can_play, même exception) : seul cas où un
+  -- héros mort reste un `hero_id` valide à assigner.
+  if not hero or (hero.hp <= 0 and not def.owner_can_be_dead) then return false end
   if state.energy < Combat.effective_cost(hero, def) then return false end
   if def.mana_cost and (hero.mana or 0) < def.mana_cost then return false end
   if def.requires_camouflage and (hero.camoufle or 0) <= 0 then return false end
@@ -1138,6 +1248,14 @@ function Game.resolve_pending(state, kind, target_id)
   Game.apply_memoire_melodique(state, hero, pending.uid)
   Game.check_victory(state)
   Game.finish_card(state, pending, ctx)
+  -- `check_defeat`, PAS seulement `check_victory` ci-dessus (2026-09-28,
+  -- pilier du sacrifice) : une carte peut désormais tuer son propre lanceur ou
+  -- un allié ("Mise à mort") -- jusqu'ici, seul un ennemi pouvait amener
+  -- state.over à vrai depuis ce point d'appel. Après Game.finish_card (pas
+  -- avant) : la carte "Mise à mort" qui vient de tuer doit déjà avoir quitté
+  -- la main (épuisement) avant que le traitement de la mort ne balaie les
+  -- piles restantes du défunt pour les convertir en Écho.
+  Game.check_defeat(state)
 end
 
 --- Effets de bord communs à TOUTE carte jouée, quel que soit son effet propre
@@ -1263,7 +1381,13 @@ function Game.finish_card(state, pending, ctx)
     local card = table.remove(state.hand, idx)
     if ctx and ctx.zero_cost then card.def = zero_cost_def(card.def) end
     local forced_amnesie = ctx and ctx.hero and ctx.hero.force_amnesie
-    if (ctx and ctx.card_def and def_has_cat(ctx.card_def, "amnesie")) or forced_amnesie then
+    if ctx and ctx.card_def and ctx.card_def.epuisement then
+      -- "Épuisement" (2026-09-28, pilier du sacrifice -- cartes Mise à mort/
+      -- Legs/Héritage/Écho, toutes à usage unique) : ne rejoint AUCUNE pile,
+      -- ni la défausse ni `state.exhausted` -- contrairement à "amnesie"
+      -- ci-dessous (qui revient au combat SUIVANT), une carte épuisée
+      -- disparaît DÉFINITIVEMENT, pour tout le reste du run.
+    elseif (ctx and ctx.card_def and def_has_cat(ctx.card_def, "amnesie")) or forced_amnesie then
       -- "Disparait pour le reste du combat" (2026-08-28) : jamais en défausse,
       -- jamais repiochable avant le combat suivant -- voir Game.start_next_combat/
       -- start_boss_combat, seuls endroits qui repêchent `state.exhausted`.
@@ -1623,7 +1747,17 @@ function Game.compute_gold_reward(state)
 end
 
 --- Retourne true si la défaite vient d'être déclenchée par cet appel.
+-- `Game.process_hero_deaths` (2026-09-28, pilier du sacrifice) appelée EN
+-- PREMIER ici plutôt que dupliquée à chaque site d'appel de check_defeat
+-- (défausse de saignement/brûlure, action ennemie, décroissance de fin de
+-- tour, carte jouée -- voir Controller:advance_after_discard_sequenced/
+-- Game.resolve_pending) : ces appels couvrent déjà EXHAUSTIVEMENT tous les
+-- points où des PV ont pu changer, un doublon parallèle à maintenir en phase
+-- serait plus risqué qu'une seule fonction à deux responsabilités. Idempotent
+-- (voir hero.death_processed), donc sans coût à être appelée plusieurs fois
+-- par tour.
 function Game.check_defeat(state)
+  Game.process_hero_deaths(state)
   if not state.over and #Combat.living_heroes(state) == 0 then
     state.over = true
     return true

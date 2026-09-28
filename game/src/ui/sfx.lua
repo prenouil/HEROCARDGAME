@@ -277,20 +277,27 @@ BUILDERS.defeat = function()
   })
 end
 
--- "hero_death" -- un aventurier tombe au combat (2026-08-30, demande
--- explicite -- "un son grave, déprimant, caractéristique de la mort") :
--- glissando triangle qui plonge lentement vers le grave sur toute sa durée,
--- doublé d'un souffle de bruit sourd au tout début (le coup qui l'achève) --
--- DISTINCT de "defeat" ci-dessus (fanfare complète de fin de RUN, plusieurs
--- notes qui descendent) : ici un seul ton qui s'éteint, pour UN aventurier
--- qui tombe, pas toute l'équipe qui est vaincue.
+-- "hero_death" -- un aventurier tombe au combat (2026-08-30, "un son grave,
+-- déprimant, caractéristique de la mort" ; accentué 2026-09-30, demande
+-- explicite -- "un son désastreux et triste au moment de la mort", jugé pas
+-- assez marquant en l'état) : glissando triangle qui plonge vers le grave,
+-- doublé d'un souffle de bruit sourd au tout début (le coup qui l'achève),
+-- PLUS désormais un second ton en dessous à distance de TRITON (racine de 2 --
+-- l'intervalle le plus instable/dissonant de la musique occidentale, "diabolus
+-- in musica") : c'est cette dissonance qui donne le côté "désastreux" (pas
+-- juste triste) -- et une durée allongée (1.3s -> 2.0s) pour que le glas ait le
+-- temps de vraiment s'éteindre plutôt que de couper court. DISTINCT de
+-- "defeat" ci-dessous (fanfare complète de fin de RUN, plusieurs notes) : ici
+-- toujours un seul glissando qui s'éteint, pour UN aventurier qui tombe.
 BUILDERS.hero_death = function()
-  return Chiptune.render(1.3, function(t)
-    local p = math.min(1, t / 1.3)
-    local freq = 220 - 160 * p
+  return Chiptune.render(2.0, function(t)
+    local p = math.min(1, t / 2.0)
+    local freq = 220 - 170 * p
+    local dissonant = freq * 1.4142 -- triton, volontairement discordant
     local thud = t < 0.12 and Chiptune.noise() * (1 - t / 0.12) * 0.5 or 0
-    return Chiptune.triangle(freq, t) * Chiptune.decay(t, 1.3, 0.6) * 0.7 + thud
-  end, 0.5)
+    local decay = Chiptune.decay(t, 2.0, 0.55)
+    return (Chiptune.triangle(freq, t) * 0.65 + Chiptune.triangle(dissonant, t) * 0.3) * decay + thud
+  end, 0.55)
 end
 
 -- "cendre" -- carte "Amnésie" qui se disperse en cendres au lieu de partir en
@@ -376,6 +383,17 @@ end
 -- d'ennemi n'a pas encore sa propre entrée ci-dessus -- Sfx.play resterait de
 -- toute façon silencieux sans erreur, mais autant avoir un son plutôt que rien.
 BUILDERS.enemy_land_default = thud(140, 0.2, 0.5, 1.6, 0.5)
+
+-- "go" -- bandeau "GO" qui rend la main au joueur après la séquence
+-- dramatique de mort (2026-09-30, demande explicite -- "un petit son") :
+-- glissando carré ASCENDANT, bref et net -- signal positif de reprise de
+-- contrôle, DISTINCT de "hop" (blip fixe, un par héros prêt) et de "flush"
+-- (glissando DESCENDANT, pensé pour un déplacement de carte).
+BUILDERS.go = function()
+  return Chiptune.render(0.16, function(t)
+    return Chiptune.sweep_square(500, 1400, t, 0.16, 0.35) * Chiptune.decay(t, 0.16, 1.2)
+  end, 0.5)
+end
 
 local cache = {}
 

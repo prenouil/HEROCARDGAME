@@ -1202,6 +1202,287 @@ Cards.list = {
       effect = function(ctx) ctx.hero.tournee_finale = 6 end,
     },
   },
+
+  -- ---------- Pilier du sacrifice (2026-09-28) ----------
+  -- Première passe MÉCANIQUE seulement, textes volontairement génériques
+  -- (demande explicite de Zgrubulu -- "on code toutes les mécaniques, mais
+  -- pas les textes des cartes elles-mêmes", les vrais noms/effets par classe
+  -- viendront plus tard sans toucher au moteur). 4 familles, 1 jeu de règles
+  -- communes :
+  -- - "Mise à mort de <Classe>" : `target = "self"`, tue son propre lanceur
+  --   (voir Game.kill_hero) -- jamais dans les decks de départ (`tier =
+  --   "avance"`, voir Deck.starting_cards_for_class), débloquée en cours de
+  --   run via le draft de victoire comme n'importe quelle carte "avance".
+  -- - "Legs du <Classe>"/"Héritage du <Classe>" : jamais draftées
+  --   (`not_draftable`, voir Draft.pick_cards) -- déposées directement dans la
+  --   défausse par Game.process_hero_deaths à la mort d'un héros de cette
+  --   classe (Legs si subie, Héritage si volontaire). `target = "ally"` : ne
+  --   fait rien sur la cible pour l'instant, oblige quand même à en choisir
+  --   une pour tester le flux complet. Héritage incrémente
+  --   `ctx.target.heritage_count` (2026-09-28, marqueur visuel -- voir
+  --   draw_hero, combat.lua) : seul effet réel de cette passe, tout le reste
+  --   du texte reste un vrai no-op.
+  -- - "Écho du <Classe>" (base + amélioré) : jamais draftée (`not_draftable`)
+  --   -- remplace automatiquement toute carte restante d'un héros mort (voir
+  --   convert_remaining_cards_to_echo, game.lua). Coût 0, aucun effet pour
+  --   l'instant.
+  -- Toutes les 4 familles : `epuisement = true` (retirées du deck pour de bon
+  -- après avoir été jouées, voir Game.finish_card) et `no_forge_upgrade =
+  -- true` (pas de champ `upgrade` -- la Forge planterait sinon, voir
+  -- Forge.upgradable_instances).
+  {
+    code = "mise-a-mort-guerrier", name = "Mise à mort de Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true,
+    desc = "Guerrier se suicide. Déclenche l'Héritage. Épuisement.",
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.kill_hero(ctx.state, ctx.hero, true)
+    end,
+  },
+  {
+    code = "mise-a-mort-paladin", name = "Mise à mort de Paladin", class_id = "paladin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true,
+    desc = "Paladin se suicide. Déclenche l'Héritage. Épuisement.",
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.kill_hero(ctx.state, ctx.hero, true)
+    end,
+  },
+  {
+    code = "mise-a-mort-mage", name = "Mise à mort de Mage", class_id = "mage", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true,
+    desc = "Mage se suicide. Déclenche l'Héritage. Épuisement.",
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.kill_hero(ctx.state, ctx.hero, true)
+    end,
+  },
+  {
+    code = "mise-a-mort-assassin", name = "Mise à mort de Assassin", class_id = "assassin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true,
+    desc = "Assassin se suicide. Déclenche l'Héritage. Épuisement.",
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.kill_hero(ctx.state, ctx.hero, true)
+    end,
+  },
+  {
+    code = "mise-a-mort-necromancien", name = "Mise à mort de Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true,
+    desc = "Nécromancien se suicide. Déclenche l'Héritage. Épuisement.",
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.kill_hero(ctx.state, ctx.hero, true)
+    end,
+  },
+  {
+    code = "mise-a-mort-barde", name = "Mise à mort de Barde", class_id = "barde", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true,
+    desc = "Barde se suicide. Déclenche l'Héritage. Épuisement.",
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.kill_hero(ctx.state, ctx.hero, true)
+    end,
+  },
+
+  {
+    code = "legs-guerrier", name = "Legs du Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "legs-paladin", name = "Legs du Paladin", class_id = "paladin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "legs-mage", name = "Legs du Mage", class_id = "mage", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "legs-assassin", name = "Legs de l'Assassin", class_id = "assassin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "legs-necromancien", name = "Legs du Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "legs-barde", name = "Legs du Barde", class_id = "barde", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) end,
+  },
+
+  -- Héritage : seule différence mécanique réelle de cette passe -- incrémente
+  -- `heritage_count` sur la cible (marqueur visuel, voir draw_hero) -- le
+  -- reste du texte affiché ("Ne fait rien...") reste vrai quant au véritable
+  -- effet de jeu, qui viendra plus tard.
+  {
+    code = "heritage-guerrier", name = "Héritage du Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+  },
+  {
+    code = "heritage-paladin", name = "Héritage du Paladin", class_id = "paladin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+  },
+  {
+    code = "heritage-mage", name = "Héritage du Mage", class_id = "mage", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+  },
+  {
+    code = "heritage-assassin", name = "Héritage de l'Assassin", class_id = "assassin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+  },
+  {
+    code = "heritage-necromancien", name = "Héritage du Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+  },
+  {
+    code = "heritage-barde", name = "Héritage du Barde", class_id = "barde", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "ally",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
+    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+  },
+
+  {
+    code = "echo-guerrier", name = "Écho du Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
+    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
+    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-guerrier-ameliore", name = "Écho du Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-paladin", name = "Écho du Paladin", class_id = "paladin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
+    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
+    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-paladin-ameliore", name = "Écho du Paladin", class_id = "paladin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-mage", name = "Écho du Mage", class_id = "mage", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
+    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
+    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-mage-ameliore", name = "Écho du Mage", class_id = "mage", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-assassin", name = "Écho de l'Assassin", class_id = "assassin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
+    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
+    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-assassin-ameliore", name = "Écho de l'Assassin", class_id = "assassin", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-necromancien", name = "Écho du Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
+    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
+    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-necromancien-ameliore", name = "Écho du Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-barde", name = "Écho du Barde", class_id = "barde", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
+    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
+    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
+  {
+    code = "echo-barde-ameliore", name = "Écho du Barde", class_id = "barde", tier = "avance", cost = 0,
+    cats = {}, dmg_type = nil, target = "self",
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
+    desc = "Aucun effet. Épuisement.",
+    effect = function(ctx) end,
+  },
 }
 
 function Cards.by_code(code)

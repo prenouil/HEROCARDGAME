@@ -23,12 +23,31 @@ function Draft.pick_cards(state)
   -- classes fixes de toute run, ça ne tient plus puisque `Heroes.defs` est
   -- désormais le catalogue des 6 débloqués) : state.heroes reflète toujours
   -- l'équipe réellement choisie, jamais le catalogue complet.
+  -- `h.hp == nil or h.hp > 0` (2026-09-28, demande explicite -- pilier du
+  -- sacrifice, "les drafts ne doivent pas proposer de cartes d'aventurier
+  -- mort") : un héros mort ne rend plus sa classe éligible -- sans cette
+  -- garde, un run où un aventurier tombe pouvait continuer à proposer des
+  -- cartes toutes neuves de SA classe, injouables dès leur pioche puisque
+  -- personne ne reste pour les payer (`Combat.effective_cost`/
+  -- `owner_defeated`), et qui ne bénéficieront jamais de la conversion en
+  -- Écho (réservée aux cartes déjà possédées AU MOMENT de la mort, voir la
+  -- mécanique Écho -- une carte piochée APRÈS coup n'y a jamais droit).
+  -- `h.hp == nil` : les fixtures de spec/draft_spec.lua ne posent pas ce
+  -- champ (non pertinent pour ce qu'elles testent) -- jamais interprété comme
+  -- "mort" faute de valeur, seulement `hp <= 0` explicite l'exclut.
   local present_classes = {}
-  for _, h in ipairs(state.heroes) do present_classes[h.class_id] = true end
+  for _, h in ipairs(state.heroes) do
+    if h.hp == nil or h.hp > 0 then present_classes[h.class_id] = true end
+  end
 
+  -- `not def.not_draftable` (2026-09-28, pilier du sacrifice) : les cartes
+  -- Legs/Héritage/Écho ne sont JAMAIS proposées au draft -- elles n'existent
+  -- qu'en étant déposées directement dans la défausse à la mort d'un héros
+  -- (voir Game.process_hero_deaths) ou en convertissant ses cartes restantes.
+  -- La carte "Mise à mort" reste, elle, normalement draftable (pas de flag).
   local eligible = {}
   for _, def in ipairs(Cards.list) do
-    if present_classes[def.class_id] then
+    if present_classes[def.class_id] and not def.not_draftable then
       eligible[#eligible + 1] = def
     end
   end
@@ -43,6 +62,18 @@ function Draft.pick_cards(state)
 
   local function is_owned(def) return contains(owned_codes, def.code) end
 
+  -- Chance qu'UNE proposition soit sa version AMÉLIORÉE (2026-09-30, demande
+  -- explicite) : 0% au tout premier draft du run (aucun combat encore passé),
+  -- +10% par combat déjà passé, SANS plafond (au-delà de 100%, la carte
+  -- améliorée est simplement toujours tirée -- `rng:random() < chance` sature
+  -- naturellement). `combat_index` n'a pas encore avancé au moment du draft
+  -- (voir Controller:advance_to_next_combat, appelé APRÈS -- draft_picks est
+  -- déjà posé) : il désigne encore le combat qui vient d'être gagné, donc
+  -- `combat_index - 1` = les combats gagnés AVANT celui-ci, exactement ce qui
+  -- doit valoir 0 pour le tout premier draft.
+  local combats_passed = math.max(0, (state.run and state.run.combat_index or 1) - 1)
+  local upgrade_chance = 0.10 * combats_passed
+
   local used_codes = {}
   local picks = {}
   -- Au plus 1 carte "Départ" parmi les 3 propositions, quelles que soient les
@@ -51,6 +82,18 @@ function Draft.pick_cards(state)
   -- suivants -- avant même le filtre doublon/inédit ci-dessous, qui ne
   -- s'applique donc plus qu'au sous-ensemble restant.
   local depart_picked = false
+  -- Cartes AMÉLIORÉES déjà tirées dans CE draft (2026-09-30, demande explicite
+  -- -- "-100% s'il y a déjà une carte améliorée dans le draft") : "-100%",
+  -- littéralement -- une VRAIE soustraction de 100 points de pourcentage à la
+  -- chance de base, PAS un plafond figé à 1 seule par draft. Avec beaucoup de
+  -- combats passés (chance de base > 100%), la chance du slot suivant reste
+  -- donc positive après une 1ʳᵉ soustraction -- "il peut donc y avoir
+  -- plusieurs cartes améliorées... s'il y a plus de 10 ou même 20 combats"
+  -- (confirmé explicitement) : 2 garanties à 20 combats passés (200% - 100% =
+  -- 100% restant pour le 2ᵉ slot), 3 à 30. N'affecte jamais le POOL lui-même
+  -- (contrairement à Départ) : un slot suivant reste libre de proposer la
+  -- MÊME carte en version de base.
+  local upgrades_picked = 0
 
   for _, chance in ipairs(Draft.DUP_CHANCES) do
     local function depart_ok(d) return not (depart_picked and d.tier == "depart") end
@@ -89,6 +132,19 @@ function Draft.pick_cards(state)
       chosen = dup_pool[rng:random(#dup_pool)]
     else
       chosen = pool[rng:random(#pool)]
+    end
+    -- Carte améliorée (2026-09-30, demande explicite) : chance de CE slot =
+    -- chance de base MOINS 100 points de pourcentage par carte améliorée déjà
+    -- tirée plus tôt dans CE MÊME draft (voir upgrades_picked ci-dessus) --
+    -- jamais tentée sur une carte non améliorable (`chosen.upgrade` absent --
+    -- ex. les cartes du pilier du sacrifice, voir cards.lua) : `Cards.
+    -- upgraded_def` planterait sinon (assert). Préserve `code` (voir son
+    -- commentaire) : la règle "jamais 2 fois le même code parmi les 3"
+    -- ci-dessus reste valable inchangée sur `used_codes` juste en dessous.
+    local this_slot_chance = upgrade_chance - upgrades_picked * 1.0
+    if chosen.upgrade and this_slot_chance > 0 and rng:random() < this_slot_chance then
+      chosen = Cards.upgraded_def(chosen)
+      upgrades_picked = upgrades_picked + 1
     end
     picks[#picks + 1] = chosen
     used_codes[chosen.code] = true

@@ -82,6 +82,26 @@ describe("Combat.can_play", function()
   end)
 end)
 
+describe("Combat.effective_owner (2026-09-28, pilier du sacrifice)", function()
+  it("héros de cette classe vivant : c'est lui, comme avant", function()
+    local guerrier = { id = "guerrier", class_id = "guerrier", hp = 10 }
+    local state = make_state({}, { guerrier })
+    assert.are.equal(guerrier, Combat.effective_owner(state, "guerrier"))
+  end)
+
+  it("héros de cette classe mort : retombe sur le premier héros vivant de l'équipe (carte Legs/Héritage/Écho posthume)", function()
+    local guerrier = { id = "guerrier", class_id = "guerrier", hp = 0 }
+    local mage = { id = "mage", class_id = "mage", hp = 10 }
+    local state = make_state({}, { guerrier, mage })
+    assert.are.equal(mage, Combat.effective_owner(state, "guerrier"))
+  end)
+
+  it("aucune classe correspondante : nil, comme Combat.hero_by_id", function()
+    local state = make_state({}, {})
+    assert.is_nil(Combat.effective_owner(state, "guerrier"))
+  end)
+end)
+
 describe("Combat.damage_multiplier", function()
   it("1 (neutre) sans aucun statut", function()
     assert.are.equal(1, Combat.damage_multiplier(nil, nil, "physique", false))

@@ -451,8 +451,38 @@ end
 -- mana. Les héros hors Mage ont `mana == nil`, donc `(hero.mana or 0)` vaut 0
 -- et toute carte avec un mana_cost > 0 leur est automatiquement inaccessible,
 -- sans case spéciale par classe ici.
+--- Le héros qui "possède" une carte de cette classe pour toute vérification
+-- de jouabilité -- normalement le héros de CETTE classe, sauf pour les
+-- cartes posthumes du pilier du sacrifice (2026-09-28 -- Legs/Héritage/Écho,
+-- générées après la mort du héros de leur classe, voir Game.process_hero_deaths) :
+-- leur "propriétaire" naturel (même class_id) est justement celui qui vient
+-- de mourir -- jamais rejouable si on s'arrêtait là (Combat.can_play refuse
+-- tout héros à hp <= 0). Retombe alors sur le premier héros VIVANT de
+-- l'équipe, qui peut les invoquer au nom du groupe (elles coûtent 0 de toute
+-- façon, aucune ressource propre à un héros précis n'entre en jeu).
+-- `allow_dead` (2026-09-28, demande explicite -- "j'aimerais que les cartes
+-- Echo soient jouées par l'aventurier propriétaire mort... l'esprit du
+-- défunt revient donner un petit boost à son équipe. C'est le SEUL cas [...]
+-- d'une carte jouée par un mort") : passer `def.owner_can_be_dead` ici
+-- garde le défunt lui-même comme propriétaire au lieu de retomber sur un
+-- vivant -- Combat.can_play/Game.assign_hero doivent alors, eux aussi,
+-- laisser passer ce héros précis malgré `hp <= 0` (voir leurs commentaires).
+-- Seule source de vérité -- utilisée à la fois par Game.select_card
+-- (jouabilité réelle) et draw_hand/view (aperçu visuel, `owner_defeated`) :
+-- ne doivent jamais diverger.
+function Combat.effective_owner(state, class_id, allow_dead)
+  local owner = Combat.hero_by_id(state, class_id)
+  if owner and owner.hp <= 0 and not allow_dead then
+    return Combat.living_heroes(state)[1]
+  end
+  return owner
+end
+
 function Combat.can_play(state, hero, pending)
-  if not pending or hero.hp <= 0 then return false end
+  -- `pending.def.owner_can_be_dead` (2026-09-28, carte Écho -- voir
+  -- Combat.effective_owner) : seule exception au refus systématique d'un
+  -- héros mort, "l'esprit du défunt" qui revient jouer sa propre carte.
+  if not pending or (hero.hp <= 0 and not (pending.def and pending.def.owner_can_be_dead)) then return false end
   if state.energy < Combat.effective_cost(hero, pending.def) then return false end
   if pending.def.mana_cost and (hero.mana or 0) < pending.def.mana_cost then return false end
   if pending.def.requires_camouflage and (hero.camoufle or 0) <= 0 then return false end

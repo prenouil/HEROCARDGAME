@@ -138,6 +138,108 @@ describe("Game.finish_card", function()
     assert.are.equal(0, state.discard[1].def.cost)
     assert.are.equal(1, canonical.cost) -- le def partagé dans Cards.list reste intact
   end)
+
+  it("def.epuisement : ne rejoint NI la défausse NI state.exhausted (2026-09-28, pilier du sacrifice)", function()
+    local def = { code = "x", epuisement = true }
+    local state = make_card_state(def)
+    Game.finish_card(state, { uid = "u1" }, { card_def = def })
+    assert.are.equal(0, #state.discard)
+    assert.are.equal(0, #state.exhausted)
+    assert.are.equal(0, #state.hand)
+    assert.are.equal(0, #state.deck)
+  end)
+end)
+
+describe("Game.kill_hero (2026-09-28, pilier du sacrifice -- carte 'Mise à mort')", function()
+  it("tue inconditionnellement, jamais via Combat.deal_damage (Bouclier/multiplicateurs ignorés)", function()
+    local hero = { hp = 20, defense = 50, name = "Guerrier" }
+    local state = make_state({ hero })
+    Game.kill_hero(state, hero, true)
+    assert.are.equal(0, hero.hp)
+    assert.are.equal(50, hero.defense) -- jamais absorbé, contrairement à Combat.deal_damage
+  end)
+
+  it("voluntary = true pose hero.died_voluntarily (lu par Game.process_hero_deaths)", function()
+    local hero = { hp = 20, name = "Paladin" }
+    local state = make_state({ hero })
+    Game.kill_hero(state, hero, true)
+    assert.is_true(hero.died_voluntarily)
+  end)
+
+  it("voluntary = false (mort infligée à un autre) ne pose jamais died_voluntarily", function()
+    local hero = { hp = 20, name = "Assassin" }
+    local state = make_state({ hero })
+    Game.kill_hero(state, hero, false)
+    assert.is_nil(hero.died_voluntarily)
+  end)
+
+  it("no-op sur un héros déjà mort -- n'écrase jamais died_voluntarily déjà posé", function()
+    local hero = { hp = 0, name = "Guerrier", died_voluntarily = true }
+    local state = make_state({ hero })
+    Game.kill_hero(state, hero, false)
+    assert.is_true(hero.died_voluntarily) -- inchangé, pas écrasé par ce 2e appel
+  end)
+end)
+
+describe("Game.process_hero_deaths (2026-09-28, pilier du sacrifice)", function()
+  it("mort SUBIE : dépose un Legs de sa classe en défausse", function()
+    local hero = { hp = 0, class_id = "guerrier", name = "Guerrier" }
+    local state = make_state({ hero })
+    state.uid_counter = 0
+    Game.process_hero_deaths(state)
+    assert.are.equal(1, #state.discard)
+    assert.are.equal("legs-guerrier", state.discard[1].def.code)
+    assert.is_true(hero.death_processed)
+  end)
+
+  it("mort VOLONTAIRE (died_voluntarily) : dépose un Héritage, pas un Legs", function()
+    local hero = { hp = 0, class_id = "paladin", name = "Paladin", died_voluntarily = true }
+    local state = make_state({ hero })
+    state.uid_counter = 0
+    Game.process_hero_deaths(state)
+    assert.are.equal("heritage-paladin", state.discard[1].def.code)
+  end)
+
+  it("idempotent : un héros déjà traité ne dépose jamais un 2e Legs/Héritage", function()
+    local hero = { hp = 0, class_id = "guerrier", name = "Guerrier" }
+    local state = make_state({ hero })
+    state.uid_counter = 0
+    Game.process_hero_deaths(state)
+    Game.process_hero_deaths(state)
+    assert.are.equal(1, #state.discard)
+  end)
+
+  it("convertit les cartes restantes du défunt en Écho -- amélioré si la carte d'origine l'était, de base sinon", function()
+    local hero = { hp = 0, class_id = "guerrier", name = "Guerrier" }
+    local state = make_state({ hero })
+    state.uid_counter = 0
+    state.deck = { { uid = 1, def = { class_id = "guerrier", code = "coup-appuye" } } }
+    state.hand = { { uid = 2, def = { class_id = "guerrier", code = "coup-taille", is_upgraded = true } } }
+    -- Carte d'une AUTRE classe : jamais convertie, même héros mort ou pas.
+    state.discard = { { uid = 3, def = { class_id = "mage", code = "main-de-feu" } } }
+    Game.process_hero_deaths(state)
+    assert.are.equal("echo-guerrier", state.deck[1].def.code)
+    assert.are.equal("echo-guerrier-ameliore", state.hand[1].def.code)
+    assert.are.equal("main-de-feu", state.discard[1].def.code) -- inchangée, autre classe
+    assert.are.equal("legs-guerrier", state.discard[2].def.code) -- le Legs déposé, ajouté APRÈS
+  end)
+
+  it("remplit state.last_death_reveals (2026-09-28, séquence dramatique de mort -- indice pour la UI)", function()
+    local hero = { hp = 0, class_id = "guerrier", name = "Guerrier", died_voluntarily = true }
+    local state = make_state({ hero })
+    state.uid_counter = 0
+    state.hand = { { uid = 2, def = { class_id = "guerrier", code = "coup-taille" } } }
+    Game.process_hero_deaths(state)
+    assert.are.equal(1, #state.last_death_reveals)
+    local reveal = state.last_death_reveals[1]
+    assert.are.equal("guerrier", reveal.class_id)
+    assert.are.equal("heritage-guerrier", reveal.legs_or_heritage.def.code)
+    assert.is_true(reveal.legs_or_heritage.voluntary)
+    assert.are.equal(1, #reveal.converted)
+    assert.are.equal(2, reveal.converted[1].uid)
+    assert.are.equal("hand", reveal.converted[1].pile)
+    assert.are.equal("coup-taille", reveal.converted[1].from_def.code) -- def D'ORIGINE, pas le nouvel Écho
+  end)
 end)
 
 describe("Game.on_card_played", function()

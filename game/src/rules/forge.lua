@@ -28,7 +28,13 @@ function Forge.upgradable_instances(state, exclude_uid)
   local out = {}
   local function scan(pile)
     for _, c in ipairs(pile) do
-      if not c.def.is_upgraded and c.uid ~= exclude_uid then out[#out + 1] = c end
+      -- `not c.def.no_forge_upgrade` (2026-09-28, pilier du sacrifice) :
+      -- exclut les cartes Mise à mort/Legs/Héritage/Écho, qui n'ont pas de
+      -- champ `upgrade` -- sans ce filtre, `Cards.upgraded_def` plante
+      -- (`assert(def.upgrade, ...)`) si la Forge en tire une au hasard.
+      if not c.def.is_upgraded and not c.def.no_forge_upgrade and c.uid ~= exclude_uid then
+        out[#out + 1] = c
+      end
     end
   end
   scan(state.deck)

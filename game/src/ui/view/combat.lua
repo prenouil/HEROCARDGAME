@@ -360,6 +360,31 @@ return function(View, UI)
         Icons.draw_status("temple_curse", 14, 14, 8, Theme.bg)
       end
     end
+    -- Marqueur d'Héritage (2026-09-28, pilier du sacrifice -- "marqueur
+    -- visuel FORT pour comprendre qu'un aventurier possède l'Héritage de 1
+    -- ou plusieurs autres" -- demande explicite) : médaillon doré scintillant
+    -- en bas du portrait (seule zone encore libre -- haut pris par
+    -- bénédiction/malédiction, bas pris par la barre de PV/le nom), avec le
+    -- nombre d'Héritages reçus dedans -- jamais mélangé à la rangée de
+    -- badges de statuts partagée (draw_badge_row plus bas), volontairement à
+    -- part pour rester immédiatement visible. Pas d'icône dédiée pour
+    -- l'instant (repli texte, voir Icons.draw_status) -- le scintillement
+    -- (même idiome que la barre de PV dorée d'un ennemi Élite, voir
+    -- draw_enemy) suffit déjà à le distinguer d'un simple badge numérique.
+    if not dead and (h.heritage_count or 0) > 0 then
+      local pulse = 0.5 + 0.5 * math.sin(love.timer.getTime() * 4)
+      local cx, cy, radius = r.w / 2, 90, 12
+      UI.set(Theme.accent, 0.5 + 0.3 * pulse)
+      love.graphics.circle("fill", cx, cy, radius + 3 * pulse)
+      UI.set(Theme.accent)
+      love.graphics.circle("fill", cx, cy, radius)
+      UI.set(Theme.black); love.graphics.setLineWidth(2)
+      love.graphics.circle("line", cx, cy, radius)
+      love.graphics.setLineWidth(1)
+      UI.set(Theme.bg)
+      love.graphics.setFont(Fonts.get(13))
+      love.graphics.printf(tostring(h.heritage_count), cx - radius, cy - 7, radius * 2, "center")
+    end
     local name_y = r.h - 24
     draw_defense_badge_big(h, r, name_y - 24)
     -- Barre de PV épaissie, valeur DEDANS plutôt qu'en dessous (2026-08-27).
@@ -908,7 +933,12 @@ return function(View, UI)
     local rects = View.hand_rects(state)
     draw_energy_display(state)
     draw_energy_turn_anim(controller)
-    draw_pile(View.deck_pile_rect, "\u{1F0A0}", "PIOCHE", #state.deck)
+    -- `controller.deck_count_override`, pas #state.deck en direct (2026-09-30,
+    -- demande explicite -- "le nombre de cartes sur la pioche doit se mettre à
+    -- jour plus précisément") : voir Controller:consume_drawn_animation, seul
+    -- écrivain -- nil hors d'une pioche à cheval sur un remélange, auquel cas
+    -- #state.deck (déjà correct) reste la source normale.
+    draw_pile(View.deck_pile_rect, "\u{1F0A0}", "PIOCHE", controller.deck_count_override or #state.deck)
     draw_pile(View.discard_pile_rect, "\u{1F5D1}\u{FE0F}", "DEFAUSSE", #state.discard)
     -- "Voir le deck" (2026-08-30) : seulement en combat (screen == "playing") --
     -- pendant un évènement "camp", ce coin de l'écran est de toute façon
@@ -937,6 +967,24 @@ return function(View, UI)
     local function draw_one(c)
       local r = rects[c.uid]
       local def = c.def
+      -- Séquence dramatique de mort (2026-09-28, pilier du sacrifice --
+      -- "toutes les cartes de l'aventurier en main se tournent une par une
+      -- pour devenir Echo") : `c.def` a DÉJÀ été converti en Écho par les
+      -- règles au moment même de la mort (voir Game.process_hero_deaths) --
+      -- sans ce garde-fou, la carte montrerait son nouveau visage AVANT que
+      -- son tour de se retourner n'arrive. Tant que `elapsed < delay`, garde
+      -- l'apparence D'ORIGINE (`flip.from_def`) ; le retournement lui-même
+      -- (mi-parcours) est géré plus bas, juste avant CardUI.draw_card_face.
+      local flip = controller.death_reveal_flip[c.uid]
+      local flip_progress -- nil = pas de retournement en cours ce frame
+      if flip then
+        if flip.elapsed < flip.delay then
+          def = flip.from_def
+        elseif flip.elapsed < flip.delay + flip.duration then
+          flip_progress = (flip.elapsed - flip.delay) / flip.duration
+          if flip_progress < 0.5 then def = flip.from_def end
+        end
+      end
       local is_pending = state.pending and state.pending.uid == c.uid
       local pop = controller.hand_pop_amount[c.uid] or 0
       -- Aperçu de dégâts (voir preview_desc ci-dessus) : seulement sur LA
@@ -952,7 +1000,13 @@ return function(View, UI)
           previewing_hero = Combat.hero_by_id(state, controller.hover.target)
         end
       end
-      local owner = Combat.hero_by_id(state, def.class_id)
+      -- `Combat.effective_owner`, pas `Combat.hero_by_id` directement
+      -- (2026-09-28, pilier du sacrifice) : voir son commentaire dans
+      -- combat.lua (rules) -- sans ça, une carte Legs/Héritage/Écho
+      -- s'afficherait grisée "owner_defeated" alors que Game.select_card
+      -- l'accepte bel et bien (jouée au nom d'un autre héros vivant, ou --
+      -- Écho seulement, `def.owner_can_be_dead` -- par le défunt lui-même).
+      local owner = Combat.effective_owner(state, def.class_id, def.owner_can_be_dead)
       local desc_text, has_bonus = def.desc, false
       if previewing_hero then
         desc_text = preview_desc(def, previewing_hero, previewing_target)
@@ -976,8 +1030,10 @@ return function(View, UI)
       local cost_insufficient = state.energy < Combat.effective_cost(owner, def)
       local mana_insufficient = def.mana_cost and (not owner or (owner.mana or 0) < def.mana_cost)
       -- Voile gris (2026-08-24) : le propriétaire est vaincu, cette carte ne
-      -- redeviendra jouable à aucun prix ce combat-ci.
-      local owner_defeated = not owner or owner.hp <= 0
+      -- redeviendra jouable à aucun prix ce combat-ci. `def.owner_can_be_dead`
+      -- (2026-09-28, Écho) : exception -- ce voile ne doit PAS s'afficher pour
+      -- une carte que son propriétaire mort peut justement encore jouer.
+      local owner_defeated = not owner or (owner.hp <= 0 and not def.owner_can_be_dead)
       -- Grossies (2026-08-27) puis réaugmenté (2026-09-12, 5ᵉ demande
       -- explicite) : survol 1.18->1.35, sélection 1.28->1.55. `pop` (0..1)
       -- interpole en continu vers cette cible plutôt que d'y sauter.
@@ -998,6 +1054,14 @@ return function(View, UI)
       -- Theme.accent sur le contour extérieur, jamais mélangée à la couleur de
       -- classe. Pas de vert "bonus" sur le nom (collision avec l'Assassin,
       -- déjà vert) -- le vert reste porté par la description.
+      if flip_progress then
+        -- Retournement (2026-09-28) : même mécanique que le flip du draft
+        -- (UI.flip_scale_x) -- écrase horizontalement autour du CENTRE
+        -- local de la carte, jamais un miroir (flip_scale_x reste positif).
+        love.graphics.translate(r.w / 2, 0)
+        love.graphics.scale(UI.flip_scale_x(flip.elapsed - flip.delay, flip.duration), 1)
+        love.graphics.translate(-r.w / 2, 0)
+      end
       CardUI.draw_card_face(def, r.w, r.h, cost_text, desc_text, has_bonus and Theme.heal or Theme.muted, is_pending, cost_insufficient, mana_insufficient, owner_defeated)
       love.graphics.pop()
     end
@@ -1183,6 +1247,86 @@ return function(View, UI)
     love.graphics.setLineWidth(1)
   end
   View.draw_card_flights = draw_card_flights
+
+  --- Assombrit le reste de l'écran + pose une lueur derrière la carte
+  -- Legs/Héritage pendant son apparition/tenue/envol (2026-09-30, demande
+  -- explicite -- "la carte de legs/héritage ne se voit pas assez") : voile
+  -- noir semi-transparent PAR-DESSUS toute la scène de combat, puis quelques
+  -- cercles dorés concentriques centrés sur la carte (même idiome que le halo
+  -- du menu principal, draw_menu_flourish) -- appelée AVANT draw_card_flights
+  -- pour que la carte elle-même se dessine PAR-DESSUS cette lueur, pas dessous.
+  local function draw_death_reveal_spotlight(controller)
+    local s = controller.death_reveal_spotlight
+    if not s then return end
+    UI.set(Theme.black, 0.55)
+    love.graphics.rectangle("fill", 0, 0, UI.W, UI.H)
+    for i = 4, 1, -1 do
+      UI.set(Theme.accent, 0.06 * i)
+      love.graphics.circle("fill", s.cx, s.cy, 90 + i * 30)
+    end
+  end
+
+  --- Cartes de pioche/défausse en train de se retourner en Écho, pendant la
+  -- séquence dramatique de mort (2026-09-28, pilier du sacrifice) : rendu à
+  -- part de draw_hand (ce ne sont pas des cartes de la main) -- simple face
+  -- de carte statique à la position de mise en scène posée par Controller:
+  -- start_death_reveal (`controller.death_reveal_flip`, clés préfixées
+  -- "death-reveal-pile-"), avec le même retournement horizontal que draw_one.
+  -- N'affiche RIEN pour les autres entrées de death_reveal_flip (les cartes de
+  -- main, déjà gérées dans draw_one/draw_hand) ni tant que `elapsed < delay`
+  -- (le vol d'arrivée depuis la pile, voir draw_card_flights, les couvre déjà).
+  local function draw_death_reveal_pile_flips(controller)
+    for key, flip in pairs(controller.death_reveal_flip) do
+      if type(key) == "string" and key:sub(1, 17) == "death-reveal-pile"
+        and flip.elapsed >= flip.delay and flip.elapsed < flip.delay + flip.duration then
+        local p = (flip.elapsed - flip.delay) / flip.duration
+        local def = p < 0.5 and flip.from_def or flip.to_def
+        love.graphics.push()
+        love.graphics.translate(flip.x + flip.w / 2, flip.y + flip.h / 2)
+        love.graphics.scale(UI.flip_scale_x(flip.elapsed - flip.delay, flip.duration), 1)
+        love.graphics.translate(-flip.w / 2, -flip.h / 2)
+        CardUI.draw_card_face(def, flip.w, flip.h, tostring(def.cost), def.desc, Theme.muted, false)
+        love.graphics.pop()
+      end
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+  end
+  View.draw_death_reveal_pile_flips = draw_death_reveal_pile_flips
+
+  --- Bandeau "Go !!!" qui traverse l'écran de DROITE à GAUCHE (2026-09-30,
+  -- demande explicite -- texte et sens de circulation corrigés après premier
+  -- essai) au moment où la main est rendue au joueur -- "un gros
+  -- ralentissement au niveau du centre de l'écran avant de re accélérer" :
+  -- easeOutQuad sur la 1ʳᵉ moitié du trajet (décélère EN approchant le
+  -- centre), easeInQuad sur la 2ᵉ (réaccélère EN le quittant) -- pas une
+  -- seule courbe continue, deux moitiés bien distinctes pour que le
+  -- ralentissement soit franchement perceptible pile au centre.
+  local GO_BANNER_TEXT_W = 280
+  local function draw_go_banner(controller)
+    local banner = controller.go_banner
+    if not banner then return end
+    local p = math.min(1, banner.elapsed / banner.duration)
+    local pos -- 0..1 le long du trajet total (hors-écran DROITE -> hors-écran GAUCHE)
+    if p < 0.5 then
+      local q = p * 2
+      pos = 0.5 * (1 - (1 - q) * (1 - q)) -- easeOutQuad : ralentit EN ARRIVANT au centre
+    else
+      local q = (p - 0.5) * 2
+      pos = 0.5 + 0.5 * (q * q) -- easeInQuad : réaccélère EN QUITTANT le centre
+    end
+    local travel = UI.W + GO_BANNER_TEXT_W * 2
+    -- Droite -> gauche : position de départ (pos=0) tout à droite hors-écran,
+    -- d'arrivée (pos=1) tout à gauche hors-écran -- simple inversion du sens
+    -- de parcours par rapport à la 1ʳᵉ version (gauche -> droite).
+    local x = (UI.W + GO_BANNER_TEXT_W) - travel * pos
+    love.graphics.setFont(Fonts.get(48))
+    UI.set(Theme.black, 0.6)
+    love.graphics.printf("Go !!!", x + 3, UI.H / 2 - 21, GO_BANNER_TEXT_W, "center")
+    UI.set(Theme.accent, 1)
+    love.graphics.printf("Go !!!", x, UI.H / 2 - 24, GO_BANNER_TEXT_W, "center")
+    love.graphics.setColor(1, 1, 1, 1)
+  end
+  View.draw_go_banner = draw_go_banner
 
   local FLOATER_RISE = 34
   -- "discretion" (2026-08-28) : même famille visuelle que "heal", juste une
@@ -1533,7 +1677,12 @@ return function(View, UI)
     -- jamais atteints ici.
 
     draw_targeting_arrow(controller)
+    -- Assombrissement + lueur AVANT draw_card_flights (2026-09-30) : la carte
+    -- Legs/Héritage (dessinée par draw_card_flights) doit apparaître PAR-DESSUS
+    -- ce voile, pas dessous.
+    draw_death_reveal_spotlight(controller)
     draw_card_flights(controller)
+    draw_death_reveal_pile_flips(controller)
     View.draw_coin_flights(controller)
     View.draw_gold_purse_overlay(controller)
     draw_particles(controller)
@@ -1544,6 +1693,10 @@ return function(View, UI)
 
     View.draw_deck_view(controller)
     View.draw_pause_menu(controller)
+    -- "GO" tout en dernier (2026-09-30) : par-dessus absolument tout, même le
+    -- menu pause/la fenêtre "voir le deck" -- c'est un signal ponctuel qui
+    -- traverse l'écran, jamais masqué par un autre calque.
+    draw_go_banner(controller)
 
     love.graphics.setColor(1, 1, 1, 1)
   end

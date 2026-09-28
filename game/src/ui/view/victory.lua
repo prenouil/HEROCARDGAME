@@ -9,8 +9,7 @@ local Theme = require("src.ui.theme")
 local Background = require("src.ui.background")
 local Fonts = require("src.ui.fonts")
 local Sprites = require("src.ui.sprites")
-local RichText = require("src.ui.richtext")
-local Heroes = require("src.data.heroes")
+local CardUI = require("src.ui.view.cards")
 
 return function(View, UI)
   local function combats_won_text(controller)
@@ -44,41 +43,23 @@ return function(View, UI)
   -- de l'écran de victoire, réutilisé par `.fading` (cartes non choisies,
   -- "disparaissent doucement") ET `.flight` (carte choisie, "rejoint la
   -- pioche dans un mouvement ample").
+  -- `front` délègue désormais à CardUI.draw_card_face (2026-09-28, bug
+  -- signalé -- "dans la fenêtre de draft, il y a l'ancien format de carte,
+  -- sans l'image") : avant, ce bloc maintenait son propre rendu de carte
+  -- (cartouche nom en haut, pas d'illustration), tombé en désynchro le
+  -- 2026-09-12 quand draw_card_face a été retravaillée pour mettre
+  -- l'illustration au premier plan -- une SEULE façon de dessiner une carte
+  -- dans tout le jeu désormais, jamais un second rendu qui pourrait diverger
+  -- à nouveau. `W, H = UI.CARD_W, UI.CARD_H` (au lieu de 130x190 propres à ce
+  -- fichier) : même gabarit que partout ailleurs (main, pioche/défausse,
+  -- deck-builder) -- draw_card_face suppose ce ratio pour son agencement interne.
   local DraftFx
   do
-    local W, H = 130, 190
+    local W, H = UI.CARD_W, UI.CARD_H
     local fade_canvas
 
     local function front(def)
-      local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
-      UI.panel(0, 0, W, H, palette.bg)
-      UI.set(def.tier == "avance" and Theme.accent or Theme.black)
-      love.graphics.setLineWidth(def.tier == "avance" and 3 or 2)
-      love.graphics.rectangle("line", 0, 0, W, H, 10, 10)
-      UI.set(palette.border)
-      love.graphics.setLineWidth(1)
-      love.graphics.rectangle("line", 3, 3, W - 6, H - 6, 8, 8)
-      love.graphics.setLineWidth(1)
-      UI.set(Theme.energy); love.graphics.circle("fill", 16, 14, 10)
-      UI.set(Theme.bg); love.graphics.setFont(Fonts.get(12)); love.graphics.printf(tostring(def.cost), 6, 7, 20, "center")
-      if def.mana_cost then
-        UI.set(Theme.mana); love.graphics.circle("fill", 38, 14, 9)
-        UI.set(Theme.bg); love.graphics.setFont(Fonts.get(11))
-        love.graphics.printf(tostring(def.mana_cost), 30, 9, 16, "center")
-      end
-      if def.corruption_cost_cap then
-        UI.set(Theme.corruption); love.graphics.ellipse("fill", 46, 14, 20, 10)
-        UI.set(Theme.bg); love.graphics.setFont(Fonts.get(10))
-        love.graphics.printf("X(0-" .. def.corruption_cost_cap .. ")", 26, 9, 40, "center")
-      end
-      UI.name_badge(def.name, 4, 26, W - 8, 16, palette.border, Theme.bg, 2, 2)
-      RichText.draw(def.desc, 4, 50, W - 8, 11, Theme.muted)
-      local hero_name = Heroes.class_name[def.class_id]
-      if hero_name then
-        UI.set(Theme.black, 0.55)
-        love.graphics.rectangle("fill", 0, H - 20, W, 16)
-        UI.text(hero_name, 0, H - 18, W, 12, palette.border, "center")
-      end
+      CardUI.draw_card_face(def, W, H, tostring(def.cost), def.desc, Theme.muted, def.tier == "avance")
     end
 
     -- Fondu d'une carte NON choisie (2026-09-02, demande explicite) : rendue

@@ -66,6 +66,12 @@ local DRAW_FLIGHT_DURATION = 0.5 -- s -- vol de pioche, plus lent que FLIGHT_DUR
 -- comme un simple "pop" plutôt qu'un vol -- voir Controller:animate_draw,
 -- seul point qui choisit entre les deux constantes.
 local DRAW_FLIGHT_SINGLE_DURATION = 0.85 -- s -- vol plus long, MÊME courbe (ease_out_back), pour rester bien visible tout seul
+-- Petite pause où la pioche affiche "0" bien visible avant que le remélange
+-- ne commence (2026-09-30, demande explicite -- "le nombre de cartes sur la
+-- pioche doit se mettre à jour plus précisément" -- voir Controller:
+-- consume_drawn_animation/self.deck_count_override) : sans elle, la transition
+-- 0 -> plein compte serait instantanée (même frame), donc jamais perçue.
+local DECK_COUNT_ZERO_HOLD = 0.3
 -- Descente des ennemis à l'entrée en combat (2026-08-30, demande explicite --
 -- voir Controller:play_enemy_entrance_sequence).
 local ENEMY_ENTRANCE_DURATION = 0.55 -- s -- chute d'1 ennemi depuis le haut de l'écran jusqu'à sa position
@@ -277,6 +283,39 @@ local ENEMY_SHATTER_SIZE = 72
 -- doucement pour atteindre l'état actuel", + un son grave dédié) : durée du
 -- fondu, voir self.hero_death_fade/draw_hero (view.lua).
 local HERO_DEATH_FADE_DURATION = 1.2
+
+-- Bandeau "GO" (2026-09-30, demande explicite -- "au début de CHAQUE round de
+-- combat... chaque fois que le joueur récupère la main", pas seulement après
+-- une séquence de mort -- correction explicite du 1er jet, qui ne le posait
+-- qu'à la fin de Controller:start_death_reveal) : posé par
+-- Controller:play_hero_ready_hops, dernier beat de CHAQUE début de tour
+-- (voir Controller:play_turn_start_sequence) -- qu'un aventurier soit mort ce
+-- tour-ci ou non. Si une mort survient PENDANT le tour de l'ennemi, sa
+-- séquence dramatique (Controller:start_death_reveal) ne pose donc plus "GO"
+-- elle-même : le joueur ne récupère la main qu'à la toute fin du tour
+-- (saignements -> actions ennemies -> décroissance -> tour suivant), jamais
+-- au milieu d'une résolution encore en cours.
+local GO_BANNER_DURATION = 1.1
+
+-- Séquence dramatique de mort (2026-09-28, pilier du sacrifice, demande
+-- explicite -- voir Controller:start_death_reveal, seul lecteur) : 3 temps
+-- après le fondu normal ci-dessus -- la carte Legs/Héritage qui apparaît
+-- (zoom + fondu) puis s'envole LENTEMENT vers la défausse ; les cartes encore
+-- en main qui se retournent une par une en Écho ; les cartes encore en
+-- pioche/défausse qui sortent, se retournent, puis reviennent.
+-- 180x270 -> 220x330 (2026-09-30, demande explicite -- "la carte de
+-- legs/héritage ne se voit pas assez") : encore agrandie, en plus de
+-- l'assombrissement du reste de l'écran (voir death_reveal_spotlight).
+local DEATH_REVEAL_CARD_W, DEATH_REVEAL_CARD_H = 220, 330 -- format "zoomé", plus grand qu'une carte normale
+local DEATH_REVEAL_APPEAR_DURATION = 0.5
+local DEATH_REVEAL_HOLD_DURATION = 0.6
+local DEATH_REVEAL_TRAVEL_DURATION = 1.4 -- "LENTEMENT", demande explicite -- nettement plus long qu'un vol de carte normal
+local DEATH_REVEAL_FLIP_STAGGER = 0.35 -- "une par une" -- délai entre 2 retournements consécutifs
+local DEATH_REVEAL_FLIP_DURATION = 0.5
+local DEATH_REVEAL_PILE_OUT_DURATION = 0.45
+local DEATH_REVEAL_PILE_HOLD_DURATION = 0.35
+local DEATH_REVEAL_PILE_BACK_DURATION = 0.45
+local DEATH_REVEAL_PILE_STAGGER = 0.3
 
 -- Transition d'entrée des écrans "camp" (2026-08-30, demande explicite --
 -- voir self.camp_entrance) : le titre descend pendant CAMP_ENTRANCE_TITLE_
@@ -510,6 +549,34 @@ function Controller.new()
   -- et draw_hero dans view.lua, seul lecteur, qui INTERPOLE ses alphas plutôt
   -- que de basculer instantanément sur "mort" comme avant ce correctif).
   self.hero_death_fade = {}
+  -- [key] = { from_def, x, y, w, h, elapsed, delay, duration } (2026-09-28,
+  -- séquence dramatique de mort, pilier du sacrifice -- demande explicite :
+  -- "toutes les cartes de l'aventurier ... se tournent une par une pour
+  -- devenir Écho") : une entrée par carte en train de se retourner -- toutes
+  -- créées d'un coup par Controller:start_death_reveal, chacune avec son
+  -- propre `delay` (jamais de chaînage de self.seq pour le "une par une",
+  -- juste des délais différents). `key` = l'uid réel pour une carte de main
+  -- (rendue à sa VRAIE place par draw_hand, voir hand_rects), ou une clé
+  -- synthétique pour une carte de pioche/défausse (position de mise en scène
+  -- choisie par Controller:start_death_reveal). `from_def` (avant) affiché
+  -- sur la 1ʳᵉ moitié du retournement (UI.flip_scale_x), le `def` ACTUEL de
+  -- la carte (déjà l'Écho réel dans state.*) sur la 2ᵉ. Purement visuel --
+  -- jamais lue par les règles ; purgée automatiquement (voir Controller:update)
+  -- une fois `elapsed >= delay + duration`.
+  self.death_reveal_flip = {}
+  -- nil, ou { elapsed, duration, cx, cy } (2026-09-30, demande explicite --
+  -- "la carte de legs/héritage ne se voit pas assez") : couvre exactement la
+  -- durée de la phase 1 de Controller:start_death_reveal (apparition + tenue
+  -- + envol) -- pendant cette fenêtre, draw_death_reveal_spotlight (combat.lua)
+  -- assombrit le reste de l'écran et pose une lueur derrière la carte, pour
+  -- qu'elle se détache vraiment au lieu de se fondre dans le décor de combat.
+  self.death_reveal_spotlight = nil
+  -- nil, ou { elapsed, duration } (2026-09-30, demande explicite -- "un
+  -- marqueur pour dire que l'on rend la main au joueur : 'GO'... avec un
+  -- gros ralentissement au niveau du centre... avant de réaccélérer") : posé
+  -- par Controller:start_death_reveal au moment EXACT où hand_locked repasse
+  -- à false -- voir draw_go_banner (combat.lua), seul lecteur.
+  self.go_banner = nil
   -- { t = elapsed } (2026-08-30, demande explicite -- transition d'entrée
   -- des 4 écrans "camp", voir Controller:enter_post_combat_sequence, seul
   -- écrivain) : titre qui descend depuis le haut de l'écran, puis le reste
@@ -582,6 +649,12 @@ function Controller.new()
   -- Controller:select_card -- le survol/la sélection d'une cible en attente
   -- restent inchangés, seul le CHOIX D'UNE NOUVELLE carte est bloqué.
   self.hand_locked = false
+  -- nil, ou un entier (2026-09-30, demande explicite -- "le nombre de cartes
+  -- sur la pioche doit se mettre à jour plus précisément") : prime sur
+  -- #state.deck dans draw_pile (view.lua) le temps d'une pioche à cheval sur
+  -- un remélange défausse -> pioche -- voir Controller:consume_drawn_animation,
+  -- seul écrivain, qui le repose à nil une fois la séquence terminée.
+  self.deck_count_override = nil
   -- Retour visuel/sonore de "Fin de tour" AVANT la vraie défausse (2026-09-12,
   -- demande explicite) : nil tant qu'aucun clic n'est en cours ; sinon compte
   -- de 0 à end_turn_feedback_duration (voir Controller:update/end_turn) --
@@ -1513,6 +1586,152 @@ function Controller:animate_reshuffle()
   return RESHUFFLE_TOTAL_DURATION
 end
 
+--- Séquence dramatique de mort (2026-09-28, pilier du sacrifice, demande
+-- explicite -- voir Controller:update/h.death_reveal_shown pour le
+-- déclenchement, HERO_DEATH_FADE_DURATION après le début du fondu normal).
+-- Consomme l'indice posé par Game.process_hero_deaths (state.last_death_reveals,
+-- voir son commentaire dans game.lua) puis anime, dans l'ordre : (1) la carte
+-- Legs/Héritage qui apparaît en zoom + fondu, immobile, puis s'envole
+-- LENTEMENT vers la défausse (2 entrées card_anims chaînées par leurs
+-- `delay`, jamais de self.seq) ; (2) les cartes encore en main qui se
+-- retournent une par une en Écho (death_reveal_flip, une entrée par carte,
+-- délais échelonnés) ; (3) les cartes encore en pioche/défausse qui sortent
+-- (card_anims), se retournent sur place (death_reveal_flip), puis reviennent
+-- (2ᵉ card_anims). Tous les délais sont calculés à l'avance en une seule
+-- passe -- AUCUN chaînage de self.seq n'est nécessaire pour le déroulé
+-- lui-même (les entrées portent chacune leur propre `delay`/`elapsed`,
+-- exactement comme animate_draw ci-dessus) ; self.seq ne sert qu'à rendre la
+-- main UNE FOIS la durée totale connue écoulée.
+function Controller:start_death_reveal(hero_id)
+  if self.screen ~= "playing" then return end -- combat déjà quitté entre-temps (défaite...)
+  local reveals = self.state.last_death_reveals
+  local idx
+  for i, r in ipairs(reveals) do if r.hero_id == hero_id then idx = i break end end
+  if not idx then return end -- rien à montrer (Game.process_hero_deaths pas encore passé -- ne devrait pas arriver)
+  local reveal = table.remove(reveals, idx)
+
+  -- `was_already_locked` (2026-09-30, demande explicite -- "il faut tout
+  -- bloquer tant que le go n'a pas fini son passage") : une mort peut survenir
+  -- EN PLEIN tour de l'ennemi, pendant que `hand_locked` est déjà vrai depuis
+  -- Controller:end_turn/play_turn_start_sequence (verrou qui doit tenir
+  -- jusqu'au bandeau "Go !!!" final, voir play_hero_ready_hops) -- si cette
+  -- séquence de révélation le relâchait quand même à SA propre fin (plus bas),
+  -- le joueur regagnerait la main en plein milieu de la résolution ennemie/
+  -- pioche, avant le "Go !!!". Ne relâche donc QUE le verrou qu'elle a
+  -- elle-même posé.
+  local was_already_locked = self.hand_locked
+  self.hand_locked = true
+  local t = 0 -- curseur de temps total, avance au fil des 3 temps
+
+  -- 1. Legs/Héritage : apparition (zoom + fondu, immobile) PUIS envol lent
+  -- vers la défausse -- 2 entrées card_anims consécutives (`from == to` sur
+  -- la 1ʳᵉ = aucun déplacement, juste fondu/échelle via ease_out_back).
+  if reveal.legs_or_heritage then
+    local big = {
+      x = View.W / 2 - DEATH_REVEAL_CARD_W / 2, y = View.H / 2 - DEATH_REVEAL_CARD_H / 2,
+      w = DEATH_REVEAL_CARD_W, h = DEATH_REVEAL_CARD_H,
+    }
+    -- Assombrit le reste de l'écran + pose une lueur derrière la carte
+    -- (2026-09-30, "ne se voit pas assez") : couvre l'apparition + la tenue +
+    -- l'envol (la carte reste lisible même petite près de la défausse, sur un
+    -- fond plus sombre que la scène de combat).
+    self.death_reveal_spotlight = {
+      elapsed = 0, duration = DEATH_REVEAL_APPEAR_DURATION + DEATH_REVEAL_HOLD_DURATION + DEATH_REVEAL_TRAVEL_DURATION,
+      cx = big.x + big.w / 2, cy = big.y + big.h / 2,
+    }
+    self.card_anims[#self.card_anims + 1] = {
+      from = big, to = big, elapsed = 0, delay = t,
+      duration = DEATH_REVEAL_APPEAR_DURATION, fade_in = true, def = reveal.legs_or_heritage.def,
+    }
+    t = t + DEATH_REVEAL_APPEAR_DURATION + DEATH_REVEAL_HOLD_DURATION
+    self.card_anims[#self.card_anims + 1] = {
+      from = big, to = View.discard_pile_rect, elapsed = 0, delay = t,
+      duration = DEATH_REVEAL_TRAVEL_DURATION, fade_in = false, def = reveal.legs_or_heritage.def,
+    }
+    t = t + DEATH_REVEAL_TRAVEL_DURATION
+    self:schedule_sfx("flup", t - DEATH_REVEAL_TRAVEL_DURATION * 0.15)
+  end
+
+  -- Def d'arrivée (2026-09-28) : le même calcul pour toute carte convertie,
+  -- qu'elle soit en main ou en pioche/défausse -- déjà le def RÉEL de la
+  -- carte dans state.* (Game.process_hero_deaths l'a posé d'un coup), retrouvé
+  -- ici via son code plutôt que relu sur l'instance (les cartes de pioche/
+  -- défausse ne sont pas indexées par uid aussi facilement que la main).
+  local Cards = require("src.data.cards")
+  local function echo_def_for(from_def)
+    return Cards.by_code("echo-" .. reveal.class_id .. (from_def.is_upgraded and "-ameliore" or ""))
+  end
+
+  -- 2. Cartes encore en main : se retournent une par une (demande explicite).
+  local hand_rects = View.hand_rects(self.state)
+  for _, c in ipairs(reveal.converted) do
+    if c.pile == "hand" then
+      local r = hand_rects[c.uid]
+      if r then
+        self.death_reveal_flip[c.uid] = {
+          from_def = c.from_def, to_def = echo_def_for(c.from_def), x = r.x, y = r.y, w = r.w, h = r.h,
+          elapsed = 0, delay = t, duration = DEATH_REVEAL_FLIP_DURATION,
+        }
+        t = t + DEATH_REVEAL_FLIP_STAGGER
+      end
+    end
+  end
+  if t > 0 then t = t + math.max(0, DEATH_REVEAL_FLIP_DURATION - DEATH_REVEAL_FLIP_STAGGER) end
+
+  -- 3. Cartes encore en pioche/défausse : sortent, se retournent sur place,
+  -- reviennent (demande explicite -- "une animation montre les cartes ...
+  -- sortir de la pioche et de la défausse, se retourner en Echo, puis
+  -- retourner à leur point de départ").
+  local pile_leg_duration = DEATH_REVEAL_PILE_OUT_DURATION + DEATH_REVEAL_PILE_HOLD_DURATION + DEATH_REVEAL_PILE_BACK_DURATION
+  local last_pile_start
+  for _, c in ipairs(reveal.converted) do
+    if c.pile == "deck" or c.pile == "discard" then
+      local pile_rect = c.pile == "deck" and View.deck_pile_rect or View.discard_pile_rect
+      local staging = { x = pile_rect.x, y = pile_rect.y - pile_rect.h - 20, w = pile_rect.w, h = pile_rect.h }
+      local start_t = t
+      last_pile_start = start_t
+      self.card_anims[#self.card_anims + 1] = {
+        from = pile_rect, to = staging, elapsed = 0, delay = start_t,
+        duration = DEATH_REVEAL_PILE_OUT_DURATION, fade_in = true, def = c.from_def,
+      }
+      self.death_reveal_flip["death-reveal-pile-" .. tostring(c.uid)] = {
+        from_def = c.from_def, to_def = echo_def_for(c.from_def), x = staging.x, y = staging.y, w = staging.w, h = staging.h,
+        elapsed = 0, delay = start_t + DEATH_REVEAL_PILE_OUT_DURATION, duration = DEATH_REVEAL_PILE_HOLD_DURATION,
+      }
+      self.card_anims[#self.card_anims + 1] = {
+        from = staging, to = pile_rect, elapsed = 0,
+        delay = start_t + DEATH_REVEAL_PILE_OUT_DURATION + DEATH_REVEAL_PILE_HOLD_DURATION,
+        duration = DEATH_REVEAL_PILE_BACK_DURATION, fade_in = false, def = echo_def_for(c.from_def),
+      }
+      t = start_t + DEATH_REVEAL_PILE_STAGGER
+    end
+  end
+  -- Durée totale réelle = démarrage de la DERNIÈRE carte (pas la somme des
+  -- staggers, qui ne couvre que les DÉPARTS échelonnés) + son propre aller-
+  -- retour complet -- sinon la main se déverrouille avant que la dernière
+  -- carte n'ait fini de revenir.
+  if last_pile_start then t = last_pile_start + pile_leg_duration end
+
+  -- "GO" retiré d'ici (2026-09-30, correction explicite -- "il ne faut pas
+  -- redonner la main au joueur à la fin de la séquence [de mort], mais plutôt
+  -- à la fin de toute la séquence de pioche") : cette séquence peut se
+  -- dérouler PENDANT le tour de l'ennemi (mort infligée par une attaque) --
+  -- `hand_locked` redescend bien ici (rien de spécial à débloquer si un
+  -- combat continue derrière, inoffensif dans les deux cas), mais le bandeau
+  -- "GO" lui-même est désormais posé une seule fois, au tout début de
+  -- CHAQUE tour, par Controller:play_hero_ready_hops -- jamais ici.
+  -- `push(empty, t+0.1)` PUIS `push(vrai déverrouillage)` -- jamais l'inverse
+  -- (voir le commentaire équivalent sur le déclenchement plus haut, même
+  -- bug de départ) : sinon `hand_locked` repasserait à false immédiatement,
+  -- avant même que les card_anims/death_reveal_flip tout juste posés
+  -- ci-dessus n'aient eu le temps de jouer.
+  local self_ = self
+  self.seq:push(function() end, t + 0.1)
+  self.seq:push(function()
+    if not was_already_locked then self_.hand_locked = false end
+  end)
+end
+
 --- Lit state.last_drawn_uids (posé par Deck.draw_cards/fill_hand, voir
 -- src/rules/deck.lua) et lance l'animation correspondante, puis le vide --
 -- point d'accroche unique pour tous les chemins de pioche (début de tour,
@@ -1542,17 +1761,41 @@ function Controller:consume_drawn_animation()
       if i <= reshuffled_at then batch1[#batch1 + 1] = uid else batch2[#batch2 + 1] = uid end
     end
     local self_ = self
+    -- Compte affiché sur la pioche, synchronisé sur ces 3 mêmes phases
+    -- (2026-09-30, demande explicite -- "le nombre de cartes sur la pioche
+    -- doit se mettre à jour plus précisément... d'abord on pioche 2 cartes et
+    -- la pioche passe visuellement à 0, puis la défausse se déplace sur la
+    -- pioche et la pioche indique le nombre max de carte, puis le joueur
+    -- pioche 3 cartes et la pioche indique le nombre de cartes effectivement
+    -- présentes") : `self.deck_count_override` (lu par draw_pile, view.lua)
+    -- prime sur #state.deck tant qu'il n'est pas nil -- sans lui, la pile
+    -- lisait #state.deck en direct, déjà à sa valeur FINALE dès l'appel
+    -- (synchrone) de Deck.draw_cards, bien avant la moindre carte volée : elle
+    -- sautait donc directement à la bonne réponse, sans jamais montrer "0" ni
+    -- le plein compte après remélange. `after_reshuffle_count` = la taille du
+    -- deck UNE FOIS le remélange fait (déjà vraie dans #state.deck, calculée
+    -- en ajoutant ce qui reste encore à piocher dans batch2).
+    local after_reshuffle_count = #self.state.deck + #batch2
+    self.deck_count_override = #batch1
     local d1 = #batch1 > 0 and self:animate_draw(batch1) or 0
+    -- Attend la fin du vol de batch1 (push "vide", même idiome que le code
+    -- d'origine) AVANT de passer l'affichage à 0 -- jamais dans le même
+    -- callback que la mise à `#batch1` ci-dessus, sinon "0" ne serait jamais
+    -- visible (même frame que le début du vol).
     self_.seq:push(function() end, d1)
+    self_.seq:push(function() self_.deck_count_override = 0 end, DECK_COUNT_ZERO_HOLD)
     self_.seq:push(function()
       if self_.state.over then return end
       self_:animate_reshuffle()
+      self_.deck_count_override = after_reshuffle_count
     end, RESHUFFLE_TOTAL_DURATION)
     self_.seq:push(function()
       if self_.state.over then return end
+      self_.deck_count_override = nil -- repart sur #state.deck, déjà la vraie valeur finale
       if #batch2 > 0 then self_:animate_draw(batch2) end
     end)
-    return d1 + RESHUFFLE_TOTAL_DURATION + (#batch2 > 0 and ((#batch2 - 1) * DRAW_FLIGHT_STAGGER + DRAW_FLIGHT_DURATION) or 0)
+    return d1 + DECK_COUNT_ZERO_HOLD + RESHUFFLE_TOTAL_DURATION
+      + (#batch2 > 0 and ((#batch2 - 1) * DRAW_FLIGHT_STAGGER + DRAW_FLIGHT_DURATION) or 0)
   end
 
   return self:animate_draw(drawn)
@@ -1833,6 +2076,23 @@ function Controller:play_hero_ready_hops()
       end, HERO_READY_STAGGER)
     end
   end
+  -- "GO" (2026-09-30, demande explicite -- voir GO_BANNER_DURATION plus haut) :
+  -- dernier beat de CHAQUE début de tour, qu'un aventurier soit mort ce
+  -- tour-ci ou non -- le vrai moment où le joueur récupère la main.
+  self_.seq:push(function()
+    self_.go_banner = { elapsed = 0, duration = GO_BANNER_DURATION }
+    Sfx.play("go")
+  end)
+  -- Relâchement de `hand_locked` (2026-09-30, demande explicite -- "il faut
+  -- tout bloquer tant que le go n'a pas fini son passage") : posé ICI, APRÈS
+  -- une attente de GO_BANNER_DURATION (le vrai temps que le bandeau met à
+  -- traverser l'écran), jamais avant -- `push(empty, wait)` PUIS
+  -- `push(vrai déverrouillage)`, même idiome que Controller:start_death_reveal
+  -- (voir son commentaire) : sinon `hand_locked` retomberait dès ce beat-ci,
+  -- avant même que le bandeau tout juste posé ci-dessus n'ait eu le temps de
+  -- jouer.
+  self_.seq:push(function() end, GO_BANNER_DURATION)
+  self_.seq:push(function() self_.hand_locked = false end)
 end
 
 --- Les 3 beats de début de tour (2026-08-21, demande explicite -- énergie ->
@@ -1900,6 +2160,14 @@ end
 
 function Controller:play_turn_start_sequence()
   local self_ = self
+  -- Verrouille la main dès l'entrée dans CHAQUE début de tour (2026-09-30,
+  -- demande explicite -- voir le commentaire équivalent dans Controller:
+  -- end_turn) : couvre aussi les points d'entrée qui n'appellent jamais
+  -- end_turn (reset_run/start_boss_test/restart_turn, tout début de combat) --
+  -- déjà vrai dans le cas normal (posé par end_turn), sans effet de bord à le
+  -- reposer ici. Relâché uniquement dans Controller:play_hero_ready_hops, une
+  -- fois le bandeau "Go !!!" terminé.
+  self_.hand_locked = true
   -- Marquer `pending_draw_uids` DÈS CE BEAT, pas seulement à l'intérieur de
   -- consume_drawn_animation (2026-08-21, bug persistant -- root cause réelle :
   -- Game.start_turn a déjà rempli state.hand de façon synchrone AVANT même que
@@ -2136,6 +2404,23 @@ function Controller:update(dt)
     a.elapsed = a.elapsed + dt
     if a.elapsed >= a.delay + a.duration then table.remove(self.card_anims, i) end
   end
+  -- Retournements de la séquence dramatique de mort (2026-09-28, même idiome
+  -- de purge que card_anims ci-dessus) : `delay` (2026-09-28) permet de les
+  -- créer TOUS d'un coup dans Controller:start_death_reveal, chacun démarrant
+  -- son propre retournement à son heure -- voir draw_hand/draw_one (view.lua),
+  -- qui n'affichent rien tant que `elapsed < delay`.
+  for key, f in pairs(self.death_reveal_flip) do
+    f.elapsed = f.elapsed + dt
+    if f.elapsed >= f.delay + f.duration then self.death_reveal_flip[key] = nil end
+  end
+  if self.death_reveal_spotlight then
+    self.death_reveal_spotlight.elapsed = self.death_reveal_spotlight.elapsed + dt
+    if self.death_reveal_spotlight.elapsed >= self.death_reveal_spotlight.duration then self.death_reveal_spotlight = nil end
+  end
+  if self.go_banner then
+    self.go_banner.elapsed = self.go_banner.elapsed + dt
+    if self.go_banner.elapsed >= self.go_banner.duration then self.go_banner = nil end
+  end
   -- Écran "Construis ton deck" (2026-09-02) : même idiome de purge que
   -- card_anims ci-dessus pour les cartes qui s'évanouissent ; le retriage
   -- (db.reflow_from) n'a besoin que d'avancer son minuteur, purgé une fois
@@ -2286,6 +2571,28 @@ function Controller:update(dt)
       if not self.hero_death_fade[h.id] then
         self.hero_death_fade[h.id] = { t = 0, duration = HERO_DEATH_FADE_DURATION }
         Sfx.play("hero_death")
+      end
+      -- Séquence dramatique de mort (2026-09-28, pilier du sacrifice, demande
+      -- explicite) : `h.death_reveal_shown`, PAS `self.hero_death_fade[h.id]`
+      -- (2026-08-30, remis à zéro à CHAQUE entrée en combat -- voir
+      -- Controller:play_enemy_entrance_sequence, jamais un souci avant que la
+      -- mort ne devienne permanente) -- sans ce champ distinct et persistant
+      -- sur le héros lui-même, la séquence entière (Legs/Héritage qui vole,
+      -- cartes qui se retournent) rejouerait en boucle à chaque nouveau combat
+      -- pour un héros déjà mort depuis longtemps. Démarre après la fin du
+      -- fondu normal ("d'abord, il meurt normalement", demande explicite),
+      -- pas en même temps -- `Sequencer:push(fn, wait)` exécute `fn`
+      -- IMMÉDIATEMENT et n'attend `wait` qu'AVANT l'étape SUIVANTE (voir
+      -- sequencer.lua) : un seul push avec `wait = HERO_DEATH_FADE_DURATION`
+      -- lançait donc start_death_reveal tout de suite, PAS après le fondu
+      -- (bug signalé en écrivant les tests de cette fonctionnalité) -- il
+      -- faut un push "vide" dédié à l'attente, PUIS le vrai déclenchement,
+      -- même idiome que Controller:consume_drawn_animation juste au-dessus.
+      if not h.death_reveal_shown then
+        h.death_reveal_shown = true
+        local self_, hero_id = self, h.id
+        self.seq:push(function() end, HERO_DEATH_FADE_DURATION)
+        self.seq:push(function() self_:start_death_reveal(hero_id) end)
       end
     else
       self.hero_death_fade[h.id] = nil
@@ -2476,8 +2783,17 @@ function Controller:resolve_target(kind, target_id)
   end)
 end
 
+-- `#Combat.living_heroes(...) == 0` (2026-09-28, pilier du sacrifice) : avant,
+-- seul un ennemi pouvait amener `state.over` à vrai depuis la résolution d'une
+-- carte -- ce point n'appelait jamais que handle_combat_victory. Une carte
+-- "Mise à mort" (voir Game.kill_hero/Game.resolve_pending) peut désormais
+-- déclencher une VRAIE défaite depuis ce même point (dernier héros tué par sa
+-- propre carte) -- distingue les deux plutôt que de supposer victoire par défaut.
 function Controller:after_card_resolved()
-  if self.state.over then self:handle_combat_victory() end
+  if not self.state.over then return end
+  if #Combat.living_heroes(self.state) == 0 then self:enter_defeat_screen()
+  else self:handle_combat_victory()
+  end
 end
 
 -- ---------- fin de tour ----------
@@ -2501,7 +2817,14 @@ function Controller:end_turn()
   self.seq:push(function() end, self.end_turn_feedback_duration)
   self.seq:push(function()
     self_.end_turn_feedback_t = nil
-    self_.hand_locked = false
+    -- `hand_locked` NE redescend PLUS ici (2026-09-30, demande explicite --
+    -- "je peux cliquer sur mes cartes ou sur Fin de Tour AVANT que le go ne
+    -- soit passé, il faut tout bloquer tant que le go n'a pas fini son
+    -- passage") : avant, ce verrou retombait dès ce beat, laissant TOUTE la
+    -- suite (résolution des monstres, pioche, saut des aventuriers, bandeau
+    -- "Go !!!") sans protection -- reste vrai en continu jusqu'au relâchement
+    -- final dans Controller:play_hero_ready_hops, une fois le bandeau "Go !!!"
+    -- terminé (voir son commentaire).
     self_:end_turn_now()
   end)
 end
