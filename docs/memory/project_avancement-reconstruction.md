@@ -10,10 +10,11 @@ Le "tableur" (6 onglets : Classes, Cartes de classes, Glossaire, Bestiaire, Temp
 **Fichiers Markdown git-suivis (source de vérité)** dans `C:\Claude\HEROCARDGAME\docs\design\` :
 - `classes.md` — roster des 6 classes, PV, ressources propres.
 - `cartes.md` — 36 cartes (6 classes × 6), format Nom/Classe/Palier/Coût/Mots-clés/Texte base/Texte amélioré.
-- `glossaire.md` — 25 termes du glossaire (icônes cosmétiques + statuts/mécaniques texte).
+- `glossaire.md` — 44 termes du glossaire (icônes cosmétiques + statuts/mécaniques texte) depuis le 2026-09-30 (synchronisation avec les 7 mots-clés du pilier du sacrifice — voir `project_glossaire-synchronise-pilier-sacrifice.md`).
 - `bestiaire.md` — refondu le 2026-09-01 : système de 4 biomes (Forêt/Catacombes/Canyon/Volcan), 20 ennemis communs (5/biome), 4 boss (1 par biome, dont Roi Squelette et Élémentaire de Feu, nouveaux), mécanique "Élite", composition de rencontre et courbe de difficulté.
-- `temple.md` — 8 bénédictions + 8 malédictions.
+- `temple.md` — 8 bénédictions + 8 malédictions. Corrigé le 2026-10-02 sur "La Renaissante"/"Survie" — voir `project_temple-survie-corrige.md`.
 - `evenements.md` — Feu de camp / Refuge / Forge (sélection, conditions de déclenchement, séquencement complet post-combat).
+- `sacrifice.md` — nouveau le 2026-09-30 : pilier du sacrifice (mort d'aventurier → Legs/Héritage/Écho), les 24 cartes définitives des 6 classes, désormais un système livré comme les autres (plus une proposition) — voir `project_pilier-sacrifice-implemente.md` pour le détail complet de cette reconstruction.
 
 **Passe du 2026-09-02 — 3 corrections ciblées suite à des changements de règles côté code, `glossaire.md`/`bestiaire.md`/`evenements.md` + Artifact republiés (classes.md/cartes.md/temple.md non concernés) :**
 1. **Nouvelle ressource "or" (PO)** ajoutée à `glossaire.md` (18ᵉ terme "à icône", 36 entrées au total désormais) : `state.gold` (`game/src/rules/game.lua`), 100 au départ d'un run (`Game.reset_run`), jamais remis à 0 en cours de run (contrairement à l'énergie), gagné à la victoire via `Game.compute_gold_reward` = somme de `Enemies.cost_at_level` sur les ennemis vaincus × 0.5 (ratio placeholder). Icône réelle `or.png` embarquée en base64 dans l'Artifact le 2026-09-02 par la session principale (pas agent_doc, qui n'a pas d'outil shell) — les 18 termes "à icône" ont désormais tous leur vraie image dans l'Artifact, plus aucune exception "nom de fichier seul".

@@ -59,12 +59,15 @@ describe("Game.tick_bleed", function()
     assert.are.equal(1, enemy.saignements)
   end)
 
-  it("La Renaissante protège aussi contre une mort par Saignement", function()
-    local hero = { hp = 2, saignements = 5, death_ward = true, name = "Héros" }
+  -- "Survie" (2026-10-01, harmonisation explicite -- "La Renaissante" utilise
+  -- désormais le même mécanisme que "Célébration Finale" du Barde, 10% des PV
+  -- max au lieu de 1 PV fixe, l'ancien hero.death_ward n'existe plus).
+  it("Survie (ex-\"La Renaissante\") protège aussi contre une mort par Saignement", function()
+    local hero = { hp = 2, max_hp = 20, saignements = 5, survie = true, name = "Héros" }
     local state = make_state({ hero }, {})
     Game.tick_bleed(state)
-    assert.are.equal(1, hero.hp)
-    assert.is_false(hero.death_ward)
+    assert.are.equal(2, hero.hp) -- 10% de 20 PV max
+    assert.is_false(hero.survie)
   end)
 end)
 

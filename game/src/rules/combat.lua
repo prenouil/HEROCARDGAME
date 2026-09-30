@@ -129,6 +129,51 @@ function Combat.incandescence_flat(source_unit, dmg_type)
   return 0
 end
 
+--- Bonus flat des buffs permanents (2026-09-30, pilier du sacrifice -- mot-clé
+-- "Permanent" sur une carte Legs/Héritage, ex. "Puissance Ancestrale" du
+-- Guerrier : "les cartes ciblant un ennemi infligent 2 'épée' de plus") :
+-- même étage de calcul qu'Incandescence ci-dessus (additif, avant tout
+-- multiplicateur), jamais consommé -- un héros peut porter PLUSIEURS buffs
+-- permanents (voir hero.permanent_buffs/Game.grant_permanent_buff), leurs
+-- `epee_bonus` s'additionnent tous. "épée" == `dmg_type == "physique"` (voir
+-- le commentaire sur Combat.is_immune_physical un peu plus haut) -- purement
+-- cosmétique côté texte de carte, mécaniquement identique à Incandescence.
+function Combat.permanent_epee_bonus(source_unit, dmg_type)
+  if dmg_type ~= "physique" or not source_unit or not source_unit.permanent_buffs then return 0 end
+  local total = 0
+  for _, buff in ipairs(source_unit.permanent_buffs) do
+    total = total + (buff.epee_bonus or 0)
+  end
+  return total
+end
+
+--- Pendant magique du bonus permanent "épée" ci-dessus (2026-10-02, pilier du
+-- sacrifice -- "Étincelle de magie"/"Arcane Oublié" du Mage : "les cartes de
+-- dégâts de l'aventurier gagnent +X 'étincelles'") : même mécanique, "épée"
+-- == "physique" -> "étincelle" == "magique" (voir le commentaire sur
+-- Combat.is_immune_physical plus haut -- "étincelle" est purement cosmétique
+-- côté texte de carte, mécaniquement `dmg_type == "magique"`).
+function Combat.permanent_magic_bonus(source_unit, dmg_type)
+  if dmg_type ~= "magique" or not source_unit or not source_unit.permanent_buffs then return 0 end
+  local total = 0
+  for _, buff in ipairs(source_unit.permanent_buffs) do
+    total = total + (buff.etincelle_bonus or 0)
+  end
+  return total
+end
+
+--- "Exaltation" (2026-10-02, mot-clé -- carte "Transfert Interdit" du Mage :
+-- "augmente les dégâts magique de +X, -1 par tour") : même mécanique
+-- qu'Incandescence (flat, avant tout multiplicateur, voir son commentaire),
+-- mais pour `dmg_type == "magique"` et DÉCROISSANTE (voir Game.decay_end_of_
+-- turn_statuses), contrairement à Incandescence qui ne redescend jamais.
+function Combat.exaltation_flat(source_unit, dmg_type)
+  if dmg_type == "magique" and source_unit and (source_unit.exaltation or 0) > 0 then
+    return source_unit.exaltation
+  end
+  return 0
+end
+
 --- Multiplicateur total de dégâts pour un coup donné : Puissance/Incapacité de
 -- l'unité qui frappe, Vulnérabilité de l'unité qui encaisse. TOUS les
 -- pourcentages sont additionnés D'ABORD puis appliqués une seule fois --
@@ -215,14 +260,19 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
   end
   -- Additif AVANT multiplicatif (2026-08-30, demande explicite -- "les bonus
   -- en addition, comme l'inspiration, doivent être appliqués AVANT les bonus
-  -- en multiplication, comme la vulnérabilité") : Inspiration (+6 flat) et
-  -- Incandescence (+X flat, 2026-09-02, même règle réaffirmée explicitement)
+  -- en multiplication, comme la vulnérabilité") : Inspiration (+6 flat),
+  -- Incandescence (+X flat, 2026-09-02, même règle réaffirmée explicitement),
+  -- les buffs permanents du pilier du sacrifice (+X flat "épée"/"étincelle",
+  -- 2026-09-30/2026-10-02, voir Combat.permanent_epee_bonus/permanent_magic_bonus)
+  -- et "Exaltation" (+X flat magique, 2026-10-02, voir Combat.exaltation_flat)
   -- grossissent d'abord `base`, la Vulnérabilité/Puissance/Incapacité (toutes
   -- multiplicatives, voir Combat.damage_multiplier) s'appliquent ENSUITE sur
   -- ce total -- l'ordre inverse (avant ce correctif) laissait le bonus flat
   -- d'Inspiration hors de portée du multiplicateur. Même ordre repris côté
   -- aperçu (voir preview_desc, view.lua), pour ne jamais diverger.
   local amount = consume_inspiration(base, ctx) + Combat.incandescence_flat(source_unit, dmg_type)
+    + Combat.permanent_epee_bonus(source_unit, dmg_type) + Combat.permanent_magic_bonus(source_unit, dmg_type)
+    + Combat.exaltation_flat(source_unit, dmg_type)
   amount = round(amount * Combat.damage_multiplier(source_unit, target_unit, dmg_type, is_fire))
   -- Filet de sécurité final pour "Vol" (2026-08-30) : la mise à 0 vit déjà
   -- dans Combat.damage_multiplier (pour que l'aperçu de dégâts affiche 0 lui
@@ -255,18 +305,31 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
     Combat.log(state, target_unit.name .. " (Bouclier de pointes) renvoie " .. retaliation .. " dégâts à " .. source_unit.name .. ".", "you")
   end
 
-  -- "La Renaissante" (2026-08-29, bénédiction -- hero.death_ward, un simple
-  -- booléen copié depuis Temple.effects par
-  -- Game.apply_combat_start_temple_effects, jamais une connaissance directe
-  -- de Temple ici) : au lieu de mourir, reste debout à 1 PV -- consommé
-  -- (remis à false) au premier déclenchement, jamais réutilisable dans le
-  -- même combat. Game.tick_bleed a son propre appel équivalent (le
-  -- saignement ne passe pas par cette fonction) -- même logique dupliquée là,
-  -- volontairement, plutôt qu'un détour par ce module pour 3 lignes.
-  if target_unit.hp <= 0 and target_unit.death_ward then
-    target_unit.hp = 1
-    target_unit.death_ward = false
-    Combat.log(state, target_unit.name .. " aurait dû mourir, mais reste debout à 1 PV !", "power")
+  -- "Survie" (2026-08-29/2026-10-01, mot-clé -- carte "Célébration Finale" du
+  -- Barde, ET "La Renaissante" du Temple depuis leur harmonisation explicite
+  -- -- un seul mécanisme désormais, hero.survie, un simple booléen) : au lieu
+  -- de mourir, reste debout à 10% des PV max -- consommé (remis à false) au
+  -- premier déclenchement. Game.tick_bleed/tick_burn ont leur propre appel
+  -- équivalent (le saignement/la brûlure ne passent pas par cette fonction)
+  -- -- même logique dupliquée là, volontairement, plutôt qu'un détour par ce
+  -- module pour 3 lignes. Accordée soit par une bénédiction du Temple
+  -- (réattribuée à CHAQUE entrée en combat par Game.apply_combat_start_temple_
+  -- effects, "1 fois par combat"), soit par une carte (charge UNIQUE qui
+  -- persiste jusqu'à consommation, quel que soit le nombre de combats -- voir
+  -- son commentaire dédié dans game.lua). "(sauf carte Mise à mort)"
+  -- (2026-10-01, précision explicite du mot-clé) : déjà garanti par
+  -- construction -- Game.kill_hero ne passe jamais par Combat.deal_damage,
+  -- donc ce garde-fou n'est même jamais atteint pour ce cas-là.
+  if target_unit.hp <= 0 and target_unit.survie then
+    target_unit.hp = math.max(1, math.ceil((target_unit.max_hp or 1) * 0.1))
+    target_unit.survie = false
+    -- "1 fois par RUN pour La Renaissante" (2026-10-02, demande explicite) :
+    -- posé ICI, à la consommation réelle -- voir son commentaire dans
+    -- fresh_hero (game.lua)/apply_combat_start_temple_effects, seul lecteur.
+    -- N'affecte jamais une charge accordée par une carte (le champ existe,
+    -- mais rien ne le lit hors du chemin "bénédiction").
+    target_unit.renaissante_used = true
+    Combat.log(state, target_unit.name .. " (Survie) aurait dû mourir, mais reste debout à " .. target_unit.hp .. " PV !", "power")
   end
 
   Combat.log(state,
@@ -356,6 +419,16 @@ function Combat.deal_damage(state, source_hero, target_unit, base, dmg_type, ctx
   if amount > 0 and is_enemy_target and source_hero and source_hero.instinct_chasseur then
     Combat.grant_defense(source_hero, source_hero.instinct_chasseur)
     Combat.log(state, source_hero.name .. " (Instinct du Chasseur) gagne " .. source_hero.instinct_chasseur .. " bouclier.", "you")
+  end
+
+  -- "Vol de Vie" (2026-10-02, mot-clé -- cartes du Nécromancien : "chaque
+  -- fois que le personnage inflige des dégâts, il regagne X PV") : même
+  -- garde qu'Instinct du Chasseur juste au-dessus (`amount > 0`, un coup
+  -- entièrement absorbé par du bouclier compte quand même) -- décroît en FIN
+  -- de tour (Game.decay_end_of_turn_statuses), jamais consommé ici.
+  if amount > 0 and is_enemy_target and source_hero and (source_hero.vol_de_vie or 0) > 0 then
+    Combat.grant_heal(source_hero, source_hero.vol_de_vie, ctx)
+    Combat.log(state, source_hero.name .. " (Vol de Vie) regagne " .. source_hero.vol_de_vie .. " PV.", "you")
   end
 
   -- "Combustion différée" (2026-09-03, Enchantement du Mage --
@@ -486,7 +559,73 @@ function Combat.can_play(state, hero, pending)
   if state.energy < Combat.effective_cost(hero, pending.def) then return false end
   if pending.def.mana_cost and (hero.mana or 0) < pending.def.mana_cost then return false end
   if pending.def.requires_camouflage and (hero.camoufle or 0) <= 0 then return false end
+  -- Condition de jouabilité par carte (2026-09-30, pilier du sacrifice --
+  -- "chaque carte de mise à mort porte sa propre condition de jouabilité",
+  -- ex. "Baroud d'Honneur" du Guerrier : PV < 30% PV max) : `def.
+  -- playable_condition(state, hero)` reçoit L'EFFECTIVE OWNER (déjà résolu
+  -- par l'appelant, voir Game.select_card/effective_owner), jamais une classe
+  -- à re-résoudre. Générique -- n'importe quelle future carte peut en poser
+  -- une, pas seulement les cartes de mise à mort.
+  if pending.def.playable_condition and not pending.def.playable_condition(state, hero) then return false end
   return true
+end
+
+--- Répartit `total` dégâts de type `dmg_type` ALÉATOIREMENT entre les ennemis
+-- vivants (2026-09-30, pilier du sacrifice -- "Baroud d'Honneur" du Guerrier :
+-- "Inflige 50 dégâts aux ennemis répartis aléatoirement") -- SANS AUCUNE
+-- PERTE PAR OVERKILL (2026-10-01, question explicite -- "un ennemi à qui il
+-- reste 10 PV ne doit pas prendre 11 dégâts. Seule exception : si des dégâts
+-- ne peuvent pas être répartis (tous les ennemis morts ou intouchables)") :
+-- chaque part tirée au sort est PLAFONNÉE à la capacité réelle de sa cible
+-- (`defense + hp` -- au-delà, le coup est déjà mortel, tout surplus ne ferait
+-- que gaspiller) ; l'éventuel excédent ainsi capé n'est PAS perdu pour autant
+-- -- il reste dans `remaining` et repart pour une NOUVELLE passe de tirage
+-- sur les ennemis ENCORE vivants (recalculés à chaque passe -- un ennemi tué
+-- par la passe précédente, ou immunisé via Combat.is_immune_physical, sort du
+-- pool). La boucle ne s'arrête avant `remaining == 0` QUE si plus aucune
+-- cible ne peut rien absorber (l'exception ci-dessus, seule perte tolérée).
+-- `rng` : state.rng.sacrifice, flux dédié partagé par toutes les classes
+-- (voir Game.new_rng_streams), jamais un autre flux -- ne doit jamais décaler
+-- un tirage reproductible existant.
+function Combat.deal_random_split_damage(state, hero, total, dmg_type, rng, ctx)
+  local remaining = total
+  -- `guard` : filet de sécurité pur (ne devrait jamais se déclencher -- chaque
+  -- passe qui plafonne au moins une cible tue au moins un ennemi de plus,
+  -- donc le pool de cibles ne peut que rétrécir ; une passe qui ne plafonne
+  -- personne épuise `remaining` d'un coup). Borne large mais finie, jamais une
+  -- boucle qui pourrait tourner indéfiniment sur un bug futur imprévu.
+  local guard = 0
+  while remaining > 0 and guard < 1000 do
+    guard = guard + 1
+    local targets = {}
+    for _, e in ipairs(Combat.living_enemies(state)) do
+      if not Combat.is_immune_physical(e, dmg_type) then targets[#targets + 1] = e end
+    end
+    if #targets == 0 then break end -- exception : plus personne ne peut encaisser, le reste est perdu
+
+    local weights, weight_sum = {}, 0
+    for i = 1, #targets do
+      weights[i] = rng:random(1, 100)
+      weight_sum = weight_sum + weights[i]
+    end
+    local assigned_total, dealt_this_pass = 0, 0
+    for i, e in ipairs(targets) do
+      local share
+      if i == #targets then
+        share = remaining - assigned_total
+      else
+        share = math.floor(remaining * weights[i] / weight_sum)
+      end
+      assigned_total = assigned_total + share
+      local capacity = (e.defense or 0) + e.hp
+      local amount = math.min(share, capacity)
+      if amount > 0 then
+        Combat.deal_damage(state, hero, e, amount, dmg_type, ctx)
+        dealt_this_pass = dealt_this_pass + amount
+      end
+    end
+    remaining = remaining - dealt_this_pass
+  end
 end
 
 return Combat

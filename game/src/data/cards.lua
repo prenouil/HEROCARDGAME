@@ -1231,107 +1231,270 @@ Cards.list = {
   -- true` (pas de champ `upgrade` -- la Forge planterait sinon, voir
   -- Forge.upgradable_instances).
   {
-    code = "mise-a-mort-guerrier", name = "Mise à mort de Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    -- "Baroud d'Honneur" (2026-09-30, 1ʳᵉ carte de mise à mort réellement
+    -- designée -- remplace le placeholder générique "Mise à mort de Guerrier").
+    -- Condition de jouabilité (mot-clé "Mise à mort") : grisée/injouable tant
+    -- que le Guerrier n'est pas sous 30% de ses PV max (voir Combat.can_play/
+    -- playable_condition, et le rendu rouge/vert côté carte -- view/cards.lua).
+    code = "mise-a-mort-guerrier", name = "Baroud d'Honneur", class_id = "guerrier", tier = "avance", cost = 2,
+    cats = { "melee", "degats" }, dmg_type = "physique", target = "self",
+    types = { "offensive" },
     epuisement = true, no_forge_upgrade = true,
-    desc = "Guerrier se suicide. Déclenche l'Héritage. Épuisement.",
+    condition_text = "PV < 30% PV max",
+    playable_condition = function(state, hero) return hero.hp < hero.max_hp * 0.3 end,
+    desc = 'Inflige 50 "epee" aux ennemis, répartis aléatoirement. "meurt". "Mise à mort".',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
+      Combat.deal_random_split_damage(ctx.state, ctx.hero, 50, "physique", ctx.state.rng.sacrifice, ctx)
       Game.kill_hero(ctx.state, ctx.hero, true)
     end,
   },
   {
-    code = "mise-a-mort-paladin", name = "Mise à mort de Paladin", class_id = "paladin", tier = "avance", cost = 0,
+    -- "Ultime Rédemption" (2026-10-01, 2ᵉ classe designée carte par carte).
+    -- Condition de jouabilité : un ennemi vivant doit avoir télégraphié une
+    -- action de dégâts (`next_move.kind == "dmg"`) visant un COÉQUIPIER du
+    -- Paladin -- explicitement JAMAIS le Paladin lui-même (confirmé --
+    -- "la carte sert à sauver un autre héros, pas à se protéger soi-même") :
+    -- thème de la rédemption, se sacrifier POUR UN AUTRE, pas pour soi.
+    code = "mise-a-mort-paladin", name = "Ultime Rédemption", class_id = "paladin", tier = "avance", cost = 2,
     cats = {}, dmg_type = nil, target = "self",
+    types = { "support" },
     epuisement = true, no_forge_upgrade = true,
-    desc = "Paladin se suicide. Déclenche l'Héritage. Épuisement.",
+    condition_text = "Un ennemi vise un allié",
+    playable_condition = function(state, hero)
+      for _, e in ipairs(Combat.living_enemies(state)) do
+        if e.next_move and e.next_move.kind == "dmg" and e.target_hero_id and e.target_hero_id ~= hero.id then
+          local target = Combat.hero_by_id(state, e.target_hero_id)
+          if target and target.hp > 0 then return true end
+        end
+      end
+      return false
+    end,
+    desc = '"Mise à mort". Annule toutes les actions ennemis, puis "meurt".',
+    -- Annule TOUTES les actions ennemies (2026-10-01, pas seulement celles qui
+    -- visaient un allié -- "annule toutes les actions ennemis", plus large que
+    -- la condition qui ne fait que déclencher la carte) : même geste que
+    -- "Riposte" (Guerrier, voir plus haut) pour annuler `next_move`/
+    -- `target_hero_id`, mais SANS renvoyer de dégâts (Ultime Rédemption
+    -- protège, elle ne contre-attaque pas) et sur TOUS les ennemis vivants,
+    -- quelle que soit leur cible télégraphiée ou le type d'action.
     effect = function(ctx)
       Game = Game or require("src.rules.game")
+      local count = 0
+      for _, e in ipairs(Combat.living_enemies(ctx.state)) do
+        if e.next_move then
+          e.next_move = nil
+          e.target_hero_id = nil
+          count = count + 1
+        end
+      end
+      if count > 0 then
+        Combat.log(ctx.state, "Ultime Rédemption annule l'action de " .. count .. " ennemi(s).", "you")
+      end
       Game.kill_hero(ctx.state, ctx.hero, true)
     end,
   },
   {
-    code = "mise-a-mort-mage", name = "Mise à mort de Mage", class_id = "mage", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    -- "Transfert Interdit" (2026-10-02, 6ᵉ classe designée carte par carte) --
+    -- même structure que "Trahison Planifiée" (Assassin) : le Mage survit et
+    -- profite, un ALLIÉ ciblé meurt à sa place -- `exclude_self_target = true`
+    -- (le Mage doit survivre pour encaisser mana/Exaltation/soin).
+    -- "Mise à mort" impose l'Héritage à la cible (confirmé -- voir "Trahison
+    -- Planifiée").
+    code = "mise-a-mort-mage", name = "Transfert Interdit", class_id = "mage", tier = "avance", cost = 2,
+    cats = {}, dmg_type = nil, target = "ally", exclude_self_target = true,
+    types = { "support" },
     epuisement = true, no_forge_upgrade = true,
-    desc = "Mage se suicide. Déclenche l'Héritage. Épuisement.",
+    condition_text = "Le Mage a 0 mana",
+    playable_condition = function(state, hero) return (hero.mana or 0) == 0 end,
+    desc = '"Mise à mort". L\'allié ciblé "meurt". Le Mage gagne 10 "mana", "Exaltation" 5, et regagne tous ses PV.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
-      Game.kill_hero(ctx.state, ctx.hero, true)
+      Game.kill_hero(ctx.state, ctx.target, true)
+      ctx.hero.mana = (ctx.hero.mana or 0) + 10
+      Combat.apply_status(ctx.hero, "exaltation", 5)
+      ctx.hero.hp = ctx.hero.max_hp
     end,
   },
   {
-    code = "mise-a-mort-assassin", name = "Mise à mort de Assassin", class_id = "assassin", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    -- "Trahison Planifiée" (2026-10-01, 4ᵉ classe designée carte par carte) --
+    -- UNIQUE parmi les 6 : l'Assassin ne meurt PAS lui-même, il tue un allié
+    -- ciblé pour en profiter -- `target = "ally"` (celui qui meurt),
+    -- `exclude_self_target = true` (on ne peut pas "se trahir" soi-même --
+    -- l'Assassin doit survivre pour profiter du Camouflage/de la Puissance).
+    -- La mort de la CIBLE déclenche son Héritage, PAS son Legs (2026-10-02,
+    -- correction explicite -- REVIREMENT sur la 1ʳᵉ version de cette carte,
+    -- qui utilisait Legs) : `Game.kill_hero(..., true)` -- "Mise à mort"
+    -- impose donc bien l'Héritage systématiquement pour qui meurt, quel que
+    -- soit qui joue la carte -- confirmé, pas seulement pour l'auto-sacrifice.
+    -- `cats = { "furtif" }` (2026-10-01, ajout nécessaire, pas dans le texte
+    -- donné -- bug rencontré en testant) : SANS ce tag, Game.on_card_played
+    -- (règle générique -- "jouer une carte non-Furtif termine Camouflage")
+    -- effaçait le Camouflage tout juste accordé PAR CETTE CARTE elle-même,
+    -- dans la MÊME résolution -- jamais l'effet voulu. Cohérent avec le thème
+    -- (élimination discrète) ; à confirmer.
+    code = "mise-a-mort-assassin", name = "Trahison Planifiée", class_id = "assassin", tier = "avance", cost = 2,
+    cats = { "furtif" }, dmg_type = nil, target = "ally", exclude_self_target = true,
+    types = { "support" },
     epuisement = true, no_forge_upgrade = true,
-    desc = "Assassin se suicide. Déclenche l'Héritage. Épuisement.",
+    condition_text = "2 aventuriers vivants",
+    playable_condition = function(state, hero) return #Combat.living_heroes(state) >= 2 end,
+    desc = '"Mise à mort". L\'allié ciblé "meurt". Devient "Camouflage" et "Puissance" 3 maintenant et à chaque début de combat. "Furtif".',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
-      Game.kill_hero(ctx.state, ctx.hero, true)
+      Game.kill_hero(ctx.state, ctx.target, true)
+      Game.grant_camouflage(ctx.state, ctx.hero)
+      Game.grant_permanent_buff(ctx.hero, {
+        name = "Trahison Planifiée",
+        desc = '"Puissance" 3 et redevient "Camouflage" à chaque début de combat.',
+        combat_start_status = { puissance = 3, camoufle = 1 },
+      })
     end,
   },
   {
-    code = "mise-a-mort-necromancien", name = "Mise à mort de Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    -- "Pacte de sang" (2026-10-02, 7ᵉ classe designée carte par carte) --
+    -- même structure que "Trahison Planifiée"/"Transfert Interdit" : le
+    -- Nécromancien survit et profite, un ALLIÉ ciblé meurt à sa place --
+    -- `exclude_self_target = true`. X = les PV ACTUELS de la cible, capturés
+    -- AVANT sa mort (Game.kill_hero les mettrait à 0). "Mise à mort" impose
+    -- l'Héritage à la cible (confirmé). "Gagne X PV max" interprété comme
+    -- une VRAIE augmentation (max_hp ET hp actuels +X, pas seulement un
+    -- plafond relevé sans gain immédiat) -- à confirmer si ce n'est pas
+    -- l'intention.
+    code = "mise-a-mort-necromancien", name = "Pacte de sang", class_id = "necromancien", tier = "avance", cost = 2,
+    cats = {}, dmg_type = nil, target = "ally", exclude_self_target = true,
+    types = { "support" },
     epuisement = true, no_forge_upgrade = true,
-    desc = "Nécromancien se suicide. Déclenche l'Héritage. Épuisement.",
+    condition_text = "Le Nécromancien est corrompu",
+    playable_condition = function(state, hero) return (hero.corruption or 0) > 0 end,
+    desc = '"Mise à mort". Gagne X PV max et X "Corruption" (X = PV actuels de l\'allié ciblé). L\'allié ciblé "meurt".',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
-      Game.kill_hero(ctx.state, ctx.hero, true)
+      local x = ctx.target.hp
+      ctx.hero.max_hp = ctx.hero.max_hp + x
+      ctx.hero.hp = ctx.hero.hp + x
+      ctx.hero.corruption = (ctx.hero.corruption or 0) + x
+      Game.kill_hero(ctx.state, ctx.target, true)
     end,
   },
   {
-    code = "mise-a-mort-barde", name = "Mise à mort de Barde", class_id = "barde", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    -- "Célébration Finale" (2026-10-01, 3ᵉ classe designée carte par carte).
+    -- `target = "ally"` (PAS "self" comme les autres Mise à mort jusqu'ici) :
+    -- le Barde choisit QUI reçoit "Survie". `exclude_self_target = true`
+    -- (2026-10-01, correction explicite -- "le barde cible un allié
+    -- différent de lui-même") : REVIREMENT sur la 1ʳᵉ version de cette carte,
+    -- qui l'autorisait -- voir Game.resolve_pending, seul lecteur.
+    code = "mise-a-mort-barde", name = "Célébration Finale", class_id = "barde", tier = "avance", cost = 2,
+    cats = {}, dmg_type = nil, target = "ally", exclude_self_target = true,
+    types = { "support" },
     epuisement = true, no_forge_upgrade = true,
-    desc = "Barde se suicide. Déclenche l'Héritage. Épuisement.",
+    condition_text = "Le Barde est inspiré",
+    playable_condition = function(state, hero) return (hero.inspiration or 0) > 0 end,
+    desc = '"Mise à mort". Donne "Survie" à l\'allié ciblé, puis "meurt".',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
+      ctx.target.survie = true
       Game.kill_hero(ctx.state, ctx.hero, true)
     end,
   },
 
   {
-    code = "legs-guerrier", name = "Legs du Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
+    -- "Puissance Ancestrale" (2026-09-30, 1ʳᵉ carte Legs réellement designée)
+    -- : accorde un buff PERMANENT (mot-clé "Permanent") à l'allié ciblé --
+    -- voir Game.grant_permanent_buff/Combat.permanent_epee_bonus. Même nom
+    -- que la version Héritage ci-dessous (voulu -- Héritage est juste sa
+    -- version renforcée, +4 "Puissance" en plus).
+    code = "legs-guerrier", name = "Puissance Ancestrale", class_id = "guerrier", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) end,
+    desc = '"Permanent". Les cartes ciblant un ennemi infligent 2 "epee" de plus.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Puissance Ancestrale",
+        desc = 'Les cartes ciblant un ennemi infligent 2 "epee" de plus.',
+        epee_bonus = 2,
+      })
+    end,
   },
   {
-    code = "legs-paladin", name = "Legs du Paladin", class_id = "paladin", tier = "avance", cost = 0,
+    -- "Bouclier Spirituel" (2026-10-01, correction explicite -- "donne +3
+    -- bouclier à chaque début de TOUR, pas de chaque combat, pas besoin de le
+    -- préciser sur la carte") : `turn_start_status`, PAS `combat_start_status`
+    -- comme "Puissance Ancestrale" du Guerrier -- voir Game.start_turn, pas
+    -- apply_combat_start_temple_effects. Aucune mention de rythme dans le
+    -- texte affiché (Bouclier se recharge chaque tour par convention
+    -- implicite du jeu, contrairement à Provocation -- voir Héritage
+    -- ci-dessous, qui doit lui le préciser).
+    code = "legs-paladin", name = "Bouclier Spirituel", class_id = "paladin", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) end,
+    desc = '"Permanent". "Bouclier" 3.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Bouclier Spirituel",
+        desc = '"Bouclier" 3 à chaque début de tour.',
+        turn_start_status = { defense = 3 },
+      })
+    end,
   },
   {
-    code = "legs-mage", name = "Legs du Mage", class_id = "mage", tier = "avance", cost = 0,
+    -- "Étincelle de magie" (2026-10-02) : buff permanent, même mécanisme que
+    -- "Puissance Ancestrale" du Guerrier mais côté magique -- `etincelle_bonus`
+    -- (voir Combat.permanent_magic_bonus), pas `epee_bonus`.
+    code = "legs-mage", name = "Étincelle de magie", class_id = "mage", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) end,
+    desc = '"Permanent". Les cartes de dégâts de l\'aventurier gagnent 2 "étincelle" de plus.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Étincelle de magie",
+        desc = 'Les cartes de dégâts de l\'aventurier gagnent 2 "étincelle" de plus.',
+        etincelle_bonus = 2,
+      })
+    end,
   },
   {
-    code = "legs-assassin", name = "Legs de l'Assassin", class_id = "assassin", tier = "avance", cost = 0,
+    -- "Voile de Brume" (2026-10-01) : contrairement aux Legs des 3 classes
+    -- précédentes (toujours "Permanent"), celui-ci est un simple gain
+    -- INSTANTANÉ, une seule fois -- pas de mot-clé "Permanent" dans le texte
+    -- donné, aucun Game.grant_permanent_buff -- à confirmer que c'est bien
+    -- volontaire (différencier Legs/Héritage sur la NATURE de l'effet, pas
+    -- seulement sa force, pour cette classe) plutôt qu'un oubli.
+    code = "legs-assassin", name = "Voile de Brume", class_id = "assassin", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'L\'allié ciblé gagne "Esquive" 2.',
+    effect = function(ctx) Combat.apply_status(ctx.target, "esquive", 2) end,
   },
   {
-    code = "legs-necromancien", name = "Legs du Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
+    -- "Siphon de vie" (2026-10-02) : gain INSTANTANÉ, une seule fois -- comme
+    -- "Voile de Brume" de l'Assassin, pas de mot-clé "Permanent" dans le texte
+    -- donné, aucun Game.grant_permanent_buff.
+    code = "legs-necromancien", name = "Siphon de vie", class_id = "necromancien", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'L\'allié gagne "Vol de Vie" 3.',
+    effect = function(ctx) Combat.apply_status(ctx.target, "vol_de_vie", 3) end,
   },
   {
-    code = "legs-barde", name = "Legs du Barde", class_id = "barde", tier = "avance", cost = 0,
+    -- "Chant du Cygne" (2026-10-01) : buff permanent -- "Inspiration" 2
+    -- réappliquée à CHAQUE COMBAT (combat_start_status, pas turn_start_status
+    -- comme le Bouclier du Paladin -- confirmé "au début de chaque combat").
+    code = "legs-barde", name = "Chant du Cygne", class_id = "barde", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) end,
+    desc = '"Permanent". "Inspiration" 2 à chaque début de combat.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Chant du Cygne",
+        desc = '"Inspiration" 2 à chaque début de combat.',
+        combat_start_status = { inspiration = 2 },
+      })
+    end,
   },
 
   -- Héritage : seule différence mécanique réelle de cette passe -- incrémente
@@ -1339,149 +1502,258 @@ Cards.list = {
   -- reste du texte affiché ("Ne fait rien...") reste vrai quant au véritable
   -- effet de jeu, qui viendra plus tard.
   {
-    code = "heritage-guerrier", name = "Héritage du Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
+    -- "Puissance Ancestrale" (2026-09-30, version Héritage -- mort VOLONTAIRE,
+    -- voir le mot-clé "Héritage"/hero.died_voluntarily) : même buff permanent
+    -- que la version Legs ci-dessus, EN PLUS d'un "Puissance" 4 réappliqué à
+    -- chaque début de combat (voir combat_start_status, appliqué par
+    -- Game.grant_permanent_buff MAINTENANT et par apply_combat_start_temple_
+    -- effects à chaque combat suivant). `heritage_count` conservé (marqueur
+    -- de l'axe "l'Élu", pour plus tard -- voir draw_hero) en plus du VRAI
+    -- effet de jeu, désormais réel.
+    code = "heritage-guerrier", name = "Puissance Ancestrale", class_id = "guerrier", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+    desc = '"Permanent". "Puissance" 4. Les cartes ciblant un ennemi infligent 2 "epee" de plus.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Puissance Ancestrale",
+        desc = '"Puissance" 4 à chaque début de combat. Les cartes ciblant un ennemi infligent 2 "epee" de plus.',
+        epee_bonus = 2,
+        combat_start_status = { puissance = 4 },
+      })
+    end,
   },
   {
-    code = "heritage-paladin", name = "Héritage du Paladin", class_id = "paladin", tier = "avance", cost = 0,
+    -- "Pouvoir de l'amitié" (2026-10-01, correction explicite) : version
+    -- Héritage de "Bouclier Spirituel" -- Bouclier 6 (au lieu de 3) réappliqué
+    -- PAR TOUR comme Legs (`turn_start_status`, jamais précisé sur la carte),
+    -- MAIS Provocation 3 réappliquée PAR COMBAT (`combat_start_status`, voir
+    -- Temple.effects/apply_combat_start_temple_effects) -- rythme DIFFÉRENT
+    -- du Bouclier, donc explicitement précisé sur la carte cette fois
+    -- ("bien +3 provocation au début de chaque combat -- à préciser").
+    code = "heritage-paladin", name = "Pouvoir de l'amitié", class_id = "paladin", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+    desc = '"Permanent". "Bouclier" 6. "Provocation" 3 à chaque début de combat.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Pouvoir de l'amitié",
+        desc = '"Bouclier" 6 à chaque début de tour. "Provocation" 3 à chaque début de combat.',
+        turn_start_status = { defense = 6 },
+        combat_start_status = { provocation = 3 },
+      })
+    end,
   },
   {
-    code = "heritage-mage", name = "Héritage du Mage", class_id = "mage", tier = "avance", cost = 0,
+    -- "Arcane Oublié" (2026-10-02) : version Héritage d'"Étincelle de magie" --
+    -- même buff, +5 au lieu de +2.
+    code = "heritage-mage", name = "Arcane Oublié", class_id = "mage", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+    desc = '"Permanent". Les cartes de dégâts de l\'aventurier gagnent 5 "étincelle" de plus.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Arcane Oublié",
+        desc = 'Les cartes de dégâts de l\'aventurier gagnent 5 "étincelle" de plus.',
+        etincelle_bonus = 5,
+      })
+    end,
   },
   {
-    code = "heritage-assassin", name = "Héritage de l'Assassin", class_id = "assassin", tier = "avance", cost = 0,
+    -- "Prédateur" (2026-10-02, correction explicite -- "Requiem de
+    -- l'assassin est une erreur. C'est 'Prédateur' le bon nom" -- règle du
+    -- coup l'ancienne collision de nom avec "Requiem" du Barde). Contrairement
+    -- au Legs "Voile de Brume" ci-dessus (instantané), celui-ci EST bien
+    -- "Permanent" -- accorde Camouflage tout de suite (Game.grant_camouflage,
+    -- avec ses effets de bord -- Ombre patiente, annulation d'une attaque déjà
+    -- télégraphiée) PUIS réapplique Camouflage + Esquive 2 à chaque futur
+    -- début de combat (combat_start_status).
+    code = "heritage-assassin", name = "Prédateur", class_id = "assassin", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+    desc = '"Permanent". Gagne "Camouflage" et "Esquive" 2 à chaque début de combat.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1
+      Game.grant_camouflage(ctx.state, ctx.target)
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Prédateur",
+        desc = 'Redevient "Camouflage" et gagne "Esquive" 2 à chaque début de combat.',
+        combat_start_status = { camoufle = 1, esquive = 2 },
+      })
+    end,
   },
   {
-    code = "heritage-necromancien", name = "Héritage du Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
+    -- "Mangeur d'âme" (2026-10-02) : version Héritage de "Siphon de vie" --
+    -- contrairement à ce dernier (instantané), celui-ci EST "Permanent".
+    code = "heritage-necromancien", name = "Mangeur d'âme", class_id = "necromancien", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+    desc = '"Permanent". L\'allié gagne "Vol de Vie" 3 au début de chaque combat.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Mangeur d'âme",
+        desc = '"Vol de Vie" 3 à chaque début de combat.',
+        combat_start_status = { vol_de_vie = 3 },
+      })
+    end,
   },
   {
-    code = "heritage-barde", name = "Héritage du Barde", class_id = "barde", tier = "avance", cost = 0,
+    -- "Requiem" (2026-10-01) : version Héritage de "Chant du Cygne" --
+    -- MÊME valeur (Inspiration 2) mais réappliquée PAR TOUR (turn_start_status,
+    -- voir Game.start_turn) au lieu de par combat -- nettement plus fort en
+    -- pratique malgré le même chiffre, cohérent avec Legs/Héritage plus haut.
+    code = "heritage-barde", name = "Requiem", class_id = "barde", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true,
-    desc = "Ne fait rien sur l'allié ciblé. Épuisement.",
-    effect = function(ctx) ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1 end,
+    desc = '"Permanent". "Inspiration" 2 à chaque début de tour.',
+    effect = function(ctx)
+      Game = Game or require("src.rules.game")
+      ctx.target.heritage_count = (ctx.target.heritage_count or 0) + 1
+      Game.grant_permanent_buff(ctx.target, {
+        name = "Requiem",
+        desc = '"Inspiration" 2 à chaque début de tour.',
+        turn_start_status = { inspiration = 2 },
+      })
+    end,
   },
 
   {
+    -- Écho du Guerrier (2026-09-30, 1ʳᵉ carte Écho réellement designée) :
+    -- simple attaque, en écho affaibli de ce que le Guerrier savait faire.
+    -- `target = "enemy"` (pas "self" comme le placeholder -- il faut bien
+    -- désigner une cible pour infliger des dégâts), `owner_can_be_dead`
+    -- (2026-09-28, "l'esprit du défunt revient donner un petit boost à son
+    -- équipe... le SEUL cas d'une carte jouée par un mort") : voir
+    -- Combat.effective_owner/can_play, inchangé.
     code = "echo-guerrier", name = "Écho du Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
-    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
-    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
-    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
+    types = { "offensive" },
     epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Inflige 3 "epee".',
+    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 3, "physique", ctx) end,
   },
   {
     code = "echo-guerrier-ameliore", name = "Écho du Guerrier", class_id = "guerrier", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
+    types = { "offensive" },
     epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Inflige 5 "epee".',
+    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 5, "physique", ctx) end,
   },
   {
+    -- Écho du Paladin (2026-10-01) : `target = "ally"` (pas "self" comme le
+    -- placeholder -- il faut désigner l'allié qui reçoit le Bouclier).
+    -- `owner_can_be_dead` (2026-09-28, "l'esprit du défunt revient donner un
+    -- petit boost à son équipe... le SEUL cas d'une carte jouée par un mort") :
+    -- voir Combat.effective_owner/can_play, inchangé -- ce flag concerne QUI
+    -- joue la carte, indépendant de QUI elle cible. Épuisement confirmé sur
+    -- les 2 versions (2026-10-01, question posée explicitement -- toutes les
+    -- cartes Écho sont à usage unique, comme celles du Guerrier).
     code = "echo-paladin", name = "Écho du Paladin", class_id = "paladin", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
-    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
-    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
-    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Un allié gagne 2 "bouclier".',
+    effect = function(ctx) Combat.grant_defense(ctx.target, 2, ctx) end,
   },
   {
     code = "echo-paladin-ameliore", name = "Écho du Paladin", class_id = "paladin", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Un allié gagne 4 "bouclier".',
+    effect = function(ctx) Combat.grant_defense(ctx.target, 4, ctx) end,
   },
   {
+    -- Écho du Mage (2026-10-02) : `target = "enemy"` (pas "self" -- inflige
+    -- des dégâts, comme Écho du Guerrier). `owner_can_be_dead` (2026-09-28,
+    -- "l'esprit du défunt revient donner un petit boost à son équipe... le
+    -- SEUL cas d'une carte jouée par un mort") : inchangé.
     code = "echo-mage", name = "Écho du Mage", class_id = "mage", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
-    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
-    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
-    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    cats = { "sort", "degats" }, dmg_type = "magique", target = "enemy",
+    types = { "offensive" },
     epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Inflige 3 "etincelle".',
+    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 3, "magique", ctx) end,
   },
   {
     code = "echo-mage-ameliore", name = "Écho du Mage", class_id = "mage", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    cats = { "sort", "degats" }, dmg_type = "magique", target = "enemy",
+    types = { "offensive" },
     epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Inflige 5 "etincelle".',
+    effect = function(ctx) Combat.deal_damage(ctx.state, ctx.hero, ctx.target, 5, "magique", ctx) end,
   },
   {
+    -- Écho de l'Assassin (2026-10-01) : `target = "ally"` (pas "self" -- il
+    -- faut désigner l'allié qui reçoit l'Esquive). `owner_can_be_dead`
+    -- (2026-09-28, "l'esprit du défunt revient donner un petit boost à son
+    -- équipe... le SEUL cas d'une carte jouée par un mort") : inchangé.
     code = "echo-assassin", name = "Écho de l'Assassin", class_id = "assassin", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
-    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
-    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
-    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Un allié gagne "Esquive" 1.',
+    effect = function(ctx) Combat.apply_status(ctx.target, "esquive", 1) end,
   },
   {
     code = "echo-assassin-ameliore", name = "Écho de l'Assassin", class_id = "assassin", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Un allié gagne "Esquive" 2.',
+    effect = function(ctx) Combat.apply_status(ctx.target, "esquive", 2) end,
   },
   {
+    -- Écho du Nécromancien (2026-10-02) : `target = "ally"` (pas "self" --
+    -- il faut désigner l'allié qui paie le coût de PV et reçoit le bouclier,
+    -- très thématique -- un sacrifice de vie contre de la protection).
+    -- Perte de PV directe (PAS Combat.deal_damage -- ce n'est pas un coup
+    -- reçu, pas de source/dégâts à parer, juste un coût -- même famille que
+    -- Rite de la Chair/Pacte funeste, qui dépensent des PV/de la Corruption
+    -- directement). `owner_can_be_dead` (2026-09-28) : inchangé.
     code = "echo-necromancien", name = "Écho du Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
-    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
-    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
-    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'L\'allié ciblé perd 2 "PV" et gagne 4 "bouclier".',
+    effect = function(ctx)
+      ctx.target.hp = math.max(0, ctx.target.hp - 2)
+      Combat.grant_defense(ctx.target, 4, ctx)
+    end,
   },
   {
     code = "echo-necromancien-ameliore", name = "Écho du Nécromancien", class_id = "necromancien", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'L\'allié ciblé perd 2 "PV" et gagne 10 "bouclier".',
+    effect = function(ctx)
+      ctx.target.hp = math.max(0, ctx.target.hp - 2)
+      Combat.grant_defense(ctx.target, 10, ctx)
+    end,
   },
   {
+    -- Écho du Barde (2026-10-01) : `target = "ally"` (pas "self" -- il faut
+    -- désigner l'allié qui reçoit l'Inspiration). `owner_can_be_dead`
+    -- (2026-09-28, "l'esprit du défunt revient donner un petit boost à son
+    -- équipe... le SEUL cas d'une carte jouée par un mort") : voir
+    -- Combat.effective_owner/can_play, inchangé.
     code = "echo-barde", name = "Écho du Barde", class_id = "barde", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
-    -- `owner_can_be_dead` (2026-09-28, demande explicite -- "l'esprit du
-    -- défunt revient donner un petit boost à son équipe... le SEUL cas d'une
-    -- carte jouée par un mort") : voir Combat.effective_owner/can_play.
+    cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Un allié gagne 2 "inspiration".',
+    effect = function(ctx) ctx.target.inspiration = (ctx.target.inspiration or 0) + 2 end,
   },
   {
     code = "echo-barde-ameliore", name = "Écho du Barde", class_id = "barde", tier = "avance", cost = 0,
-    cats = {}, dmg_type = nil, target = "self",
+    cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, is_upgraded = true, owner_can_be_dead = true,
-    desc = "Aucun effet. Épuisement.",
-    effect = function(ctx) end,
+    desc = 'Un allié gagne 3 "inspiration".',
+    effect = function(ctx) ctx.target.inspiration = (ctx.target.inspiration or 0) + 3 end,
   },
 }
 

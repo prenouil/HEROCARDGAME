@@ -113,6 +113,16 @@ return function(View, UI)
         local curse = Temple.by_id(hero.curse)
         if curse then add_described_line(lines, curse.desc, seen, curse.name .. " — ") end
       end
+      -- Buffs permanents du pilier du sacrifice (2026-09-30, mot-clé
+      -- "Permanent" -- "l'aventurier gagne une icône dédiée... qui lui donne
+      -- le bonus à tout instant") : même traitement que blessing/curse
+      -- ci-dessus, mais une LISTE (un héros peut en porter plusieurs, voir
+      -- hero.permanent_buffs/Game.grant_permanent_buff), jamais un badge à
+      -- part -- l'infobulle reste le seul endroit où le détail complet
+      -- s'affiche.
+      for _, buff in ipairs(hero.permanent_buffs or {}) do
+        add_described_line(lines, buff.desc, seen, buff.name .. " — ")
+      end
       for _, l in ipairs(active_status_lines(hero, seen)) do lines[#lines + 1] = l end
       return hero.name, lines
     elseif h.kind == "enemy" then

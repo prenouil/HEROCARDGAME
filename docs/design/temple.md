@@ -2,6 +2,8 @@
 
 Catalogue des 8 bénédictions et 8 malédictions attribuables à l'écran du Temple. Reconstruit depuis le code le 2026-08-30 (`game/src/rules/temple.lua`, refonte complète du 2026-08-29). Absent des deux anciens documents (Google Doc, GDD BMAD) — écrit après leur rédaction, rien à comparer.
 
+**Corrigé le 2026-10-02** : "La Renaissante" utilisait encore l'ancien mécanisme décrit lors de la reconstruction initiale (voir la section dédiée plus bas) — harmonisée entre-temps par le code avec le mot-clé "Survie" du pilier du sacrifice. Audit complet du fichier `game/src/rules/temple.lua` à cette occasion (pas seulement cette entrée) : aucune autre bénédiction/malédiction n'a divergé depuis le 2026-08-30, voir la note en fin de document.
+
 Pour le comportement de l'écran lui-même en tant qu'évènement post-combat (conditions de déclenchement, sélection des candidats, ce que le joueur voit et fait), voir `docs/design/evenements.md` — ce document-ci ne couvre QUE le contenu des statues (nom, couleur, effet).
 
 ## Fonctionnement
@@ -21,11 +23,13 @@ Pour le comportement de l'écran lui-même en tant qu'évènement post-combat (c
 | La Guérisseuse | Vert | "Soin" 5 à chaque début de combat. |
 | L'Illusionniste | Bleu | "Esquive" 1 au début de chaque combat. |
 | Le Puissant | Rouge | "Puissance" 3 au début de chaque combat. |
-| La Renaissante | Blanc | À la place de mourir, reste vivant à 1 "PV", 1 seule fois (pour tout le run). |
+| La Renaissante | Blanc | Donne "Survie" au début de chaque combat — mais seulement tant qu'elle n'a jamais encore sauvé le porteur pour de vrai. |
 | L'Archiviste | Violet | "Pioche" une carte en plus à chaque tour. |
 | Le Réserviste | Noir | L'"énergie" non dépensée reste pour le tour suivant, 1 fois par combat. |
 | Le Protecteur | Orange | Gagne 4 "bouclier" au début de chaque tour. |
 | Le Rancunier | Gris | Renvoie 2 dégâts (brut, ignore le bouclier) à l'attaquant à chaque coup reçu. |
+
+**"La Renaissante" en détail** (voir aussi le mot-clé "Survie" dans `docs/design/glossaire.md`) : "Survie" fait que la prochaine fois que le porteur doit mourir, il reste en vie à **10% de ses PV max** à la place (jamais 1 PV fixe) — sauf face à une carte "Mise à mort", à laquelle rien n'échappe. La bénédiction **redonne** "Survie" à **chaque** entrée en combat, mais **seulement tant qu'elle n'a jamais encore sauvé le porteur pour de vrai** : dès que "Survie" a effectivement empêché une mort une fois, la bénédiction cesse de la recharger pour le reste du run, même à un combat bien plus tard. Au final, "La Renaissante" ne sauve donc qu'**une seule fois par run** — jamais "une fois par combat" comme le mécanisme d'origine (1 PV fixe, 1 fois pour tout le run — au final la même limite globale, mais pas le même PV d'arrivée). "Survie" peut aussi être accordée par une carte (Barde, "Célébration Finale") : dans ce cas c'est une charge unique indépendante de "La Renaissante", qui persiste jusqu'à consommation sans lien avec `renaissante_used`.
 
 ## Malédictions
 
@@ -39,6 +43,12 @@ Pour le comportement de l'écran lui-même en tant qu'évènement post-combat (c
 | Le Faible | Noir | "Incapacité" 3 au début de chaque combat. |
 | Le Blessé | Orange | Perd 1 "PV" à chaque attaque faisant des dégâts. |
 | L'Amnésique | Gris | Les cartes de cet aventurier gagnent "Amnésie". |
+
+## Correction interne du 2026-10-02 — "La Renaissante"
+
+La reconstruction initiale (2026-08-30) décrivait "La Renaissante" avec le mécanisme alors en place : `hero.death_ward`, remontée fixe à 1 PV, valable 1 seule fois pour tout le run. Le code l'a depuis harmonisée avec le mot-clé "Survie" (introduit par le pilier du sacrifice, carte "Célébration Finale" du Barde) : remontée à **10% des PV max** (jamais 1 PV fixe), rechargée à chaque entrée en combat **jusqu'à la première sauvegarde réelle**, puis plus jamais réactivée de tout le run (`hero.renaissante_used`, `game/src/rules/game.lua`/`combat.lua`) — voir le paragraphe dédié ci-dessus. L'écart avait été repéré et signalé (sans être corrigé, hors périmètre) lors de la synchronisation du Glossaire du 2026-09-30 ; corrigé ici.
+
+**Audit du reste du fichier à cette occasion** (`game/src/rules/temple.lua` relu intégralement, pas seulement l'entrée "La Renaissante") : les 7 autres bénédictions et les 8 malédictions correspondent toujours exactement à ce document — aucun autre écart trouvé. Vérifications ciblées faites en plus de la simple lecture de `temple.lua` : "Le Rancunier" (`hero.thorns`, riposte en dégâts `brut`) confirmé ignorer bien le bouclier de la cible dans `combat.lua` ; "Le Martyr" (`hero.targeting_bonus`) confirmé cumulable multiplicativement avec la Provocation du Paladin dans `encounter.lua` (`w = w * 1.5` puis `w = w * (1 + targeting_bonus)`) ; "Le Maladroit" (`discard_on_draw_chance`) confirmé se déclencher bien à la pioche, pas à un autre moment ; "Le Blessé" (`self_damage_on_hit`) confirmé ne se déclencher que sur une attaque qui inflige réellement des dégâts à un ennemi (jamais sur un coup entièrement paré, jamais sur un allié touché par erreur).
 
 ## Écart avec les anciens documents
 

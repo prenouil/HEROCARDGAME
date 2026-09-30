@@ -40,7 +40,10 @@ Glossary.terms = {
   { key = "saignement", icon = nil, has_icon = false, related = "", explain = "Inflige X dégâts brut à la fin du tour, -1 Saignement au début de chaque tour.", aliases = { "saignements" } },
   { key = "incapacite", icon = nil, has_icon = false, related = "", explain = "Inflige -25% de dégâts, -1 Incapacité au début de chaque tour." },
   { key = "vulnerabilite", icon = nil, has_icon = false, related = "", explain = "Reçoit +25% de dégâts, -1 Vulnérabilité au début de chaque tour." },
-  { key = "camoufle", icon = nil, has_icon = false, related = "", explain = "Ne peut pas être ciblé par un ennemi. Reste tant qu'un allié est en vie et jusqu'à jouer une carte." },
+  -- `aliases = { "camouflage" }` (2026-10-01) : cartes de l'Assassin (pilier
+  -- du sacrifice) qui écrivent '"Camouflage"' entre guillemets plutôt que
+  -- "Camouflé" -- même statut (hero.camoufle), reconnu sous les 2 formes.
+  { key = "camoufle", icon = nil, has_icon = false, related = "", explain = "Ne peut pas être ciblé par un ennemi. Reste tant qu'un allié est en vie et jusqu'à jouer une carte.", aliases = { "camouflage" } },
   -- "-1 Puissance au début de chaque tour, aventurier seulement" (2026-09-02,
   -- 1ère correction -- contredisait la description de "Cœur en Fusion"/
   -- "Surchauffe"/etc., "ne redescend jamais seule") : reformulé pour ne plus
@@ -137,6 +140,62 @@ Glossary.terms = {
   -- Gratuite (2026-09-02, statut GÉNÉRIQUE -- carte "Bis" du Barde,
   -- hero.gratuite) : voir Combat.effective_cost/Game.on_card_played.
   { key = "gratuite", icon = nil, has_icon = false, related = "", explain = "Tant que Gratuite > 0, toutes les cartes de l'aventurier coûtent et affichent 0 en énergie. -1 à chaque utilisation." },
+
+  -- Mots-clés du pilier du sacrifice (2026-09-30, demande explicite -- 4
+  -- définitions données en une fois, à formaliser au glossaire avant même la
+  -- 1ʳᵉ carte qui les utilise, contrairement à "Épuisement" resté en texte
+  -- brut jusqu'ici). Icone/Statut "no" pour les 4 -- pas de badge dédié sur le
+  -- cadre du héros, juste le texte entre guillemets sur la carte elle-même
+  -- (même traitement qu'Amnésie/Furtif ci-dessus).
+  -- "Mise à mort" : la carte qui la porte est détruite après utilisation
+  -- (comme "Épuisement" -- ne revient JAMAIS, contrairement à "Amnésie" qui
+  -- revient au combat suivant) ET déclenche l'Héritage (jamais le Legs) de
+  -- l'aventurier qui meurt en la jouant -- voir Game.kill_hero(voluntary=true)/
+  -- Game.process_hero_deaths, déjà le comportement réel de longue date, cette
+  -- entrée ne fait que le nommer formellement.
+  -- `label = "Mise à mort"` (2026-10-01, bug signalé -- affichait "miseamort"
+  -- en toutes lettres sur la carte) : contrairement à "Épuisement"/"Vulnerabilite"
+  -- etc. (mots UNIQUES, où la clé brute reste lisible telle quelle une fois
+  -- l'accent perdu), RichText.tokenize (voir son commentaire -- `value =
+  -- g.label or g.key` pour tout terme SANS icône) retombe sinon sur la clé
+  -- brute "miseamort", illisible car plusieurs mots FUSIONNÉS sans espace par
+  -- normalize_kw -- seul un `label` explicite corrige ce cas précis.
+  { key = "miseamort", icon = nil, has_icon = false, label = "Mise à mort", related = "", explain = "La carte est détruite après utilisation (jamais reprise). Déclenche l'Héritage (pas le Legs) de l'aventurier qui meurt en la jouant." },
+  -- "Héritage" : keyword GÉNÉRIQUE, distinct de la simple catégorie de carte
+  -- "Héritage du <Classe>" déposée à la mort -- une future carte pourrait
+  -- l'accorder à un allié pour que SA mort, même subie (pas via "Mise à
+  -- mort"), dépose un Héritage plutôt qu'un Legs. Aucune carte du Guerrier ne
+  -- l'accorde encore (2026-09-30) -- entrée posée en prévision, cohérente
+  -- avec la mécanique déjà réelle de "Mise à mort" ci-dessus.
+  { key = "heritage", icon = nil, has_icon = false, related = "", explain = "À la mort de son porteur, dépose une carte Héritage en défausse au lieu d'un Legs." },
+  -- "meurt" : PAS un simple "perd tous ses PV" -- aucun mécanisme du jeu ne
+  -- peut l'empêcher (contrairement à des PV qui tombent à 0 par les dégâts
+  -- normaux, potentiellement bloqués par du bouclier/de la Défense en amont) :
+  -- voir Game.kill_hero, qui met `hp` à 0 directement, sans jamais passer par
+  -- Combat.deal_damage (donc sans Défense/Bouclier/immunité possibles).
+  { key = "meurt", icon = nil, has_icon = false, related = "", explain = "Met les PV à 0 directement. Rien ne peut éviter cette mort (ni Défense, ni Bouclier, ni immunité)." },
+  -- "Permanent" : mot-clé des cartes Legs/Héritage (cible un allié) --
+  -- contrairement à un statut de combat classique (Puissance, Vulnérabilité...,
+  -- qui repart à 0 entre 2 combats), le bonus accordé dure TOUT LE RESTE DU
+  -- RUN, matérialisé par une icône dédiée au nom de la carte -- voir
+  -- hero.permanent_buffs/Game.grant_permanent_buff, Combat.permanent_epee_bonus.
+  { key = "permanent", icon = nil, has_icon = false, related = "", explain = "Cible un allié : il gagne une icône dédiée au nom de la carte, qui lui donne le bonus décrit à tout instant, pour le reste du run." },
+  -- "Survie" (2026-10-01, mot-clé -- carte "Célébration Finale" du Barde,
+  -- désormais AUSSI accordée par "La Renaissante" du Temple, harmonisées sur
+  -- ce même mécanisme unique à la demande explicite du porteur de projet --
+  -- l'ancien hero.death_ward à 1 PV fixe n'existe plus) : voir
+  -- Combat.deal_damage/Game.tick_bleed/tick_burn.
+  { key = "survie", icon = nil, has_icon = false, related = "", explain = "La prochaine fois qu'il doit mourir, l'aventurier reste en vie avec 10% de ses PV max à la place (sauf une carte \"Mise à mort\", à laquelle rien n'échappe)." },
+  -- "Exaltation" (2026-10-02, mot-clé -- carte "Transfert Interdit" du
+  -- Mage) : équivalent magique d'Incandescence, mais DÉCROISSANT -1/tour
+  -- (comme Puissance) -- voir Combat.exaltation_flat/Game.decay_end_of_
+  -- turn_statuses.
+  { key = "exaltation", icon = nil, has_icon = false, related = "", explain = "Les attaques magiques gagnent +X dégâts, X étant la valeur actuelle. -1 en fin de tour." },
+  -- "Vol de Vie" (2026-10-02, mot-clé -- cartes du Nécromancien) : `label`
+  -- explicite (2026-10-02, même correctif que "Mise à mort" -- voir son
+  -- commentaire) -- clé "voldevie" (3 mots fusionnés par normalize_kw),
+  -- illisible sans lui.
+  { key = "voldevie", icon = nil, has_icon = false, label = "Vol de Vie", related = "", explain = "Chaque fois que le personnage inflige des dégâts, il regagne X PV, X étant la valeur actuelle. -1 en fin de tour." },
 }
 
 -- Repli ASCII des lettres accentuées françaises (2026-08-30, bug signalé --

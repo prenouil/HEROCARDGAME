@@ -44,10 +44,18 @@ function Draft.pick_cards(state)
   -- Legs/Héritage/Écho ne sont JAMAIS proposées au draft -- elles n'existent
   -- qu'en étant déposées directement dans la défausse à la mort d'un héros
   -- (voir Game.process_hero_deaths) ou en convertissant ses cartes restantes.
-  -- La carte "Mise à mort" reste, elle, normalement draftable (pas de flag).
+  -- La carte "Mise à mort" reste, elle, normalement draftable, MAIS jamais
+  -- deux fois dans le même run (2026-10-01, demande explicite -- "les cartes
+  -- de mise à mort ne peuvent pas apparaître au draft si le joueur en a déjà
+  -- sélectionnée une avant pour son deck, même s'il l'a déjà jouée") : une
+  -- fois prise, son code rejoint state.run.drafted_mise_a_mort pour de bon
+  -- (voir Controller:choose_draft_card) -- même après épuisement (jouée, donc
+  -- disparue de toute pile), contrairement à `is_owned` plus bas (qui ne
+  -- regarde QUE ce qui est encore possédé maintenant, jamais l'historique).
+  local drafted_mise_a_mort = (state.run and state.run.drafted_mise_a_mort) or {}
   local eligible = {}
   for _, def in ipairs(Cards.list) do
-    if present_classes[def.class_id] and not def.not_draftable then
+    if present_classes[def.class_id] and not def.not_draftable and not drafted_mise_a_mort[def.code] then
       eligible[#eligible + 1] = def
     end
   end

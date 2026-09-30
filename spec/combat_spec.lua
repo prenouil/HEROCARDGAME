@@ -214,12 +214,16 @@ describe("Combat.deal_damage", function()
     assert.are.equal(8, self_hit.hp) -- 10 - 2, aucun rebond supplémentaire
   end)
 
-  it("La Renaissante (death_ward) : reste à 1 PV au lieu de mourir, consommée une seule fois", function()
+  -- "Survie" (2026-10-01, harmonisation explicite -- "La Renaissante" et
+  -- l'ancien death_ward à 1 PV fixe n'existent plus, un seul mécanisme
+  -- désormais, à 10% des PV max) : voir aussi spec/sacrifice_spec.lua pour la
+  -- couverture bout-en-bout de "Célébration Finale"/hero.survie.
+  it("Survie (ex-\"La Renaissante\"/death_ward) : reste à 10% des PV max au lieu de mourir, consommée une seule fois", function()
     local state = make_state()
-    local target = make_unit(5, { death_ward = true })
-    Combat.deal_damage(state, nil, target, 20, "physique", nil, { brut = true })
-    assert.are.equal(1, target.hp)
-    assert.is_false(target.death_ward)
+    local target = make_unit(50, { survie = true })
+    Combat.deal_damage(state, nil, target, 999, "physique", nil, { brut = true })
+    assert.are.equal(5, target.hp) -- 10% de 50 PV max
+    assert.is_false(target.survie)
   end)
 
   it("Le Blessé (self_damage_on_hit) : se blesse en touchant réellement un ennemi, jamais sur un allié", function()
@@ -302,5 +306,204 @@ describe("Combat.enemy_targeting", function()
     local buff_move = { hp = 10, next_move = { kind = "buff" }, target_hero_id = "guerrier" }
     local state = make_state({ dead, buff_move })
     assert.is_nil(Combat.enemy_targeting(state, hero))
+  end)
+end)
+
+-- Pilier du sacrifice (2026-09-30) : mécaniques GÉNÉRIQUES ajoutées à
+-- combat.lua pour "Baroud d'Honneur"/"Puissance Ancestrale" du Guerrier,
+-- réutilisables par les 5 prochaines classes -- couverture ISOLÉE du moteur
+-- pur (voir spec/sacrifice_spec.lua pour l'intégration bout-en-bout via de
+-- vraies cartes).
+local Rng = require("src.util.rng")
+
+describe("Combat.permanent_epee_bonus", function()
+  it("0 sans permanent_buffs, ou sur un dmg_type autre que physique", function()
+    assert.are.equal(0, Combat.permanent_epee_bonus(make_unit(10), "physique"))
+    local unit = make_unit(10, { permanent_buffs = { { epee_bonus = 2 } } })
+    assert.are.equal(0, Combat.permanent_epee_bonus(unit, "magique"))
+  end)
+
+  it("additionne le epee_bonus de TOUS les buffs permanents portés", function()
+    local unit = make_unit(10, { permanent_buffs = { { epee_bonus = 2 }, { epee_bonus = 3 }, {} } })
+    assert.are.equal(5, Combat.permanent_epee_bonus(unit, "physique"))
+  end)
+
+  it("s'applique réellement dans Combat.deal_damage, avant tout multiplicateur", function()
+    local source = make_unit(10, { permanent_buffs = { { epee_bonus = 2 } } })
+    local target = make_unit(20)
+    local state = make_state({ target }, { source })
+    Combat.deal_damage(state, source, target, 4, "physique", nil)
+    assert.are.equal(14, target.hp) -- 20 - (4 base + 2 bonus flat)
+  end)
+end)
+
+describe("Combat.deal_random_split_damage", function()
+  it("un seul ennemi vivant : reçoit tout, sans tirage", function()
+    local target = make_unit(100)
+    local state = make_state({ target })
+    Combat.deal_random_split_damage(state, nil, 50, "physique", Rng.new(1), nil)
+    assert.are.equal(50, target.hp)
+  end)
+
+  it("plusieurs ennemis : la somme des dégâts infligés vaut EXACTEMENT le total, jamais plus/moins par arrondi", function()
+    for seed = 1, 20 do
+      local e1, e2, e3 = make_unit(1000), make_unit(1000), make_unit(1000)
+      local state = make_state({ e1, e2, e3 })
+      Combat.deal_random_split_damage(state, nil, 50, "physique", Rng.new(seed), nil)
+      local dealt = (1000 - e1.hp) + (1000 - e2.hp) + (1000 - e3.hp)
+      assert.are.equal(50, dealt, "seed " .. seed)
+    end
+  end)
+
+  it("ignore les ennemis déjà morts, ne plante jamais si personne n'est vivant", function()
+    local dead = make_unit(0)
+    local state = make_state({ dead })
+    assert.has_no.errors(function()
+      Combat.deal_random_split_damage(state, nil, 50, "physique", Rng.new(1), nil)
+    end)
+    assert.are.equal(0, dead.hp)
+  end)
+
+  -- 2026-10-01, question explicite du porteur de projet -- "un ennemi à qui
+  -- il reste 10 PV ne doit pas prendre 11 dégâts. Seule exception : si des
+  -- dégâts ne peuvent pas être répartis (tous les ennemis morts ou
+  -- intouchables)". Les 3 tests précédents (HP >> total réparti) ne pouvaient
+  -- pas révéler un gaspillage par overkill -- ceux-ci le ciblent précisément.
+  it("aucune perte par overkill : le surplus capé sur un ennemi faible repart vers un autre encore vivant", function()
+    for seed = 1, 30 do
+      local weak = make_unit(5)
+      local strong = make_unit(1000)
+      local state = make_state({ weak, strong })
+      Combat.deal_random_split_damage(state, nil, 50, "physique", Rng.new(seed), nil)
+      assert.is_true(weak.hp >= 0, "seed " .. seed .. " : PV négatifs = overkill gaspillé")
+      local dealt = (5 - weak.hp) + (1000 - strong.hp)
+      -- Capacité totale (1005) très supérieure au total réparti (50) : RIEN
+      -- ne doit jamais être perdu, quel que soit le tirage.
+      assert.are.equal(50, dealt, "seed " .. seed)
+    end
+  end)
+
+  it("un ennemi tué par overkill s'arrête pile à 0 PV, jamais en dessous", function()
+    -- Poids délibérément écrasants sur `weak` (Rng.new(1) avec 1 seul autre
+    -- candidat) : sur assez de tirages, au moins un doit largement dépasser
+    -- ses 3 PV de capacité -- vérifie que le plafond s'applique, pas que la
+    -- chance l'évite.
+    local saw_capped = false
+    for seed = 1, 30 do
+      local weak = make_unit(3)
+      local strong = make_unit(1000)
+      local state = make_state({ weak, strong })
+      Combat.deal_random_split_damage(state, nil, 50, "physique", Rng.new(seed), nil)
+      if weak.hp == 0 then saw_capped = true end
+      assert.is_true(weak.hp >= 0, "seed " .. seed)
+    end
+    assert.is_true(saw_capped, "aucun des 30 tirages n'a jamais tué le plus faible -- suspect")
+  end)
+
+  it("exception RÉELLE : si la capacité totale des ennemis vivants est inférieure au total, le surplus est perdu", function()
+    local weak1, weak2 = make_unit(3), make_unit(4)
+    local state = make_state({ weak1, weak2 })
+    assert.has_no.errors(function()
+      Combat.deal_random_split_damage(state, nil, 50, "physique", Rng.new(1), nil)
+    end)
+    -- Capacité totale réelle : 7 PV, pour 50 dégâts à répartir -- 43 sont
+    -- inévitablement perdus (plus personne pour les encaisser), mais les 7
+    -- PV disponibles sont bien intégralement consommés (pas juste un des 2
+    -- ennemis tué au hasard en laissant l'autre indemne).
+    assert.are.equal(0, weak1.hp)
+    assert.are.equal(0, weak2.hp)
+  end)
+
+  it("un ennemi immunisé (\"Vol\") n'absorbe jamais de dégâts physique -- tout va aux autres", function()
+    local flying = make_unit(100, { vol = 1 })
+    local grounded = make_unit(1000)
+    local state = make_state({ flying, grounded })
+    Combat.deal_random_split_damage(state, nil, 50, "physique", Rng.new(1), nil)
+    assert.are.equal(100, flying.hp)
+    assert.are.equal(950, grounded.hp)
+  end)
+
+  it("un bouclier (Défense) compte dans la capacité -- jamais gaspillé non plus", function()
+    for seed = 1, 20 do
+      local shielded = make_unit(5, { defense = 20 }) -- capacité totale 25
+      local strong = make_unit(1000)
+      local state = make_state({ shielded, strong })
+      Combat.deal_random_split_damage(state, nil, 50, "physique", Rng.new(seed), nil)
+      local shielded_capacity_used = (20 - shielded.defense) + (5 - shielded.hp)
+      local dealt = shielded_capacity_used + (1000 - strong.hp)
+      assert.are.equal(50, dealt, "seed " .. seed)
+    end
+  end)
+end)
+
+-- Pilier du sacrifice (2026-10-02) : mécaniques GÉNÉRIQUES ajoutées à
+-- combat.lua pour le Mage/le Nécromancien -- "Exaltation" (Transfert Interdit),
+-- "Vol de Vie" (Siphon de vie/Mangeur d'âme), permanent_magic_bonus
+-- (Étincelle de magie/Arcane Oublié). Couverture ISOLÉE du moteur pur (voir
+-- spec/sacrifice_spec.lua pour l'intégration bout-en-bout via de vraies cartes).
+describe("Combat.permanent_magic_bonus", function()
+  it("0 sans permanent_buffs, ou sur un dmg_type autre que magique", function()
+    assert.are.equal(0, Combat.permanent_magic_bonus(make_unit(10), "magique"))
+    local unit = make_unit(10, { permanent_buffs = { { etincelle_bonus = 2 } } })
+    assert.are.equal(0, Combat.permanent_magic_bonus(unit, "physique"))
+  end)
+
+  it("additionne l'etincelle_bonus de TOUS les buffs permanents, s'applique dans Combat.deal_damage", function()
+    local source = make_unit(10, { permanent_buffs = { { etincelle_bonus = 2 }, { etincelle_bonus = 5 } } })
+    local target = make_unit(20)
+    local state = make_state({ target }, { source })
+    Combat.deal_damage(state, source, target, 4, "magique", nil)
+    assert.are.equal(9, target.hp) -- 20 - (4 base + 2 + 5)
+  end)
+end)
+
+describe("Combat.exaltation_flat", function()
+  it("0 sans exaltation, ou sur un dmg_type autre que magique", function()
+    assert.are.equal(0, Combat.exaltation_flat(make_unit(10), "magique"))
+    assert.are.equal(0, Combat.exaltation_flat(make_unit(10, { exaltation = 5 }), "physique"))
+  end)
+
+  it("s'applique dans Combat.deal_damage, flat avant tout multiplicateur", function()
+    local source = make_unit(10, { exaltation = 5 })
+    local target = make_unit(20)
+    local state = make_state({ target }, { source })
+    Combat.deal_damage(state, source, target, 4, "magique", nil)
+    assert.are.equal(11, target.hp) -- 20 - (4 + 5)
+  end)
+end)
+
+describe("\"Vol de Vie\" (Combat.deal_damage)", function()
+  it("soigne le porteur du montant actuel à chaque coup porté sur un ennemi, même totalement absorbé par du bouclier", function()
+    local source = make_unit(10, { vol_de_vie = 3 })
+    source.hp = 5 -- pour voir le soin
+    local target = make_unit(20)
+    local state = make_state({ target }, { source })
+    Combat.deal_damage(state, source, target, 4, "physique", nil)
+    assert.are.equal(8, source.hp) -- 5 + 3 (plafonné a max_hp=10, pas atteint)
+
+    -- Coup entierement absorbé par du bouclier : compte quand même (amount > 0).
+    source.hp = 5
+    local shielded = make_unit(20, { defense = 100 })
+    local state2 = make_state({ shielded }, { source })
+    Combat.deal_damage(state2, source, shielded, 4, "physique", nil)
+    assert.are.equal(8, source.hp)
+  end)
+
+  it("ne se déclenche jamais sur un coup porté à un ALLIÉ (is_enemy_target)", function()
+    local source = make_unit(10, { vol_de_vie = 3 })
+    source.hp = 5
+    local ally_target = make_unit(20) -- pas dans state.enemies -> jamais "is_enemy_target"
+    local state = make_state({}, { source, ally_target })
+    Combat.deal_damage(state, source, ally_target, 4, "physique", nil, { brut = true })
+    assert.are.equal(5, source.hp) -- inchangé
+  end)
+
+  it("plafonné aux PV max du porteur (Combat.grant_heal)", function()
+    local source = make_unit(10, { vol_de_vie = 100 })
+    source.hp = 8
+    local target = make_unit(20)
+    local state = make_state({ target }, { source })
+    Combat.deal_damage(state, source, target, 4, "physique", nil)
+    assert.are.equal(10, source.hp) -- jamais au-dessus de max_hp
   end)
 end)

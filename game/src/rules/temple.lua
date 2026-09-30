@@ -57,10 +57,18 @@ Temple.effects = {
     desc = '"Puissance" 3 au début de chaque combat.',
     combat_start_status = { puissance = 3 },
   },
+  -- Harmonisée avec le mot-clé "Survie" du pilier du sacrifice (2026-10-01,
+  -- demande explicite -- "il faut harmoniser La Renaissante pour qu'elle
+  -- donne Survie... le pourcentage va changer, c'est volontaire") : avant,
+  -- mécanisme distinct (hero.death_ward, revient à 1 PV fixe) -- désormais
+  -- LE MÊME champ/la même règle que "Survie" (10% des PV max, voir
+  -- Combat.deal_damage/Game.tick_bleed/tick_burn), recopiée sur `survie` par
+  -- Game.apply_combat_start_temple_effects à chaque entrée en combat -- 1
+  -- fois par combat, comme avant.
   {
     id = "renaissante", type = "blessing", name = "La Renaissante", color = "blanc",
-    desc = 'À la place de mourir, reste vivant à 1 "PV", 1 seule fois.',
-    death_ward = true,
+    desc = 'Donne "Survie" au début de chaque combat.',
+    survie = true,
   },
   {
     id = "archiviste", type = "blessing", name = "L'Archiviste", color = "violet",

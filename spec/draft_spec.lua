@@ -69,6 +69,39 @@ describe("Draft.pick_cards", function()
     end
   end)
 
+  -- 2026-10-01, demande explicite -- "les cartes de mise à mort ne peuvent
+  -- pas apparaître au draft si le joueur en a déjà sélectionnée une avant
+  -- pour son deck, même s'il l'a déjà jouée" : state.run.drafted_mise_a_mort
+  -- (posé par Controller:choose_draft_card au moment du choix, JAMAIS remis à
+  -- zéro même une fois la carte épuisée/jouée -- voir game.lua) exclut le code
+  -- du pool éligible, quel que soit le tirage.
+  it("ne propose plus jamais une carte \"Mise à mort\" déjà prise, même si elle n'est plus possédée (jouée/épuisée)", function()
+    for seed = 1, 40 do
+      -- Une seule classe (le pool éligible se réduit à 8 cartes -- voir le
+      -- test "une seule classe" plus bas) : force "mise-a-mort-guerrier" à
+      -- apparaître souvent sans l'exclusion, pour être sûr que l'exclusion
+      -- est bien ce qui la fait disparaître, pas la chance du tirage.
+      local state = make_state({ "guerrier" }, seed)
+      state.run = { combat_index = 1, drafted_mise_a_mort = { ["mise-a-mort-guerrier"] = true } }
+      local picks = Draft.pick_cards(state)
+      for _, def in ipairs(picks) do
+        assert.are_not.equal("mise-a-mort-guerrier", def.code, "seed " .. seed)
+      end
+    end
+  end)
+
+  it("sans l'exclusion (state.run absent ou vide), \"Mise à mort\" reste un pick possible -- confirme que le test ci-dessus teste bien l'exclusion, pas autre chose", function()
+    local seen = false
+    for seed = 1, 40 do
+      local state = make_state({ "guerrier" }, seed)
+      local picks = Draft.pick_cards(state)
+      for _, def in ipairs(picks) do
+        if def.code == "mise-a-mort-guerrier" then seen = true end
+      end
+    end
+    assert.is_true(seen)
+  end)
+
   it("carte améliorée : jamais au tout premier draft du run (2026-09-30, demande explicite -- 0% au début)", function()
     for seed = 1, 30 do
       local state = make_state({ "guerrier", "paladin", "mage", "assassin" }, seed)

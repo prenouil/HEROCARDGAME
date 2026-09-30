@@ -385,6 +385,28 @@ return function(View, UI)
       love.graphics.setFont(Fonts.get(13))
       love.graphics.printf(tostring(h.heritage_count), cx - radius, cy - 7, radius * 2, "center")
     end
+    -- Buffs permanents du pilier du sacrifice (2026-09-30, mot-clé
+    -- "Permanent" -- "l'aventurier gagne une icône dédiée... à tout instant") :
+    -- une pastille par buff porté, juste au-dessus du médaillon d'Héritage
+    -- (seule zone encore libre) -- le détail (nom + effet exact) vit dans
+    -- l'infobulle du héros (voir tooltip.lua), ce marqueur ne sert qu'à
+    -- signaler leur présence au premier coup d'œil. Teinte distincte du
+    -- médaillon d'Héritage (or) et des badges Temple (couleur de la statue) --
+    -- jamais confondus.
+    if not dead and #(h.permanent_buffs or {}) > 0 then
+      local buffs = h.permanent_buffs
+      local PIP_RADIUS, PIP_GAP = 6, 4
+      local total_w = #buffs * (PIP_RADIUS * 2) + (#buffs - 1) * PIP_GAP
+      local start_x = r.w / 2 - total_w / 2 + PIP_RADIUS
+      for i = 1, #buffs do
+        local cx, cy = start_x + (i - 1) * (PIP_RADIUS * 2 + PIP_GAP), 68
+        UI.set(Theme.energy)
+        love.graphics.circle("fill", cx, cy, PIP_RADIUS)
+        UI.set(Theme.black); love.graphics.setLineWidth(1.5)
+        love.graphics.circle("line", cx, cy, PIP_RADIUS)
+        love.graphics.setLineWidth(1)
+      end
+    end
     local name_y = r.h - 24
     draw_defense_badge_big(h, r, name_y - 24)
     -- Barre de PV épaissie, valeur DEDANS plutôt qu'en dessous (2026-08-27).
@@ -1034,6 +1056,12 @@ return function(View, UI)
       -- (2026-09-28, Écho) : exception -- ce voile ne doit PAS s'afficher pour
       -- une carte que son propriétaire mort peut justement encore jouer.
       local owner_defeated = not owner or (owner.hp <= 0 and not def.owner_can_be_dead)
+      -- Condition de jouabilité (2026-09-30, pilier du sacrifice) : évaluée
+      -- CHAQUE frame contre l'effective owner déjà résolu (même valeur que
+      -- Combat.can_play lira au clic, voir Game.select_card) -- jamais
+      -- recalculée différemment ici, sinon la carte pourrait s'afficher
+      -- jouable puis se faire refuser au clic (ou l'inverse).
+      local condition_met = not def.playable_condition or (owner and def.playable_condition(state, owner))
       -- Grossies (2026-08-27) puis réaugmenté (2026-09-12, 5ᵉ demande
       -- explicite) : survol 1.18->1.35, sélection 1.28->1.55. `pop` (0..1)
       -- interpole en continu vers cette cible plutôt que d'y sauter.
@@ -1062,7 +1090,7 @@ return function(View, UI)
         love.graphics.scale(UI.flip_scale_x(flip.elapsed - flip.delay, flip.duration), 1)
         love.graphics.translate(-r.w / 2, 0)
       end
-      CardUI.draw_card_face(def, r.w, r.h, cost_text, desc_text, has_bonus and Theme.heal or Theme.muted, is_pending, cost_insufficient, mana_insufficient, owner_defeated)
+      CardUI.draw_card_face(def, r.w, r.h, cost_text, desc_text, has_bonus and Theme.heal or Theme.muted, is_pending, cost_insufficient, mana_insufficient, owner_defeated, def.condition_text, condition_met)
       love.graphics.pop()
     end
 

@@ -184,6 +184,44 @@ describe("Mécaniques réactives des Enchantements (intégration, 6 classes)", f
       Game.gain_discretion(state, assassin, 10) -- redevient Camouflé une 2ème fois
       assert.are.equal(2, assassin.puissance)
     end)
+
+    -- 2026-10-01, nouvelle règle explicite -- "quand un allié devient
+    -- Camouflé, les ennemis qui le ciblent annulent leur attaque".
+    it("Camouflé annule l'action d'un ennemi qui le visait, quelle que soit la source (10 Discrétion)", function()
+      assassin.discretion, assassin.camoufle = 0, 0
+      enemy1.next_move = { kind = "dmg", amount = 5 }
+      enemy1.target_hero_id = assassin.id
+      Game.gain_discretion(state, assassin, 10) -- 0 -> 10 -> Camouflé
+      assert.is_nil(enemy1.next_move)
+      assert.is_nil(enemy1.target_hero_id)
+    end)
+
+    it("Camouflé n'annule PAS l'action d'un ennemi qui vise un AUTRE héros", function()
+      assassin.discretion, assassin.camoufle = 0, 0
+      enemy1.next_move = { kind = "dmg", amount = 5 }
+      enemy1.target_hero_id = guerrier.id
+      Game.gain_discretion(state, assassin, 10)
+      assert.is_not_nil(enemy1.next_move)
+      assert.are.equal(guerrier.id, enemy1.target_hero_id)
+    end)
+
+    it("ne se redéclenche pas si le héros est DÉJÀ Camouflé (seule une vraie transition 0->1 annule)", function()
+      assassin.discretion, assassin.camoufle = 10, 1 -- déjà Camouflé
+      enemy1.next_move = { kind = "dmg", amount = 5 }
+      enemy1.target_hero_id = assassin.id
+      Game.gain_discretion(state, assassin, 0)
+      assert.is_not_nil(enemy1.next_move) -- pas de nouvelle transition -> pas d'annulation
+    end)
+
+    it("Game.grant_camouflage (accordé DIRECTEMENT par une carte, pas via Discrétion) déclenche la même annulation", function()
+      assassin.discretion, assassin.camoufle = 0, 0
+      enemy1.next_move = { kind = "dmg", amount = 5 }
+      enemy1.target_hero_id = assassin.id
+      Game.grant_camouflage(state, assassin)
+      assert.are.equal(1, assassin.camoufle)
+      assert.is_nil(enemy1.next_move)
+      assert.is_nil(enemy1.target_hero_id)
+    end)
   end)
 
   describe("Nécromancien", function()

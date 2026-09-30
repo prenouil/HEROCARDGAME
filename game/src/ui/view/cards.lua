@@ -112,7 +112,15 @@ end
 -- `owner_defeated` (2026-08-24, demande explicite, optionnel, même
 -- provenance) : voile gris sur TOUTE la carte quand le héros propriétaire est
 -- vaincu.
-function M.draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight, cost_insufficient, mana_insufficient, owner_defeated)
+-- `condition_text`/`condition_met` (2026-09-30, pilier du sacrifice --
+-- "chaque carte de mise à mort porte sa propre condition de jouabilité...
+-- si la condition n'est pas remplie, la carte est injouable (grisée) et la
+-- condition est en rouge, sinon la condition est en vert") : optionnels,
+-- seul l'appel depuis la main les renseigne (voir def.playable_condition/
+-- Combat.can_play) -- `condition_text` seul suffit à déclencher l'affichage,
+-- `condition_met` nil est traité comme "non remplie" (jamais affiché vert par
+-- défaut).
+function M.draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight, cost_insufficient, mana_insufficient, owner_defeated, condition_text, condition_met)
   local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
   UI.panel(0, 0, w, h, palette.bg)
   UI.set(highlight and Theme.accent or Theme.black)
@@ -233,6 +241,20 @@ function M.draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight
   -- SANS dessiner) tienne dans le budget vertical réel, jusqu'à un plancher
   -- de 6. Si même 6 ne suffit pas, signalé en console.
   local desc_y = art_y + art_h + 4
+  -- Ligne de condition (2026-09-30, pilier du sacrifice) : réserve une petite
+  -- bande dédiée AU-DESSUS de la description, jamais mélangée à son texte
+  -- (RichText.draw n'accepte qu'UNE seule couleur pour tout le bloc, voir son
+  -- en-tête -- une condition rouge/verte au milieu d'un texte muted needs un
+  -- rendu séparé). `CONDITION_LINE_H` grignoté sur `desc_budget_h` seulement
+  -- quand `condition_text` est fourni -- aucun changement de mise en page pour
+  -- les 99% de cartes qui n'en ont pas.
+  local CONDITION_LINE_H = 11
+  if condition_text then
+    UI.set(condition_met and Theme.heal or Theme.hp)
+    love.graphics.setFont(Fonts.get(7))
+    love.graphics.printf(condition_text, 3, desc_y, w - 6, "center")
+    desc_y = desc_y + CONDITION_LINE_H
+  end
   local desc_budget_h = band_y - desc_y - 2
   local desc_size = 9
   while desc_size > 6 and RichText.measure_height(desc_text, w - 6, desc_size) > desc_budget_h do
@@ -281,9 +303,11 @@ function M.draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight
   UI.draw_tooltip_hint(w, h)
 
   -- Voile gris par-dessus tout le contenu déjà dessiné (cadre compris) quand
-  -- le propriétaire est vaincu -- chaque élément ci-dessus fixe sa propre
-  -- couleur, un voile en overlay évite de les reprendre un par un.
-  if owner_defeated then
+  -- le propriétaire est vaincu OU quand une condition de jouabilité n'est pas
+  -- remplie (2026-09-30, pilier du sacrifice -- "la carte est injouable
+  -- (grisée)") -- chaque élément ci-dessus fixe sa propre couleur, un voile en
+  -- overlay évite de les reprendre un par un.
+  if owner_defeated or (condition_text and not condition_met) then
     UI.set(Theme.black, 0.55)
     love.graphics.rectangle("fill", 0, 0, w, h, 10, 10)
   end

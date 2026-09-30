@@ -177,7 +177,16 @@ local function fresh_hero(def)
     -- descend pas" -- statut Volcan, côté ennemi surtout, mais initialisé ici
     -- comme les autres champs de statut par cohérence si jamais un futur
     -- effet l'accordait à un héros).
-    incapacite = 0, vulnerabilite = 0, puissance = 0, incandescence = 0, saignements = 0, brulure = 0,
+    -- "Exaltation" (2026-10-02, mot-clé -- carte "Transfert Interdit" du
+    -- Mage) : équivalent d'Incandescence, mais pour les dégâts MAGIQUES
+    -- (`dmg_type == "magique"`), et DÉCROISSANT -1/tour comme Puissance
+    -- (contrairement à Incandescence, qui ne redescend jamais) -- voir
+    -- Combat.exaltation_flat/Game.decay_end_of_turn_statuses.
+    -- "Vol de Vie" (2026-10-02, mot-clé -- cartes du Nécromancien) : soigne
+    -- son porteur à chaque coup qu'il porte (voir Combat.deal_damage), décroît
+    -- -1 en FIN DE TOUR comme Puissance/Exaltation (jamais à l'usage,
+    -- contrairement à Inspiration).
+    incapacite = 0, vulnerabilite = 0, puissance = 0, incandescence = 0, exaltation = 0, vol_de_vie = 0, saignements = 0, brulure = 0,
     -- Provocation (2026-08-28, statut propre au Paladin, clarifié après coup --
     -- "+50% de chances d'être ciblé par les ennemis, puis diminue de 1") : un
     -- statut de combat comme les autres (voir STATUS_KEYS/STATUS_TOOLTIP_FIELDS
@@ -225,7 +234,7 @@ local function fresh_hero(def)
     -- ne fait qu'exister pour que les champs soient documentés une fois ici.
     blessing = nil, curse = nil,
     thorns = nil, card_cost_delta = nil, targeting_bonus = nil, force_amnesie = nil,
-    extra_draw = nil, turn_start_shield = nil, death_ward = nil, reserviste = nil,
+    extra_draw = nil, turn_start_shield = nil, reserviste = nil,
     discard_on_draw_chance = nil,
     -- Enchantements (2026-09-03, demande explicite -- 2 par classe, jamais
     -- "Départ", accordés par la carte correspondante au moment où elle est
@@ -242,6 +251,39 @@ local function fresh_hero(def)
     ombre_patiente = nil, imperceptible = nil,
     rite_de_la_chair = nil, pacte_survie = nil,
     memoire_melodique = nil, tournee_finale = nil,
+    -- Buffs permanents accordés par un Legs/Héritage (2026-09-30, pilier du
+    -- sacrifice -- mot-clé "Permanent" : "l'aventurier gagne une icône dédiée
+    -- 'Nom de la carte', qui lui donne le bonus à tout instant") : liste de
+    -- { name, desc, epee_bonus, combat_start_status } -- JAMAIS remise à zéro
+    -- entre 2 combats (voir carried_hero, qui ne le touche pas, contrairement
+    -- à puissance/incandescence ci-dessus -- persiste tout le run une fois
+    -- accordé, comme blessing/curse) ; un héros peut en porter PLUSIEURS,
+    -- contrairement à blessing/curse (1 scalaire chacun) : plusieurs
+    -- camarades différents peuvent mourir au fil d'un même run et léguer
+    -- CHACUN son propre buff au même survivant. Voir Game.grant_permanent_buff
+    -- (seul point d'entrée pour en ajouter un) et son application à chaque
+    -- entrée en combat dans apply_combat_start_temple_effects ci-dessous.
+    permanent_buffs = {},
+    -- "Survie" (2026-10-01, mot-clé -- carte "Célébration Finale" du Barde,
+    -- ET désormais "La Renaissante" du Temple, harmonisées sur UN SEUL
+    -- mécanisme -- demande explicite) : DEUX sources possibles, traitées
+    -- différemment par apply_combat_start_temple_effects ci-dessous -- la
+    -- bénédiction la réattribue à chaque entrée en combat, MAIS SEULEMENT
+    -- TANT QU'ELLE N'A JAMAIS ENCORE SAUVÉ LE HÉROS (voir renaissante_used
+    -- juste en dessous -- correction explicite du 2026-10-02, "1 fois par
+    -- run", pas "1 fois par combat") ; une carte l'accorde comme une charge
+    -- UNIQUE qui persiste jusqu'à consommation, quel que soit le nombre de
+    -- combats, tant qu'aucune bénédiction n'est en jeu pour la personne qui
+    -- la porte -- voir Combat.deal_damage/Game.tick_bleed/tick_burn, seuls
+    -- lecteurs/écrivains (avec apply_combat_start_temple_effects).
+    survie = nil,
+    -- "La Renaissante ne sauve plus qu'UNE FOIS PAR RUN" (2026-10-02, demande
+    -- explicite) : posé à `true` au moment même où Survie sauve effectivement
+    -- ce héros (voir les 3 mêmes points de lecture que survie) -- PERSISTE
+    -- tout le run une fois vrai (jamais remis à nil, ni ici ni dans
+    -- carried_hero) : la bénédiction cesse alors de recharger `survie` pour
+    -- de bon, même à un combat bien plus tard.
+    renaissante_used = nil,
   }
 end
 
@@ -252,8 +294,12 @@ end
 -- (même principe que hero.discretion pour l'Assassin). Appelé à CHAQUE
 -- entrée en combat (fresh_hero n'a jamais d'effet, mais carried_hero si) --
 -- recalcule tout depuis zéro plutôt que de préserver l'ancien état, donc
--- "1 fois par combat" (death_ward/reserviste) redevient vrai à chaque
--- nouveau combat sans logique de reset séparée.
+-- "1 fois par combat" (survie/reserviste, quand accordés par une bénédiction)
+-- redevient vrai à chaque nouveau combat sans logique de reset séparée.
+-- `survie` (2026-10-01) fait exception à cette remise à zéro générale --
+-- voir son traitement dédié plus bas (JAMAIS un simple `n.survie = nil`
+-- comme les autres champs "miroir" : une charge accordée par une CARTE, pas
+-- une bénédiction, ne doit jamais être effacée à l'entrée en combat).
 -- `combat_start_heal`/`combat_start_curse_damage` (2026-08-28/29) : montant
 -- EFFECTIVEMENT appliqué à CETTE entrée en combat précise (peut être <
 -- l'effet déclaré si déjà proche du plafond/déjà bas, ou nil si rien à
@@ -264,8 +310,13 @@ local function apply_combat_start_temple_effects(n)
   n.combat_start_heal = nil
   n.combat_start_curse_damage = nil
   n.thorns = nil; n.card_cost_delta = nil; n.targeting_bonus = nil; n.force_amnesie = nil
-  n.extra_draw = nil; n.turn_start_shield = nil; n.death_ward = nil; n.reserviste = nil
+  n.extra_draw = nil; n.turn_start_shield = nil; n.reserviste = nil
   n.discard_on_draw_chance = nil
+  -- `n.survie` : PAS remis à nil ici (2026-10-01, voir le commentaire de
+  -- cette fonction) -- seule la bénédiction "La Renaissante" le force à
+  -- `true` plus bas (voir le bloc `blessing` juste en dessous) ; sans elle,
+  -- la valeur héritée du combat précédent (accordée ou non par une carte)
+  -- doit survivre intacte.
   if n.hp <= 0 then return end
 
   local blessing = n.blessing and Temple.by_id(n.blessing)
@@ -284,7 +335,25 @@ local function apply_combat_start_temple_effects(n)
     n.thorns = blessing.thorns
     n.extra_draw = blessing.extra_draw
     n.turn_start_shield = blessing.turn_start_shield
-    n.death_ward = blessing.death_ward or nil
+    -- `if blessing.survie then n.survie = true end` (2026-10-01), PAS
+    -- `n.survie = blessing.survie or nil` comme les autres champs "miroir"
+    -- ci-dessus : cette dernière forme écraserait à `nil` une charge accordée
+    -- par une CARTE ("Célébration Finale" du Barde) chez un héros qui n'a PAS
+    -- "La Renaissante" -- ici, en l'absence de la bénédiction, `n.survie`
+    -- garde simplement la valeur héritée par shallow_copy (carried_hero),
+    -- jamais réinitialisée.
+    -- `not n.renaissante_used` (2026-10-02, correction explicite -- "la
+    -- bénédiction la recharge à chaque entrée en combat JUSQU'À LA LIMITE DE
+    -- 1 UTILISATION. Quand le personnage est sauvé 1 fois par la bénédiction,
+    -- Survie ne réapparaît plus du fait de la bénédiction") : REVIREMENT sur
+    -- le comportement "1 fois par combat" de l'ex-death_ward -- La Renaissante
+    -- ne sauve plus qu'UNE SEULE FOIS PAR RUN désormais, jamais rechargée une
+    -- 2ᵉ fois même à un combat bien plus tard. `n.renaissante_used` (voir sa
+    -- définition dans fresh_hero) : posé à `true` au moment même de la
+    -- consommation (Combat.deal_damage/Game.tick_bleed/tick_burn), PERSISTE
+    -- tout le run (jamais remis à nil ici, contrairement aux autres champs
+    -- "miroir" de ce bloc).
+    if blessing.survie and not n.renaissante_used then n.survie = true end
     n.reserviste = blessing.reserviste or nil
   end
 
@@ -306,6 +375,87 @@ local function apply_combat_start_temple_effects(n)
     n.force_amnesie = curse.force_amnesie or nil
     n.discard_on_draw_chance = curse.discard_on_draw_chance
   end
+
+  -- Buffs permanents (Legs/Héritage, mot-clé "Permanent" -- 2026-09-30) :
+  -- réapplique le `combat_start_status` de CHAQUE buff porté, même mécanisme
+  -- que blessing.combat_start_status ci-dessus -- contrairement à
+  -- blessing/curse (1 seul possible par type), un héros peut en cumuler
+  -- plusieurs, d'où la boucle sur toute la liste plutôt qu'un seul `if`.
+  -- `epee_bonus` (bonus flat de dégâts, voir Combat.permanent_epee_bonus) n'a
+  -- besoin d'AUCUNE réapplication ici : combat.lua le relit directement depuis
+  -- `n.permanent_buffs` à chaque coup, jamais recopié sur un champ simple.
+  for _, buff in ipairs(n.permanent_buffs or {}) do
+    if buff.combat_start_status then
+      for field, amount in pairs(buff.combat_start_status) do
+        n[field] = (n[field] or 0) + amount
+      end
+    end
+  end
+end
+
+--- Accorde un buff permanent à `hero` (2026-09-30, pilier du sacrifice --
+-- mot-clé "Permanent" sur une carte Legs/Héritage) : seul point d'entrée pour
+-- peupler `hero.permanent_buffs` (voir sa définition dans fresh_hero) --
+-- s'applique IMMÉDIATEMENT (le combat en cours, si `combat_start_status` est
+-- posé) ET à chaque combat suivant (voir apply_combat_start_temple_effects,
+-- appelée par carried_hero) : "qui lui donne le bonus à TOUT INSTANT", jamais
+-- seulement à partir du prochain combat.
+-- `buff` : { name, desc, epee_bonus (optionnel, flat), combat_start_status
+-- (optionnel, table {champ=montant}, même convention que Temple.effects) }.
+--- Applique une table `{champ=montant}` d'un buff permanent sur `hero`
+-- (2026-10-01, "Bouclier Spirituel"/"Pouvoir de l'amitié" du Paladin) : la
+-- Défense passe TOUJOURS par Combat.grant_defense (jamais un simple `+=` sur
+-- `hero.defense`), comme "Le Protecteur"/hero.turn_start_shield juste plus
+-- bas dans ce fichier -- pour que "Bouclier vivant" (Enchantement du Paladin)
+-- redistribue une part de CE gain-là aussi, comme n'importe quel autre
+-- bouclier. Les autres champs (Puissance, Provocation...) restent un `+=`
+-- direct, aucune redistribution de ce genre n'existant pour eux.
+-- `field == "camoufle"` (2026-10-01, "Trahison Planifiée"/"Requiem" de
+-- l'Assassin) : DRAPEAU 0/1, jamais un compteur qui s'additionne -- toujours
+-- remis à exactement 1, jamais `+= amount` comme les autres champs. Bug
+-- rencontré en testant : ces 2 cartes appellent DÉJÀ Game.grant_camouflage
+-- (pour les effets de bord -- Ombre patiente, annulation d'attaque déjà
+-- télégraphiée, voir on_camouflage_gained) AVANT de poser ce buff permanent
+-- -- un simple `+=` ici l'aurait fait passer à 2 sur l'octroi immédiat. Les
+-- réapplications futures (à chaque entrée en combat, voir
+-- apply_combat_start_temple_effects) passent, elles, PAR ce chemin simplifié
+-- SANS les effets de bord (jamais d'action ennemie déjà télégraphiée à ce
+-- stade précis de toute façon -- voir le commentaire de Game.grant_camouflage).
+local function apply_permanent_buff_status(hero, status, ctx)
+  for field, amount in pairs(status) do
+    if field == "defense" then
+      Combat.grant_defense(hero, amount, ctx)
+    elseif field == "camoufle" then
+      hero.camoufle = 1
+    else
+      hero[field] = (hero[field] or 0) + amount
+    end
+  end
+end
+
+--- Accorde un buff permanent à `hero` (2026-09-30, pilier du sacrifice --
+-- mot-clé "Permanent" sur une carte Legs/Héritage) : seul point d'entrée pour
+-- peupler `hero.permanent_buffs` (voir sa définition dans fresh_hero) --
+-- s'applique IMMÉDIATEMENT (le combat en cours, si `combat_start_status` ou
+-- `turn_start_status` est posé) ET à chaque combat/tour suivant (voir
+-- apply_combat_start_temple_effects/Game.start_turn) : "qui lui donne le
+-- bonus à TOUT INSTANT", jamais seulement à partir du prochain combat/tour.
+-- `buff` : { name, desc, epee_bonus (optionnel, flat), combat_start_status
+-- (optionnel, réappliqué à CHAQUE COMBAT, voir Temple.effects), turn_start_status
+-- (optionnel, réappliqué à CHAQUE TOUR, voir hero.turn_start_shield --
+-- 2026-10-01, ex. "Bouclier Spirituel" : "à chaque début de TOUR, pas de
+-- chaque combat") }. `ctx` (optionnel) : passé tel quel à Combat.grant_defense
+-- si `defense` figure dans une de ces 2 tables -- `nil` ici (pas de `state`
+-- disponible à cet appel, contrairement à Game.start_turn) : pas de
+-- redistribution "Bouclier vivant" sur CE gain immédiat précis, acceptable
+-- (un simple hors-carte, pas un vrai geste de jeu) -- la réapplication de
+-- CHAQUE tour suivant, elle, en bénéficie (voir Game.start_turn, qui a
+-- `state` sous la main).
+function Game.grant_permanent_buff(hero, buff)
+  hero.permanent_buffs = hero.permanent_buffs or {}
+  hero.permanent_buffs[#hero.permanent_buffs + 1] = buff
+  if buff.combat_start_status then apply_permanent_buff_status(hero, buff.combat_start_status, nil) end
+  if buff.turn_start_status then apply_permanent_buff_status(hero, buff.turn_start_status, nil) end
 end
 
 --- Remet `card.def` sur sa forme CANONIQUE (2026-09-02, demande explicite --
@@ -346,7 +496,7 @@ local function carried_hero(h)
   -- rien à faire de spécial ici pour ces 2 champs.
   local n = shallow_copy(h)
   n.defense = 0; n.esquive = 0; n.camoufle = 0
-  n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.incandescence = 0; n.saignements = 0; n.brulure = 0
+  n.incapacite = 0; n.vulnerabilite = 0; n.puissance = 0; n.incandescence = 0; n.exaltation = 0; n.vol_de_vie = 0; n.saignements = 0; n.brulure = 0
   n.provocation = 0; n.scheduled_shields = {}
   n.played_card_this_turn = false
   -- Inspiration/Encore/Bouclier programmé de Servant d'os (2026-08-29) : des
@@ -412,13 +562,39 @@ function Game.gain_energy(state, amount)
   state.energy = state.energy + amount
 end
 
+--- Effets de bord d'une VRAIE transition 0->1 vers Camouflé (2026-10-01,
+-- extrait de Game.gain_discretion pour être réutilisable -- désormais DEUX
+-- chemins vers Camouflé, voir Game.grant_camouflage juste en dessous) :
+-- - "Ombre patiente" (2026-09-03, Enchantement de l'Assassin --
+--   hero.ombre_patiente) : Puissance à CHAQUE entrée en Camouflé, répétable
+--   sans plafond dans un même combat si Camouflé est reperdu puis regagné
+--   plusieurs fois, confirmé explicitement par le porteur de projet.
+-- - Annule l'action de tout ennemi qui vise CE héros (2026-10-01, nouvelle
+--   règle explicite -- "quand un allié devient Camouflé, les ennemis qui le
+--   ciblent annulent leur attaque") : Camouflé rend indétectable, une action
+--   déjà télégraphiée contre lui devient donc caduque -- même geste que
+--   "Ultime Rédemption"/"Riposte" (e.next_move/target_hero_id remis à nil),
+--   mais déclenché par un ÉVÉNEMENT (devenir Camouflé) plutôt qu'une carte.
+local function on_camouflage_gained(state, hero)
+  if hero.ombre_patiente then
+    Combat.apply_status(hero, "puissance", hero.ombre_patiente)
+    Combat.log(state, hero.name .. " (Ombre patiente) gagne " .. hero.ombre_patiente .. " Puissance.", "power")
+  end
+  for _, e in ipairs(Combat.living_enemies(state)) do
+    if e.next_move and e.target_hero_id == hero.id then
+      e.next_move = nil
+      e.target_hero_id = nil
+      Combat.log(state, e.name .. " annule son action : " .. hero.name .. " est Camouflé.", "power")
+    end
+  end
+end
+
 --- Ressource propre à l'Assassin (2026-08-24, DISTINCTE de Camouflé -- voir
 -- fresh_hero) : plafonnée à 10 (contrairement à l'énergie/la mana, jamais
--- plafonnées) -- au-delà, l'Assassin devient Camouflé (`hero.camoufle = 1`) --
--- c'est le SEUL chemin vers Camouflé désormais, aucune carte ne l'accorde
--- plus directement. Seul point d'entrée pour un gain de Discrétion (cartes
--- Assassinat/En traître/Préparation dans cards.lua, et le passif "un allié agit/ne
--- joue aucune carte ce tour" -- voir Game.on_card_played/
+-- plafonnées) -- au-delà, l'Assassin devient Camouflé (`hero.camoufle = 1`).
+-- Seul point d'entrée pour un gain de Discrétion (cartes Assassinat/En
+-- traître/Préparation dans cards.lua, et le passif "un allié agit/ne joue
+-- aucune carte ce tour" -- voir Game.on_card_played/
 -- Game.tick_discretion_end_of_turn) : ne jamais écrire `hero.discretion = ...`
 -- directement ailleurs.
 -- "Imperceptible" (2026-09-03, Enchantement de l'Assassin -- hero.imperceptible) :
@@ -434,18 +610,30 @@ function Game.gain_discretion(state, hero, amount)
   hero.discretion = math.min(10, (hero.discretion or 0) + amount)
   if hero.discretion >= 10 then
     hero.camoufle = 1
-    if not was_camoufle then Combat.log(state, hero.name .. " atteint 10 Discrétion : Camouflé.", "power") end
-    -- "Ombre patiente" (2026-09-03, Enchantement de l'Assassin --
-    -- hero.ombre_patiente) : Puissance à CHAQUE entrée en Camouflé (`not
-    -- was_camoufle` = transition 0->1, pas "reste Camouflé") -- répétable
-    -- sans plafond dans un même combat si la Discrétion retombe puis remonte
-    -- à 10 plusieurs fois, confirmé explicitement par le porteur de projet.
-    if not was_camoufle and hero.ombre_patiente then
-      Combat.apply_status(hero, "puissance", hero.ombre_patiente)
-      Combat.log(state, hero.name .. " (Ombre patiente) gagne " .. hero.ombre_patiente .. " Puissance.", "power")
+    if not was_camoufle then
+      Combat.log(state, hero.name .. " atteint 10 Discrétion : Camouflé.", "power")
+      on_camouflage_gained(state, hero)
     end
     Game.sync_camoufle_visibility(state)
   end
+end
+
+--- Accorde Camouflé DIRECTEMENT (2026-10-01, pilier du sacrifice -- "Trahison
+-- Planifiée"/"Requiem" de l'Assassin -- "L'assassin devient Camouflé"/"Gagne
+-- Camouflage") : 2ᵉ chemin vers Camouflé, en plus des 10 Discrétion
+-- (Game.gain_discretion ci-dessus) -- ne touche PAS hero.discretion (Camouflé
+-- devient vrai sans passer par le plafond de la ressource), mais déclenche
+-- les MÊMES effets de bord (Ombre patiente, annulation des attaques ennemies
+-- déjà télégraphiées contre ce héros) via on_camouflage_gained -- jamais une
+-- 2ᵉ copie de cette logique.
+function Game.grant_camouflage(state, hero)
+  local was_camoufle = (hero.camoufle or 0) > 0
+  hero.camoufle = 1
+  if not was_camoufle then
+    Combat.log(state, hero.name .. " devient Camouflé.", "power")
+    on_camouflage_gained(state, hero)
+  end
+  Game.sync_camoufle_visibility(state)
 end
 
 --- Camouflé "reste tant qu'un allié [non-Camouflé] est en vie" (2026-08-24,
@@ -538,6 +726,12 @@ function Game.new_rng_streams(master_seed)
     -- dédié, même raison d'être que "curse"/"necro" ci-dessus (ne jamais
     -- décaler un AUTRE tirage reproductible).
     enchantment = Rng.new(master_seed + 9),
+    -- Cartes "Mise à mort" à répartition aléatoire des dégâts (2026-09-30,
+    -- pilier du sacrifice -- ex. "Baroud d'Honneur" du Guerrier) : flux dédié
+    -- partagé par TOUTES les classes (une seule mort volontaire de ce type à
+    -- la fois de toute façon), même raison d'être que "curse"/"necro"/
+    -- "enchantment" ci-dessus.
+    sacrifice = Rng.new(master_seed + 10),
   }
 end
 
@@ -676,7 +870,15 @@ function Game.reset_run(state, seed, selected_ids, mode)
   local heroes = {}
   for i, id in ipairs(selected_ids) do heroes[i] = fresh_hero(Heroes.by_id(id)) end
   state.heroes = heroes
-  state.run = { combat_index = 1, is_boss = false, mode = mode }
+  -- `drafted_mise_a_mort` (2026-10-01, demande explicite -- "les cartes de
+  -- mise à mort ne peuvent pas apparaître au draft si le joueur en a déjà
+  -- sélectionnée une avant pour son deck, même s'il l'a déjà jouée") : set de
+  -- codes de cartes ("mise-a-mort-<classe>") déjà pris au draft AU MOINS UNE
+  -- FOIS ce run -- persiste même après que la carte ait été jouée et ait
+  -- disparu (épuisement), contrairement à un simple scan deck/main/défausse
+  -- (voir Draft.pick_cards/Controller:choose_draft_card, seuls lecteur et
+  -- écrivain).
+  state.run = { combat_index = 1, is_boss = false, mode = mode, drafted_mise_a_mort = {} }
   state.rng = Game.new_rng_streams(seed)
   if mode == "bounded" then state.run.biomes = pick_run_biomes(state.rng.encounter) end
   local budget = Encounter.budget_for_combat(1)
@@ -759,7 +961,7 @@ function Game.start_boss_test(state, seed, selected_ids, biome, level)
   local heroes = {}
   for i, id in ipairs(selected_ids) do heroes[i] = fresh_hero(Heroes.by_id(id)) end
   state.heroes = heroes
-  state.run = { combat_index = 1, is_boss = true }
+  state.run = { combat_index = 1, is_boss = true, drafted_mise_a_mort = {} }
   state.rng = Game.new_rng_streams(seed)
   state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter, biome, level)
   state.deck = Deck.build_starting_deck(selected_ids, function() return Game.next_uid(state) end, state.rng.deck)
@@ -790,7 +992,7 @@ end
 -- Game.start_boss_combat en pose, jamais appelé pour ce run_mode).
 function Game.start_solo_run(state, seed, hero_id, deck_defs)
   state.heroes = { fresh_hero(Heroes.by_id(hero_id)) }
-  state.run = { combat_index = 1, is_boss = false }
+  state.run = { combat_index = 1, is_boss = false, drafted_mise_a_mort = {} }
   state.rng = Game.new_rng_streams(seed)
   local budget = Encounter.budget_for_combat(1)
   local instances = Encounter.generate_encounter(budget, state.rng.encounter, nil)
@@ -999,6 +1201,20 @@ function Game.start_turn(state)
       -- juste assez pour que "Bouclier vivant" (Combat.grant_defense) puisse
       -- retrouver le reste de l'équipe même pour CE gain hors carte.
       if h.turn_start_shield then Combat.grant_defense(h, h.turn_start_shield, { state = state }) end
+      -- Buffs permanents à réapplication PAR TOUR (2026-10-01, "Bouclier
+      -- Spirituel"/"Pouvoir de l'amitié" du Paladin -- "+3/+6 bouclier à
+      -- chaque début de TOUR, pas de chaque combat") : même emplacement/même
+      -- raison d'être que turn_start_shield juste au-dessus (après la remise
+      -- à 0 de la Défense) -- DISTINCT de `combat_start_status` (voir
+      -- apply_combat_start_temple_effects), réappliqué lui à l'entrée en
+      -- combat SEULEMENT (ex. la Provocation de "Pouvoir de l'amitié", qui
+      -- reste sur ce rythme-là). Un héros peut porter plusieurs buffs, d'où
+      -- la boucle plutôt qu'un champ scalaire comme turn_start_shield.
+      for _, buff in ipairs(h.permanent_buffs or {}) do
+        if buff.turn_start_status then
+          apply_permanent_buff_status(h, buff.turn_start_status, { state = state })
+        end
+      end
       -- Boucliers programmés (2026-08-28, "Infranchissable") : même raison
       -- d'être qu'au-dessus (après la remise à 0 de la Défense).
       if h.scheduled_shields and #h.scheduled_shields > 0 then
@@ -1188,6 +1404,12 @@ function Game.resolve_pending(state, kind, target_id)
     if kind ~= "ally" then return end
     target = Combat.hero_by_id(state, target_id)
     if not target or target.hp <= 0 then return end
+    -- `def.exclude_self_target` (2026-10-01, "Célébration Finale" du Barde --
+    -- "le barde cible un allié différent de lui-même") : générique, n'importe
+    -- quelle future carte "ally" peut le poser -- refuse la résolution si le
+    -- lanceur se cible lui-même, exactement comme une cible invalide (return
+    -- silencieux, même contrat que les gardes juste au-dessus).
+    if def.exclude_self_target and target.id == hero.id then return end
   elseif def.target == "self" or (def.target == "conditional" and kind == "self") then
     target = hero
   end
@@ -1468,13 +1690,15 @@ function Game.tick_bleed(state)
     if h.hp > 0 and (h.saignements or 0) > 0 then
       local dmg = h.saignements
       h.hp = h.hp - dmg
-      -- "La Renaissante" (2026-08-29) : même garde-fou que Combat.deal_damage
+      -- "Survie" (2026-08-29/2026-10-01, ex-"La Renaissante"/death_ward,
+      -- harmonisées -- voir hero.survie) : même garde-fou que Combat.deal_damage
       -- (voir son commentaire) -- le saignement ne passe pas par cette
       -- fonction, dupliqué ici volontairement plutôt qu'un détour par combat.lua.
-      if h.hp <= 0 and h.death_ward then
-        h.hp = 1
-        h.death_ward = false
-        Combat.log(state, h.name .. " aurait dû mourir du saignement, mais reste debout à 1 PV !", "power")
+      if h.hp <= 0 and h.survie then
+        h.hp = math.max(1, math.ceil((h.max_hp or 1) * 0.1))
+        h.survie = false
+        h.renaissante_used = true -- "1 fois par run" (2026-10-02) -- voir combat.lua
+        Combat.log(state, h.name .. " (Survie) aurait dû mourir du saignement, mais reste debout à " .. h.hp .. " PV !", "power")
       end
       Combat.log(state, h.name .. " saigne : " .. dmg .. " dégâts.", "foe")
       h.saignements = h.saignements - 1
@@ -1502,10 +1726,11 @@ function Game.tick_burn(state)
     if h.hp > 0 and (h.brulure or 0) > 0 then
       local dmg = h.brulure
       h.hp = h.hp - dmg
-      if h.hp <= 0 and h.death_ward then
-        h.hp = 1
-        h.death_ward = false
-        Combat.log(state, h.name .. " aurait dû mourir de la brûlure, mais reste debout à 1 PV !", "power")
+      if h.hp <= 0 and h.survie then
+        h.hp = math.max(1, math.ceil((h.max_hp or 1) * 0.1))
+        h.survie = false
+        h.renaissante_used = true -- "1 fois par run" (2026-10-02) -- voir combat.lua
+        Combat.log(state, h.name .. " (Survie) aurait dû mourir de la brûlure, mais reste debout à " .. h.hp .. " PV !", "power")
       end
       Combat.log(state, h.name .. " brûle : " .. dmg .. " dégâts.", "foe")
     end
@@ -1694,6 +1919,8 @@ function Game.decay_end_of_turn_statuses(state)
     if (h.incapacite or 0) > 0 then h.incapacite = math.max(0, h.incapacite - 1) end
     if (h.vulnerabilite or 0) > 0 then h.vulnerabilite = math.max(0, h.vulnerabilite - 1) end
     if (h.puissance or 0) > 0 then h.puissance = math.max(0, h.puissance - 1) end
+    if (h.exaltation or 0) > 0 then h.exaltation = math.max(0, h.exaltation - 1) end
+    if (h.vol_de_vie or 0) > 0 then h.vol_de_vie = math.max(0, h.vol_de_vie - 1) end
     -- Inspiration (2026-08-29, Barde) : -1 automatique en fin de tour, EN PLUS
     -- de la consommation à l'usage (consume_inspiration, combat.lua) --
     -- "Dernier rappel" protège cette décroissance auto pour N tours

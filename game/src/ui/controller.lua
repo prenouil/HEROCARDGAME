@@ -1242,6 +1242,14 @@ function Controller:clear_animation_state()
   self.energy_turn_anim = nil
   self.pending_draw_uids = {}
   self.pending_sfx = {}
+  -- Filet de sécurité (2026-10-01) : un abandon de run (ESC -> "Revenir au
+  -- menu") pendant qu'une séquence de mort est encore en file (voir
+  -- pending_death_reveal_count) ne passe jamais par la fin normale de
+  -- Controller:start_death_reveal pour le redescendre -- sans cette remise à
+  -- 0 explicite, le compteur resterait bloqué au-dessus de 0 et gèlerait
+  -- indéfiniment la victoire/défaite de la PROCHAINE run.
+  self.pending_death_reveal_count = 0
+  self.pending_defeat = false
 end
 
 --- `mode` : "infini" | "bounded" (2026-08-21, demande explicite -- voir
@@ -1656,11 +1664,26 @@ end
 -- exactement comme animate_draw ci-dessus) ; self.seq ne sert qu'à rendre la
 -- main UNE FOIS la durée totale connue écoulée.
 function Controller:start_death_reveal(hero_id)
-  if self.screen ~= "playing" then return end -- combat déjà quitté entre-temps (défaite...)
+  -- Décompte AUSSI sur les 2 sorties anticipées ci-dessous (2026-10-01) :
+  -- l'incrément (voir Controller:update) a eu lieu inconditionnellement à la
+  -- mise en file -- un abandon de run (retour au menu pendant l'attente, voir
+  -- Controller:pause_menu_return_to_menu/clear_animation_state) NE PASSE PAS
+  -- par cette fonction pour redescendre le compteur, mais clear_animation_state
+  -- le remet à 0 directement ; ces 2 `return` ici couvrent le cas résiduel où
+  -- CETTE fonction est bien appelée mais n'a rien à faire (combat déjà quitté,
+  -- reveal déjà consommé) -- sans ce décompte, le compteur resterait bloqué
+  -- au-dessus de 0 et gèlerait la victoire/défaite du combat SUIVANT.
+  if self.screen ~= "playing" then
+    self.pending_death_reveal_count = math.max(0, (self.pending_death_reveal_count or 1) - 1)
+    return -- combat déjà quitté entre-temps (défaite...)
+  end
   local reveals = self.state.last_death_reveals
   local idx
   for i, r in ipairs(reveals) do if r.hero_id == hero_id then idx = i break end end
-  if not idx then return end -- rien à montrer (Game.process_hero_deaths pas encore passé -- ne devrait pas arriver)
+  if not idx then
+    self.pending_death_reveal_count = math.max(0, (self.pending_death_reveal_count or 1) - 1)
+    return -- rien à montrer (Game.process_hero_deaths pas encore passé -- ne devrait pas arriver)
+  end
   local reveal = table.remove(reveals, idx)
 
   -- `was_already_locked` (2026-09-30, demande explicite -- "il faut tout
@@ -1808,6 +1831,10 @@ function Controller:start_death_reveal(hero_id)
   self.seq:push(function() end, t + 0.1)
   self.seq:push(function()
     if not was_already_locked then self_.hand_locked = false end
+    -- Décompte la séquence terminée (2026-10-01, voir le commentaire sur
+    -- pending_death_reveal_count au moment de l'incrément, plus haut) : la
+    -- victoire/défaite en attente peut désormais basculer l'écran.
+    self_.pending_death_reveal_count = math.max(0, (self_.pending_death_reveal_count or 1) - 1)
   end)
 end
 
@@ -2686,6 +2713,23 @@ function Controller:update(dt)
       -- même idiome que Controller:consume_drawn_animation juste au-dessus.
       if not h.death_reveal_shown then
         h.death_reveal_shown = true
+        -- Compteur de séquences de mort EN COURS (2026-10-01, bug signalé --
+        -- "si le guerrier tue tous les ennemis avec le baroud d'honneur, on ne
+        -- voit pas du tout la cinématique de sa mort... il faut tout
+        -- interrompre, faire la séquence de mort en entier, avant de reprendre
+        -- les autres évènements") : incrémenté ICI (la séquence est mise en
+        -- file, pas encore jouée), décrémenté par Controller:start_death_reveal
+        -- une fois la séquence RÉELLEMENT terminée -- voir Controller:
+        -- has_pending_death_reveal, qui bloque désormais la bascule vers
+        -- l'écran de victoire/défaite (handle_combat_victory_now/
+        -- enter_defeat_screen_now, Controller:update) tant qu'il reste non
+        -- nul. Avant ce correctif, une carte "Mise à mort" qui tuait aussi le
+        -- dernier ennemi (ex. "Baroud d'Honneur") laissait la victoire
+        -- basculer l'écran BIEN avant que start_death_reveal (retardée de
+        -- HERO_DEATH_FADE_DURATION) n'ait eu la moindre chance de jouer --
+        -- son propre garde-fou `if self.screen ~= "playing" then return end`
+        -- annulait alors la cinématique en silence.
+        self.pending_death_reveal_count = (self.pending_death_reveal_count or 0) + 1
         local self_, hero_id = self, h.id
         -- Fige IMMÉDIATEMENT l'apparence des cartes de MAIN déjà converties
         -- (2026-10-01, bug signalé -- "les cartes du mort en main sont
@@ -2760,12 +2804,26 @@ function Controller:update(dt)
       Sfx.play("enemy_death")
     end
   end
+  -- Défaite différée (2026-10-01, voir Controller:enter_defeat_screen) :
+  -- vérifiée AVANT la victoire ci-dessous, même ordre de priorité que
+  -- Game.check_defeat/check_victory ailleurs dans ce fichier -- ne bascule
+  -- jamais tant qu'une séquence dramatique de mort est encore en file
+  -- (has_pending_death_reveal), sans quoi elle serait coupée net.
+  if self.pending_defeat and not self:has_pending_death_reveal() then
+    self:enter_defeat_screen_now()
+  end
   -- Victoire différée jusqu'à la fin des explosions (2026-08-30, voir
   -- Controller:handle_combat_victory ci-dessous) : vérifiée ICI, juste après
   -- avoir avancé toutes les séquences de mort ci-dessus, pour basculer
   -- l'écran dès la frame où la dernière explosion se termine plutôt qu'avec
-  -- 1 frame de retard.
-  if self.pending_victory and self:all_enemy_deaths_settled() then
+  -- 1 frame de retard. `not self:has_pending_death_reveal()` (2026-10-01,
+  -- bug signalé -- "si le guerrier tue tous les ennemis avec le baroud
+  -- d'honneur, on ne voit pas du tout la cinématique de sa mort") : une carte
+  -- comme "Baroud d'Honneur" peut tuer le dernier ennemi ET son propre lanceur
+  -- dans le même effet -- sans ce garde-fou, la victoire basculait l'écran
+  -- bien avant que la séquence de mort (retardée de HERO_DEATH_FADE_DURATION)
+  -- n'ait eu la moindre chance de jouer, l'annulant en silence.
+  if self.pending_victory and self:all_enemy_deaths_settled() and not self:has_pending_death_reveal() then
     self:handle_combat_victory_now()
   end
   for _, keys in pairs(self.status_pop) do
@@ -3041,10 +3099,35 @@ end
 
 -- ---------- victoire / défaite / draft ----------
 
+--- Différée (2026-10-01, même correctif que Controller:handle_combat_victory
+-- ci-dessous, même bug -- "il faut tout interrompre et faire la séquence de
+-- mort en entier avant de reprendre les autres évènements") : avant, basculait
+-- l'écran IMMÉDIATEMENT (et vidait self.seq au passage), ce qui pouvait couper
+-- net une séquence de mort dramatique tout juste mise en file (ex. le dernier
+-- héros qui s'achève avec sa propre carte "Mise à mort") avant qu'elle n'ait
+-- eu la moindre chance de jouer -- son garde-fou `if self.screen ~= "playing"`
+-- l'annulait alors en silence. Pose juste self.pending_defeat, consommé par
+-- Controller:update (voir Controller:enter_defeat_screen_now) dès que
+-- has_pending_death_reveal() redevient faux -- TOUS les appelants (défaite
+-- normale en pleine résolution ennemie, défaite par carte du joueur) passent
+-- par ce même chemin, jamais un chemin immédiat séparé.
 function Controller:enter_defeat_screen()
+  self.pending_defeat = true
+end
+
+function Controller:enter_defeat_screen_now()
+  self.pending_defeat = false
   self.screen = "defeat"
   self.seq:clear() -- inutile de finir de dérouler les ennemis restants une fois la défaite actée
   Sfx.play("defeat")
+end
+
+--- Vrai tant qu'au moins une séquence dramatique de mort (voir
+-- Controller:start_death_reveal/pending_death_reveal_count) est en file ou en
+-- cours -- seul lecteur : Controller:update, pour retarder la bascule vers
+-- l'écran de victoire/défaite tant qu'une mort n'a pas fini de se raconter.
+function Controller:has_pending_death_reveal()
+  return (self.pending_death_reveal_count or 0) > 0
 end
 
 -- Dispatch central de toute victoire de combat (2026-08-21, demande explicite --
@@ -3266,6 +3349,14 @@ function Controller:choose_draft_card(index)
   -- Mémorisé pour Controller:enter_forge_screen (2026-08-30, voir son
   -- commentaire) -- avant le log, sans effet sur celui-ci.
   self.last_drafted_uid = uid
+  -- Cartes "Mise à mort" jamais reproposées au draft (2026-10-01, demande
+  -- explicite) : enregistré ICI, au moment même où le joueur la choisit --
+  -- voir Draft.pick_cards, seul lecteur, et le commentaire sur
+  -- state.run.drafted_mise_a_mort (game.lua) pour pourquoi un simple scan
+  -- "encore possédée" ne suffit pas (une carte épuisée disparaît sans trace).
+  if def.code:match("^mise%-a%-mort%-") and self.state.run then
+    self.state.run.drafted_mise_a_mort[def.code] = true
+  end
   Combat.log(self.state, def.name .. " ajoutée au deck.", "sys")
   self.draft_choice_anim = {
     chosen_index = index, t = 0,
