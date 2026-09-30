@@ -32,7 +32,7 @@ Chaque classe a exactement 4 cartes dédiées à ce pilier, toutes tier "Avancé
 - **Legs vs Héritage** : toujours déterminé par la cause de la mort de qui MEURT (`voluntary` passé à `Game.kill_hero`), jamais par qui a joué la carte. Une carte "Mise à mort" pose systématiquement `voluntary = true`, donc toujours un Héritage — même quand elle tue un allié (fratricide) plutôt que son propre lanceur.
 - **Dépôt direct en défausse**, jamais en main — le joueur doit repiocher la carte avant de la jouer.
 - **Conversion en Écho AVANT dépôt du Legs/Héritage** (`Game.process_hero_deaths`) : évite que la carte tout juste déposée (de la même classe que le défunt) ne se reconvertisse elle-même.
-- **Jouabilité posthume** : Legs/Héritage restent jouables par n'importe quel héros vivant (`Combat.effective_owner` retombe sur un vivant) — jamais par le défunt. Seule exception : l'Écho, qui porte `owner_can_be_dead` et reste jouable par son propriétaire mort lui-même ("l'esprit du défunt").
+- **Jouabilité posthume** : Legs/Héritage/Écho portent tous les trois `owner_can_be_dead` (2026-10-03, correction explicite — "c'est le propriétaire qui joue Legs/Héritage sur un allié ciblé, la même dynamique que pour l'écho") et restent jouables par leur propriétaire mort lui-même ("l'esprit du défunt"), jamais par un autre héros vivant de l'équipe. Le repli de `Combat.effective_owner` sur le premier héros vivant reste un mécanisme générique du moteur, mais aucune carte du pilier du sacrifice n'en dépend plus aujourd'hui.
 - **Exclusion Draft** : Legs/Héritage/Écho portent `not_draftable`, jamais proposés en récompense. La carte "Mise à mort" reste normalement draftable, **mais son code rejoint `state.run.drafted_mise_a_mort` dès qu'elle est prise une première fois** — exclusion permanente du draft pour le reste du run, même après avoir été jouée et avoir disparu de toutes les piles (contrairement à une simple vérification "actuellement possédée").
 - **Exclusion Forge** : les 4 familles portent `no_forge_upgrade = true`, filtré par `Forge.upgradable_instances`.
 - **`exclude_self_target`** : sur les 4 cartes à `target = "ally"` (Barde, Assassin, Mage, Nécromancien), le lanceur ne peut jamais se choisir lui-même comme cible.
@@ -83,7 +83,7 @@ Contrairement à l'intention de design d'origine ("auto-sacrifice → un allié 
 
 <table>
 <tr><th>Carte</th><th>Détail</th></tr>
-<tr><td><strong>Trahison Planifiée</strong> (Mise à mort, coût 2)</td><td>Condition : 2 aventuriers vivants minimum. L'allié ciblé (≠ Assassin) meurt (Héritage). L'Assassin devient "Camouflage" et gagne "Puissance" 3, immédiatement ET à chaque début de combat.</td></tr>
+<tr><td><strong>Trahison Planifiée</strong> (Mise à mort, coût 2)</td><td>Condition : seulement 2 aventuriers vivants (exactement 2, pas "au moins 2" — corrigé le 2026-10-03). L'allié ciblé (≠ Assassin) meurt (Héritage). L'Assassin devient "Camouflage" et gagne "Puissance" 6 — gain instantané (2026-10-03, REVIREMENT : n'est plus un buff permanent, ne se réapplique plus aux combats suivants).</td></tr>
 <tr><td><strong>Voile de Brume</strong> (Legs, coût 0)</td><td>PAS permanent — gain instantané unique : l'allié ciblé gagne "Esquive" 2.</td></tr>
 <tr><td><strong>Prédateur</strong> (Héritage, coût 0)</td><td>Permanent (nature différente du Legs, pas juste plus fort) : l'allié gagne "Camouflage" immédiatement, puis "Camouflage" + "Esquive" 2 à chaque début de combat.</td></tr>
 <tr><td><strong>Écho de l'Assassin</strong></td><td>Base : un allié gagne "Esquive" 1. Amélioré : 2.</td></tr>

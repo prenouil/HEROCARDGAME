@@ -1333,22 +1333,23 @@ Cards.list = {
     -- effaçait le Camouflage tout juste accordé PAR CETTE CARTE elle-même,
     -- dans la MÊME résolution -- jamais l'effet voulu. Cohérent avec le thème
     -- (élimination discrète) ; à confirmer.
+    -- Puissance 3->6, gain INSTANTANÉ (2026-10-03, correction explicite --
+    -- "on supprime 'maintenant et à chaque début de combat'") : REVIREMENT,
+    -- ce n'est plus un buff permanent (`Game.grant_permanent_buff`) mais un
+    -- simple `Combat.apply_status`, comme "Voile de Brume" -- ne se
+    -- réapplique plus aux combats suivants.
     code = "mise-a-mort-assassin", name = "Trahison Planifiée", class_id = "assassin", tier = "avance", cost = 2,
     cats = { "furtif" }, dmg_type = nil, target = "ally", exclude_self_target = true,
     types = { "support" },
     epuisement = true, no_forge_upgrade = true,
-    condition_text = "2 aventuriers vivants",
-    playable_condition = function(state, hero) return #Combat.living_heroes(state) >= 2 end,
-    desc = '"Mise à mort". L\'allié ciblé "meurt". Devient "Camouflage" et "Puissance" 3 maintenant et à chaque début de combat. "Furtif".',
+    condition_text = "Seulement 2 aventuriers vivants",
+    playable_condition = function(state, hero) return #Combat.living_heroes(state) == 2 end,
+    desc = '"Mise à mort". L\'allié ciblé (≠ l\'Assassin) "meurt". Devient "Camouflage" et "Puissance" 6. "Furtif".',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
       Game.kill_hero(ctx.state, ctx.target, true)
       Game.grant_camouflage(ctx.state, ctx.hero)
-      Game.grant_permanent_buff(ctx.hero, {
-        name = "Trahison Planifiée",
-        desc = '"Puissance" 3 et redevient "Camouflage" à chaque début de combat.',
-        combat_start_status = { puissance = 3, camoufle = 1 },
-      })
+      Combat.apply_status(ctx.hero, "puissance", 6)
     end,
   },
   {
@@ -1406,7 +1407,7 @@ Cards.list = {
     -- version renforcée, +4 "Puissance" en plus).
     code = "legs-guerrier", name = "Puissance Ancestrale", class_id = "guerrier", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". Les cartes ciblant un ennemi infligent 2 "epee" de plus.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1428,7 +1429,7 @@ Cards.list = {
     -- ci-dessous, qui doit lui le préciser).
     code = "legs-paladin", name = "Bouclier Spirituel", class_id = "paladin", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". "Bouclier" 3.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1445,7 +1446,7 @@ Cards.list = {
     -- (voir Combat.permanent_magic_bonus), pas `epee_bonus`.
     code = "legs-mage", name = "Étincelle de magie", class_id = "mage", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". Les cartes de dégâts de l\'aventurier gagnent 2 "étincelle" de plus.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1465,7 +1466,7 @@ Cards.list = {
     -- seulement sa force, pour cette classe) plutôt qu'un oubli.
     code = "legs-assassin", name = "Voile de Brume", class_id = "assassin", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = 'L\'allié ciblé gagne "Esquive" 2.',
     effect = function(ctx) Combat.apply_status(ctx.target, "esquive", 2) end,
   },
@@ -1475,7 +1476,7 @@ Cards.list = {
     -- donné, aucun Game.grant_permanent_buff.
     code = "legs-necromancien", name = "Siphon de vie", class_id = "necromancien", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = 'L\'allié gagne "Vol de Vie" 3.',
     effect = function(ctx) Combat.apply_status(ctx.target, "vol_de_vie", 3) end,
   },
@@ -1485,7 +1486,7 @@ Cards.list = {
     -- comme le Bouclier du Paladin -- confirmé "au début de chaque combat").
     code = "legs-barde", name = "Chant du Cygne", class_id = "barde", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". "Inspiration" 2 à chaque début de combat.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1512,7 +1513,7 @@ Cards.list = {
     -- effet de jeu, désormais réel.
     code = "heritage-guerrier", name = "Puissance Ancestrale", class_id = "guerrier", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". "Puissance" 4. Les cartes ciblant un ennemi infligent 2 "epee" de plus.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1535,7 +1536,7 @@ Cards.list = {
     -- ("bien +3 provocation au début de chaque combat -- à préciser").
     code = "heritage-paladin", name = "Pouvoir de l'amitié", class_id = "paladin", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". "Bouclier" 6. "Provocation" 3 à chaque début de combat.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1553,7 +1554,7 @@ Cards.list = {
     -- même buff, +5 au lieu de +2.
     code = "heritage-mage", name = "Arcane Oublié", class_id = "mage", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". Les cartes de dégâts de l\'aventurier gagnent 5 "étincelle" de plus.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1576,7 +1577,7 @@ Cards.list = {
     -- début de combat (combat_start_status).
     code = "heritage-assassin", name = "Prédateur", class_id = "assassin", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". Gagne "Camouflage" et "Esquive" 2 à chaque début de combat.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1594,7 +1595,7 @@ Cards.list = {
     -- contrairement à ce dernier (instantané), celui-ci EST "Permanent".
     code = "heritage-necromancien", name = "Mangeur d'âme", class_id = "necromancien", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". L\'allié gagne "Vol de Vie" 3 au début de chaque combat.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
@@ -1613,7 +1614,7 @@ Cards.list = {
     -- pratique malgré le même chiffre, cohérent avec Legs/Héritage plus haut.
     code = "heritage-barde", name = "Requiem", class_id = "barde", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
-    epuisement = true, no_forge_upgrade = true, not_draftable = true,
+    epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". "Inspiration" 2 à chaque début de tour.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")

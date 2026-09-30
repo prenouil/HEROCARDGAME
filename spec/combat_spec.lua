@@ -89,7 +89,7 @@ describe("Combat.effective_owner (2026-09-28, pilier du sacrifice)", function()
     assert.are.equal(guerrier, Combat.effective_owner(state, "guerrier"))
   end)
 
-  it("héros de cette classe mort : retombe sur le premier héros vivant de l'équipe (carte Legs/Héritage/Écho posthume)", function()
+  it("héros de cette classe mort, allow_dead absent : retombe sur le premier héros vivant de l'équipe (repli générique, plus utilisé par aucune carte du pilier du sacrifice depuis owner_can_be_dead=true sur Legs/Héritage/Écho)", function()
     local guerrier = { id = "guerrier", class_id = "guerrier", hp = 0 }
     local mage = { id = "mage", class_id = "mage", hp = 10 }
     local state = make_state({}, { guerrier, mage })

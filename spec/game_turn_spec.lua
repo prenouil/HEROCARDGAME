@@ -295,6 +295,40 @@ describe("Game.tick_discretion_end_of_turn", function()
   end)
 end)
 
+describe("Game.sync_camoufle_visibility", function()
+  it("retire Camouflé à tous si plus aucun allié vivant n'est visible pour couvrir", function()
+    local a = { id = "a", hp = 10, camoufle = 1 }
+    local b = { id = "b", hp = 10, camoufle = 1 }
+    local state = make_state({ a, b }, {})
+    Game.sync_camoufle_visibility(state)
+    assert.are.equal(0, a.camoufle)
+    assert.are.equal(0, b.camoufle)
+  end)
+
+  it("ne touche à rien tant qu'au moins un allié vivant reste visible", function()
+    local a = { id = "a", hp = 10, camoufle = 1 }
+    local b = { id = "b", hp = 10, camoufle = 0 }
+    local state = make_state({ a, b }, {})
+    Game.sync_camoufle_visibility(state)
+    assert.are.equal(1, a.camoufle)
+    assert.are.equal(0, b.camoufle)
+  end)
+
+  -- Exception dernier survivant (2026-10-03, trouvé en testant "Trahison
+  -- Planifiée" : sa condition "Seulement 2 aventuriers vivants" fait que tuer
+  -- l'allié ciblé laisse systématiquement l'Assassin SEUL en vie, et cette
+  -- règle annulait alors instantanément le Camouflage que la carte venait
+  -- d'accorder -- "couvrir les autres" suppose qu'il existe d'autres héros
+  -- vivants).
+  it("un UNIQUE survivant vivant reste Camouflé (pas d'autre allié à couvrir, mais pas besoin d'être couvert non plus)", function()
+    local a = { id = "a", hp = 10, camoufle = 1 }
+    local dead = { id = "d", hp = 0, camoufle = 0 }
+    local state = make_state({ a, dead }, {})
+    Game.sync_camoufle_visibility(state)
+    assert.are.equal(1, a.camoufle)
+  end)
+end)
+
 -- Game.start_turn fait bien plus que consommer ces 2 files (télégraphie
 -- ennemie, pioche, PO...) -- besoin d'un état COMPLET (Game.reset_run), pas
 -- d'une fixture minimale, pour ne pas planter sur une dépendance sans rapport

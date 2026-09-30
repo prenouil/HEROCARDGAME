@@ -60,7 +60,7 @@ Les 18 termes "à icône" ont chacun un PNG dédié dans `game/assets/icons/keyw
 | Saignement(s) | Inflige X dégâts brut à la fin du tour, -1 Saignement au début de chaque tour. |
 | Incapacité | Inflige -25% de dégâts (flat, peu importe le nombre de stacks), -1 Incapacité au début de chaque tour. |
 | Vulnérabilité | Reçoit +25% de dégâts (flat, peu importe le nombre de stacks), -1 Vulnérabilité au début de chaque tour. |
-| Camouflé (alias : camouflage) | Ne peut pas être ciblé par un ennemi. Reste tant qu'un allié est en vie et jusqu'à jouer une carte. |
+| Camouflé (alias : camouflage) | Ne peut pas être ciblé par un ennemi. Retiré à tous les Camouflés dès qu'il ne reste plus aucun allié vivant et visible pour "couvrir" le groupe — sauf s'il ne reste plus qu'un seul aventurier vivant, auquel cas il reste Camouflé seul (2026-10-03). Retiré aussi dès que son porteur joue une carte (sauf "Furtif"). |
 | Puissance | Les attaques physiques gagnent +25% par stack (multiplicatif). -1 Puissance en **fin** de tour, **symétriquement** pour les aventuriers ET les ennemis (seule règle de décroissance, `Game.decay_end_of_turn_statuses`). |
 | Incandescence | Les attaques physiques gagnent +X dégâts (**flat**, X = valeur actuelle), additionné avant tout multiplicateur — pas +25%/stack comme Puissance. Ne décroît **jamais** automatiquement, quel que soit le porteur. Posée par plusieurs ennemis du Volcan (Salamandre de Lave, Golem de Magma, Vouivre des Cendres, Élémentaire de Feu) — voir `docs/design/bestiaire.md`. |
 | Vol | Les dégâts de type "épée" (physique) sont réduits à 0. Ne décroît PAS tout seul — seule "Charge en Piqué" (Aigle Géant) le retire. |

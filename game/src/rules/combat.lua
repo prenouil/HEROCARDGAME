@@ -535,11 +535,16 @@ end
 -- façon, aucune ressource propre à un héros précis n'entre en jeu).
 -- `allow_dead` (2026-09-28, demande explicite -- "j'aimerais que les cartes
 -- Echo soient jouées par l'aventurier propriétaire mort... l'esprit du
--- défunt revient donner un petit boost à son équipe. C'est le SEUL cas [...]
--- d'une carte jouée par un mort") : passer `def.owner_can_be_dead` ici
--- garde le défunt lui-même comme propriétaire au lieu de retomber sur un
--- vivant -- Combat.can_play/Game.assign_hero doivent alors, eux aussi,
--- laisser passer ce héros précis malgré `hp <= 0` (voir leurs commentaires).
+-- défunt revient donner un petit boost à son équipe") : passer
+-- `def.owner_can_be_dead` ici garde le défunt lui-même comme propriétaire au
+-- lieu de retomber sur un vivant -- Combat.can_play/Game.assign_hero doivent
+-- alors, eux aussi, laisser passer ce héros précis malgré `hp <= 0` (voir
+-- leurs commentaires). Étendu à Legs/Héritage (2026-10-03, correction
+-- explicite -- "c'est le propriétaire qui joue Legs/Heritage sur un allié
+-- ciblé, la même dynamique que pour l'écho") : les 3 familles de cartes
+-- posthumes portent désormais `owner_can_be_dead = true`, donc le repli sur
+-- un héros vivant ci-dessous ne joue plus qu'en dernier recours théorique
+-- (aucune carte du pilier du sacrifice n'en dépend plus aujourd'hui).
 -- Seule source de vérité -- utilisée à la fois par Game.select_card
 -- (jouabilité réelle) et draw_hand/view (aperçu visuel, `owner_defeated`) :
 -- ne doivent jamais diverger.
@@ -552,9 +557,10 @@ function Combat.effective_owner(state, class_id, allow_dead)
 end
 
 function Combat.can_play(state, hero, pending)
-  -- `pending.def.owner_can_be_dead` (2026-09-28, carte Écho -- voir
-  -- Combat.effective_owner) : seule exception au refus systématique d'un
-  -- héros mort, "l'esprit du défunt" qui revient jouer sa propre carte.
+  -- `pending.def.owner_can_be_dead` (2026-09-28, carte Écho ; étendu aux
+  -- cartes Legs/Héritage le 2026-10-03 -- voir Combat.effective_owner) :
+  -- exception au refus systématique d'un héros mort, "l'esprit du défunt"
+  -- qui revient jouer sa propre carte posthume.
   if not pending or (hero.hp <= 0 and not (pending.def and pending.def.owner_can_be_dead)) then return false end
   if state.energy < Combat.effective_cost(hero, pending.def) then return false end
   if pending.def.mana_cost and (hero.mana or 0) < pending.def.mana_cost then return false end

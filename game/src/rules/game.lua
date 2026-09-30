@@ -643,7 +643,16 @@ end
 -- "couvrir" les autres. À appeler après tout événement qui peut faire mourir
 -- un héros ou en rendre un Camouflé -- voir call sites : Game.gain_discretion,
 -- Game.tick_bleed, Game.resolve_enemy_action.
+-- Exception dernier survivant (2026-10-03, correction explicite trouvée en
+-- testant "Trahison Planifiée" -- avec sa condition "Seulement 2 aventuriers
+-- vivants", tuer l'allié ciblé laisse systématiquement l'Assassin SEUL en
+-- vie, et cette règle annulait alors instantanément le Camouflage que la
+-- carte venait d'accorder) : "couvrir les autres" suppose qu'il existe
+-- d'AUTRES héros vivants -- un unique survivant n'a personne à côté de qui se
+-- fondre, mais n'a pas non plus besoin qu'on le couvre ; il reste Camouflé
+-- seul.
 function Game.sync_camoufle_visibility(state)
+  if #Combat.living_heroes(state) <= 1 then return end
   for _, h in ipairs(state.heroes) do
     if h.hp > 0 and (h.camoufle or 0) <= 0 then return end -- au moins un allié visible : rien à faire
   end
@@ -1328,8 +1337,9 @@ function Game.select_card(state, uid)
       -- `Combat.effective_owner`, pas `Combat.hero_by_id` directement
       -- (2026-09-28, pilier du sacrifice) : voir son commentaire -- une carte
       -- Legs/Héritage/Écho reste jouable même une fois son héros d'origine
-      -- mort. `c.def.owner_can_be_dead` (Écho seulement) : le défunt reste
-      -- lui-même son propre propriétaire au lieu de retomber sur un vivant.
+      -- mort. `c.def.owner_can_be_dead` (toutes les cartes posthumes depuis
+      -- 2026-10-03) : le défunt reste lui-même son propre propriétaire au
+      -- lieu de retomber sur un vivant.
       local owner = Combat.effective_owner(state, c.def.class_id, c.def.owner_can_be_dead)
       if not owner or not Combat.can_play(state, owner, { def = c.def }) then return "refused" end
       state.pending = { uid = uid, def = c.def, hero_id = nil }
@@ -1355,9 +1365,9 @@ function Game.assign_hero(state, hero_id)
   if not pending then return false end
   local hero = Combat.hero_by_id(state, hero_id)
   local def = pending.def
-  -- `def.owner_can_be_dead` (2026-09-28, carte Écho -- voir
-  -- Combat.effective_owner/Combat.can_play, même exception) : seul cas où un
-  -- héros mort reste un `hero_id` valide à assigner.
+  -- `def.owner_can_be_dead` (2026-09-28, carte Écho ; étendu aux cartes Legs/
+  -- Héritage le 2026-10-03 -- voir Combat.effective_owner/Combat.can_play) :
+  -- cas où un héros mort reste un `hero_id` valide à assigner.
   if not hero or (hero.hp <= 0 and not def.owner_can_be_dead) then return false end
   if state.energy < Combat.effective_cost(hero, def) then return false end
   if def.mana_cost and (hero.mana or 0) < def.mana_cost then return false end

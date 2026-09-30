@@ -1026,8 +1026,9 @@ return function(View, UI)
       -- (2026-09-28, pilier du sacrifice) : voir son commentaire dans
       -- combat.lua (rules) -- sans ça, une carte Legs/Héritage/Écho
       -- s'afficherait grisée "owner_defeated" alors que Game.select_card
-      -- l'accepte bel et bien (jouée au nom d'un autre héros vivant, ou --
-      -- Écho seulement, `def.owner_can_be_dead` -- par le défunt lui-même).
+      -- l'accepte bel et bien -- `def.owner_can_be_dead` (toutes les cartes
+      -- posthumes depuis 2026-10-03) : jouée par le défunt lui-même,
+      -- "l'esprit du défunt", jamais un autre héros vivant à sa place.
       local owner = Combat.effective_owner(state, def.class_id, def.owner_can_be_dead)
       local desc_text, has_bonus = def.desc, false
       if previewing_hero then
@@ -1053,8 +1054,9 @@ return function(View, UI)
       local mana_insufficient = def.mana_cost and (not owner or (owner.mana or 0) < def.mana_cost)
       -- Voile gris (2026-08-24) : le propriétaire est vaincu, cette carte ne
       -- redeviendra jouable à aucun prix ce combat-ci. `def.owner_can_be_dead`
-      -- (2026-09-28, Écho) : exception -- ce voile ne doit PAS s'afficher pour
-      -- une carte que son propriétaire mort peut justement encore jouer.
+      -- (2026-09-28, Écho ; étendu aux cartes Legs/Héritage le 2026-10-03) :
+      -- exception -- ce voile ne doit PAS s'afficher pour une carte que son
+      -- propriétaire mort peut justement encore jouer lui-même.
       local owner_defeated = not owner or (owner.hp <= 0 and not def.owner_can_be_dead)
       -- Condition de jouabilité (2026-09-30, pilier du sacrifice) : évaluée
       -- CHAQUE frame contre l'effective owner déjà résolu (même valeur que

@@ -72,7 +72,7 @@ describe("Pilier du sacrifice -- intégration bout-en-bout", function()
     assert.is_true(all_guerrier_cards_are_echo(state.discard))
   end)
 
-  it("Legs/Héritage posthumes : jouables via un AUTRE héros vivant (Combat.effective_owner), jamais le défunt", function()
+  it("Legs posthume : jouable par le défunt lui-même (2026-10-03, même dynamique que l'Écho), pas par un autre héros", function()
     guerrier.hp = 0 -- mort subie, pas de died_voluntarily -> Legs
     Game.process_hero_deaths(state)
     local legs_card
@@ -83,16 +83,15 @@ describe("Pilier du sacrifice -- intégration bout-en-bout", function()
     state.discard = {}
     state.hand[#state.hand + 1] = legs_card
     assert.are.equal("assigned", Game.select_card(state, legs_card.uid))
-    -- Le lanceur assigné n'est JAMAIS le Guerrier mort -- un autre vivant de
-    -- l'équipe (le premier de state.heroes encore en vie).
-    assert.are_not.equal(guerrier.id, state.pending.hero_id)
-    local assigned = Combat.hero_by_id(state, state.pending.hero_id)
-    assert.is_true(assigned.hp > 0)
+    -- Le lanceur assigné EST le Guerrier mort lui-même -- "c'est le
+    -- propriétaire qui joue Legs/Héritage sur un allié ciblé, la même
+    -- dynamique que pour l'écho" (correction explicite du 2026-10-03).
+    assert.are.equal(guerrier.id, state.pending.hero_id)
     Game.resolve_pending(state, "ally", mage.id)
     assert.is_nil(mage.heritage_count) -- Legs (pas Héritage) : jamais de heritage_count posé
   end)
 
-  it("Écho posthume : SEULE exception -- reste jouable par son propriétaire mort lui-même", function()
+  it("Écho posthume : reste jouable par son propriétaire mort lui-même", function()
     guerrier.hp = 0
     guerrier.died_voluntarily = true
     Game.process_hero_deaths(state)
@@ -531,12 +530,25 @@ describe("Pilier du sacrifice -- intégration bout-en-bout", function()
   -- "Trahison Planifiée"/"Voile de Brume"/"Requiem"/"Écho de l'Assassin"
   -- (2026-10-01, 5ᵉ classe designée carte par carte).
   describe("Trahison Planifiée (Mise à mort de l'Assassin)", function()
-    it("injouable à moins de 2 aventuriers vivants", function()
-      -- Ne laisse que l'Assassin en vie -- 1 seul aventurier vivant.
+    -- Condition corrigée le 2026-10-03 ("Seulement 2 aventuriers vivants",
+    -- pas "au moins 2") : `#living_heroes == 2`, jamais `>= 2`. Ne laisse que
+    -- l'Assassin et le Mage en vie avant chaque test qui doit réellement
+    -- pouvoir jouer la carte -- sinon le décompte par défaut (6 héros vivants
+    -- posés par le before_each du fichier) la rendrait injouable.
+    before_each(function()
       for _, h in ipairs(state.heroes) do
-        if h.id ~= "assassin" then h.hp = 0 end
+        if h.id ~= "assassin" and h.id ~= "mage" then h.hp = 0 end
       end
+    end)
+
+    it("injouable à moins de 2 aventuriers vivants", function()
+      mage.hp = 0 -- ne laisse que l'Assassin en vie -- 1 seul aventurier vivant.
       assert.are.equal("refused", play("mise-a-mort-assassin", "u-trah-1", "ally", mage.id))
+    end)
+
+    it("injouable à plus de 2 aventuriers vivants (\"Seulement 2\", pas \"au moins 2\")", function()
+      paladin.hp = paladin.max_hp -- 3 aventuriers vivants : Assassin, Mage, Paladin.
+      assert.are.equal("refused", play("mise-a-mort-assassin", "u-trah-1b", "ally", mage.id))
     end)
 
     it("refuse de cibler l'Assassin lui-même (exclude_self_target)", function()
@@ -563,16 +575,17 @@ describe("Pilier du sacrifice -- intégration bout-en-bout", function()
       assert.is_true(has_heritage)
     end)
 
-    it("l'Assassin devient Camouflé et gagne Puissance 3 IMMÉDIATEMENT, réappliqués à chaque futur combat", function()
+    it("l'Assassin devient Camouflé et gagne Puissance 6, gain INSTANTANÉ (pas de buff permanent)", function()
       play("mise-a-mort-assassin", "u-trah-4", "ally", mage.id)
       assert.are.equal(1, assassin.camoufle)
-      assert.are.equal(3, assassin.puissance)
+      assert.are.equal(6, assassin.puissance)
+      assert.are.equal(0, #assassin.permanent_buffs) -- 2026-10-03 : plus de Game.grant_permanent_buff
 
       assassin.camoufle, assassin.puissance = 0, 0
       Game.start_next_combat(state)
       assassin = Combat.hero_by_id(state, "assassin")
-      assert.are.equal(1, assassin.camoufle)
-      assert.are.equal(3, assassin.puissance)
+      assert.are.equal(0, assassin.camoufle) -- ne se réapplique plus au combat suivant
+      assert.are.equal(0, assassin.puissance)
     end)
 
     it("Camouflage immédiat annule une attaque déjà télégraphiée contre l'Assassin", function()
