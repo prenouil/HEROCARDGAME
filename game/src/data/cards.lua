@@ -1400,19 +1400,24 @@ Cards.list = {
   },
 
   {
-    -- "Puissance Ancestrale" (2026-09-30, 1ʳᵉ carte Legs réellement designée)
-    -- : accorde un buff PERMANENT (mot-clé "Permanent") à l'allié ciblé --
-    -- voir Game.grant_permanent_buff/Combat.permanent_epee_bonus. Même nom
-    -- que la version Héritage ci-dessous (voulu -- Héritage est juste sa
-    -- version renforcée, +4 "Puissance" en plus).
-    code = "legs-guerrier", name = "Puissance Ancestrale", class_id = "guerrier", tier = "avance", cost = 0,
+    -- "Technique du Maître" (2026-09-30, 1ʳᵉ carte Legs réellement designée ;
+    -- renommée le 2026-10-03 -- REVIREMENT explicite : "Les 2 cartes Legs et
+    -- Héritage ne doivent pas avoir le même nom", correction d'une exception
+    -- involontaire -- toutes les 5 autres classes avaient déjà 2 noms
+    -- distincts pour leur Legs/Héritage, seul le Guerrier partageait "Puissance
+    -- Ancestrale" entre les deux) : accorde un buff PERMANENT (mot-clé
+    -- "Permanent") à l'allié ciblé -- voir Game.grant_permanent_buff/
+    -- Combat.permanent_epee_bonus. Même effet de jeu qu'avant, seul le nom
+    -- affiché change -- la version Héritage ci-dessous garde "Puissance
+    -- Ancestrale" comme sa version renforcée, +4 "Puissance" en plus.
+    code = "legs-guerrier", name = "Technique du Maître", class_id = "guerrier", tier = "avance", cost = 0,
     cats = {}, dmg_type = nil, target = "ally",
     epuisement = true, no_forge_upgrade = true, not_draftable = true, owner_can_be_dead = true,
     desc = '"Permanent". Les cartes ciblant un ennemi infligent 2 "epee" de plus.',
     effect = function(ctx)
       Game = Game or require("src.rules.game")
       Game.grant_permanent_buff(ctx.target, {
-        name = "Puissance Ancestrale",
+        name = "Technique du Maître",
         desc = 'Les cartes ciblant un ennemi infligent 2 "epee" de plus.',
         epee_bonus = 2,
       })

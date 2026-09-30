@@ -127,10 +127,12 @@ describe("Pilier du sacrifice -- intégration bout-en-bout", function()
     assert.are.equal(1, mage.heritage_count)
   end)
 
-  -- "Baroud d'Honneur"/"Puissance Ancestrale"/"Écho du Guerrier" (2026-09-30,
-  -- 1ʳᵉ classe designée carte par carte) : couverture des 4 cartes réelles du
-  -- Guerrier, au-delà du seul moteur générique déjà testé ci-dessus et dans
-  -- combat_spec.lua (Combat.deal_random_split_damage/permanent_epee_bonus).
+  -- "Baroud d'Honneur"/"Technique du Maître"/"Puissance Ancestrale"/"Écho du
+  -- Guerrier" (2026-09-30, 1ʳᵉ classe designée carte par carte ; Legs renommé
+  -- le 2026-10-03 -- "Les 2 cartes Legs et Héritage ne doivent pas avoir le
+  -- même nom") : couverture des 4 cartes réelles du Guerrier, au-delà du seul
+  -- moteur générique déjà testé ci-dessus et dans combat_spec.lua
+  -- (Combat.deal_random_split_damage/permanent_epee_bonus).
   describe("Baroud d'Honneur (Mise à mort du Guerrier)", function()
     it("injouable au-dessus de 30% PV (grisée), jouable en dessous", function()
       guerrier.hp = guerrier.max_hp
@@ -161,7 +163,7 @@ describe("Pilier du sacrifice -- intégration bout-en-bout", function()
     end)
   end)
 
-  describe("Puissance Ancestrale (Legs/Héritage du Guerrier)", function()
+  describe("Technique du Maître / Puissance Ancestrale (Legs/Héritage du Guerrier)", function()
     it("Legs : accorde un buff permanent (+2 epee) SANS Puissance", function()
       guerrier.hp = 0 -- mort subie -> Legs
       Game.process_hero_deaths(state)

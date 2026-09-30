@@ -99,6 +99,33 @@ local function draw_upgraded_frame(code, x, y, w, h)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
+--- Icône "tête de mort" en primitives, TOUJOURS au même endroit sur une
+-- carte "Mise à mort" (2026-10-03, pilier du sacrifice -- "il faut trouver
+-- quelque chose qui les mette en valeur... une icône de tête de mort dans un
+-- des coins de la carte, toujours au même endroit") : voir son appel dans
+-- draw_card_face, coin bas-droit de l'illustration -- vectorielle plutôt
+-- qu'un asset généré, pour rester nette à cette taille sans dépendre d'un
+-- fichier externe.
+local function draw_skull_badge(cx, cy, r)
+  UI.set(Theme.black, 0.82)
+  love.graphics.circle("fill", cx, cy, r)
+  local bone = { 0.93, 0.91, 0.84 }
+  UI.set(bone)
+  love.graphics.ellipse("fill", cx, cy - r * 0.15, r * 0.6, r * 0.68)
+  love.graphics.rectangle("fill", cx - r * 0.38, cy + r * 0.2, r * 0.76, r * 0.34, 2, 2)
+  UI.set(Theme.black, 0.85)
+  love.graphics.circle("fill", cx - r * 0.26, cy - r * 0.18, r * 0.18)
+  love.graphics.circle("fill", cx + r * 0.26, cy - r * 0.18, r * 0.18)
+  love.graphics.polygon("fill",
+    cx, cy - r * 0.02,
+    cx - r * 0.09, cy + r * 0.16,
+    cx + r * 0.09, cy + r * 0.16)
+  love.graphics.line(cx - r * 0.3, cy + r * 0.37, cx + r * 0.3, cy + r * 0.37)
+  love.graphics.line(cx - r * 0.12, cy + r * 0.2, cx - r * 0.12, cy + r * 0.5)
+  love.graphics.line(cx + r * 0.12, cy + r * 0.2, cx + r * 0.12, cy + r * 0.5)
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
 --- Dessine le contenu plein d'une carte (fond teinté par classe, double contour,
 -- pastille de coût, nom en cadre, description) dans l'espace local [0,0]..[w,h] --
 -- l'appelant gère push/translate/scale/pop. Partagé entre la main (combat.lua)
@@ -122,6 +149,14 @@ end
 -- défaut).
 function M.draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight, cost_insufficient, mana_insufficient, owner_defeated, condition_text, condition_met)
   local palette = Theme.card_class[def.class_id] or Theme.card_class.generic
+  -- Carte posthume (2026-10-03, pilier du sacrifice -- "les cartes Legs/
+  -- Héritage/Écho doivent être un peu translucides, avec un alpha qui
+  -- montre que ce sont des cartes venant des esprits, d'un fantôme") :
+  -- `def.owner_can_be_dead` est déjà EXACTEMENT ce marqueur ("jouable par
+  -- le défunt lui-même", voir Combat.effective_owner) -- jamais vrai pour
+  -- une carte "Mise à mort" elle-même, qui a son propre traitement
+  -- (draw_skull_badge) plus bas.
+  local spectral = def.owner_can_be_dead
   UI.panel(0, 0, w, h, palette.bg)
   UI.set(highlight and Theme.accent or Theme.black)
   love.graphics.setLineWidth(highlight and 3 or 2)
@@ -151,12 +186,22 @@ function M.draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight
   local art_x, art_y, art_w, art_h = 4, 4, w - 8, 109
   local art = Sprites.card(def.code)
   if art then
+    if spectral then love.graphics.setColor(0.72, 0.85, 1, 0.42) end
     Sprites.draw_cover(art, art_x, art_y, art_w, art_h)
+    if spectral then love.graphics.setColor(1, 1, 1, 1) end
   else
-    UI.set(Theme.panel_light); love.graphics.rectangle("fill", art_x, art_y, art_w, art_h, 4, 4)
+    UI.set(spectral and { 0.68, 0.76, 0.84 } or Theme.panel_light)
+    love.graphics.rectangle("fill", art_x, art_y, art_w, art_h, 4, 4)
   end
   UI.set(palette.border); love.graphics.setLineWidth(1)
   love.graphics.rectangle("line", art_x, art_y, art_w, art_h, 4, 4)
+
+  -- Icône "tête de mort" (2026-10-03, pilier du sacrifice, carte "Mise à
+  -- mort") : coin bas-droit de l'illustration, TOUJOURS cette position
+  -- exacte quelle que soit l'illustration en dessous -- voir draw_skull_badge.
+  if def.code:match("^mise%-a%-mort%-") then
+    draw_skull_badge(art_x + art_w - 14, art_y + art_h - 14, 11)
+  end
 
   -- Coûts (2026-09-12, demande explicite -- "les coûts additionnels doivent
   -- être situés en colonne, dessous le coût en énergie") : l'énergie garde sa
@@ -301,6 +346,20 @@ function M.draw_card_face(def, w, h, cost_text, desc_text, desc_color, highlight
   end
 
   UI.draw_tooltip_hint(w, h)
+
+  -- Halo spectral (2026-10-03, pilier du sacrifice, voir `spectral` plus
+  -- haut) : voile additif pâle sur TOUTE la carte -- mode "add" plutôt
+  -- qu'alpha normal pour toujours ÉCLAIRCIR sans jamais nuire à la
+  -- lisibilité du texte déjà dessiné, contrairement au voile gris
+  -- owner_defeated ci-dessous qui, lui, doit assombrir exprès. Avant ce
+  -- voile gris (pas après) : une carte injouable reste avant tout "grisée",
+  -- l'aura spectrale ne doit jamais l'emporter visuellement là-dessus.
+  if spectral then
+    love.graphics.setBlendMode("add")
+    UI.set({ 0.55, 0.78, 1 }, 0.28)
+    love.graphics.rectangle("fill", 0, 0, w, h, 10, 10)
+    love.graphics.setBlendMode("alpha")
+  end
 
   -- Voile gris par-dessus tout le contenu déjà dessiné (cadre compris) quand
   -- le propriétaire est vaincu OU quand une condition de jouabilité n'est pas

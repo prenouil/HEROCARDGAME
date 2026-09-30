@@ -54,7 +54,7 @@ Contrairement à l'intention de design d'origine ("auto-sacrifice → un allié 
 <table>
 <tr><th>Carte</th><th>Détail</th></tr>
 <tr><td><strong>Baroud d'Honneur</strong> (Mise à mort, coût 2)</td><td>Condition : PV &lt; 30% max. Inflige 50 "epee" aux ennemis (répartis aléatoirement), puis meurt (Héritage).</td></tr>
-<tr><td><strong>Puissance Ancestrale</strong> (Legs, coût 0)</td><td>Permanent. Les cartes ciblant un ennemi infligent 2 "epee" de plus.</td></tr>
+<tr><td><strong>Technique du Maître</strong> (Legs, coût 0)</td><td>Permanent. Les cartes ciblant un ennemi infligent 2 "epee" de plus. (Renommé le 2026-10-03 — partageait "Puissance Ancestrale" avec l'Héritage, seule exception aux 5 autres classes qui ont toujours 2 noms distincts.)</td></tr>
 <tr><td><strong>Puissance Ancestrale</strong> (Héritage, coût 0)</td><td>Permanent. "Puissance" 4 à chaque début de combat. Les cartes ciblant un ennemi infligent 2 "epee" de plus.</td></tr>
 <tr><td><strong>Écho du Guerrier</strong></td><td>Base : inflige 3 "epee". Amélioré : 5.</td></tr>
 </table>
