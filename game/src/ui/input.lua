@@ -85,6 +85,38 @@ local function debug_card_picker_hovering(controller, x, y)
   return true -- overlay modal : tout le panneau réagit (cartes cliquables + fermeture)
 end
 
+--- Fenêtre PARTAGÉE "Choisis un pouvoir à oublier à jamais" (2026-10-03,
+-- "Le Puit de l'Oubli"/"Prédiction de la Mort" -- "Sacrifier un pouvoir à la
+-- place") : même priorité/schéma que debug_card_picker_click juste au-dessus
+-- -- un clic sur "Retour" OU en dehors du panneau le referme SANS rien
+-- détruire (voir Controller:close_power_well_picker), un clic sur UNE CARTE
+-- lance le zoom/éclatement (Controller:choose_power_well_card). Pendant
+-- l'animation (`pw.anim`), tout clic est simplement "consommé" -- rien n'est
+-- plus cliquable, la grille elle-même n'est plus affichée (voir
+-- draw_power_well).
+local function power_well_click(controller, x, y)
+  local pw = controller.power_well
+  if not pw then return false end
+  if pw.anim then return true end
+  if View.point_in(View.power_well_back_button, x, y) or not View.point_in(View.power_well_panel_rect, x, y) then
+    controller:close_power_well_picker()
+    return true
+  end
+  local layout = View.power_well_layout(controller)
+  local scroll = math.max(0, math.min(layout.max_scroll, pw.scroll or 0))
+  for i, c in ipairs(layout.cards) do
+    if View.point_in(View.power_well_rect_at(controller, i, scroll), x, y) then
+      controller:choose_power_well_card(c.uid)
+      break
+    end
+  end
+  return true
+end
+
+local function power_well_hovering(controller, x, y)
+  return controller.power_well ~= nil
+end
+
 -- Écrans "menu"/"options" (2026-08-21, demande explicite) : mêmes boutons
 -- quel que soit le mode d'entrée (tap/flèche), jamais de ciblage de carte en
 -- jeu -- factorisé une seule fois, comme feu_de_camp_hovering plus bas,
@@ -265,6 +297,34 @@ local function post_combat_click(controller, x, y)
     end
     return true
   end
+  -- "Prédiction de la Mort" (2026-10-03) : une seule carte à cliquer, directement
+  -- au-dessus du héros concerné (jamais une sélection en 2 temps comme le
+  -- Temple) -- seuls les héros avec une entrée dans `p.eligible` répondent
+  -- (héros mort/carte déjà prise = carte de dos non interactive, voir
+  -- draw_prediction). "Sacrifier un pouvoir à la place" ouvre la fenêtre
+  -- partagée (voir power_well_click plus haut, testée AVANT ce dispatch).
+  if controller.screen == "prediction" then
+    local p = controller.prediction
+    if p and not p.resolved then
+      local card_rects = View.prediction_card_rects(controller)
+      for _, h in ipairs(controller.state.heroes) do
+        if p.eligible[h.id] then
+          local r = card_rects[h.id]
+          if r and View.point_in(r, x, y) then controller:choose_prediction_card(h.id); return true end
+        end
+      end
+      if View.point_in(View.prediction_sacrifice_button, x, y) then controller:prediction_open_sacrifice() end
+    end
+    return true
+  end
+  -- "Le Puit de l'Oubli" (2026-10-03) : simple écran d'intro, 1 seul bouton --
+  -- la vraie sélection vit dans la fenêtre partagée (voir power_well_click).
+  if controller.screen == "puits" then
+    if controller.puits and View.point_in(View.puits_choose_button, x, y) then
+      controller:puits_open_picker()
+    end
+    return true
+  end
   return false
 end
 
@@ -285,6 +345,12 @@ local function team_select_click(controller, x, y)
   if ts.focused_id then
     if View.point_in(View.team_select_cancel_button, x, y) then controller:team_select_cancel(); return true end
     if View.point_in(View.team_select_confirm_button, x, y) then controller:team_select_confirm(); return true end
+    -- Onglets Départ/Trépas-Avancé-Artefact (2026-10-03, demande explicite) :
+    -- seulement cliquables quand un héros est mis en avant -- les boutons ne
+    -- sont de toute façon affichés que dans ce cas (voir draw_team_select).
+    for _, b in ipairs(View.team_select_tab_button_rects()) do
+      if View.point_in(b, x, y) then controller:team_select_switch_tab(b.id); return true end
+    end
   end
 
   -- "Voir le deck" (2026-08-30, demande explicite) : clic sur le deck qui se
@@ -339,6 +405,7 @@ local function mousepressed_tap(controller, x, y, button)
   if pause_menu_click(controller, x, y) then return end
   if deck_view_click(controller, x, y) then return end
   if debug_card_picker_click(controller, x, y) then return end
+  if power_well_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
   if deck_builder_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
@@ -453,6 +520,7 @@ local function mousepressed_arrow(controller, x, y, button)
   if pause_menu_click(controller, x, y) then return end
   if deck_view_click(controller, x, y) then return end
   if debug_card_picker_click(controller, x, y) then return end
+  if power_well_click(controller, x, y) then return end
   if menu_click(controller, x, y) then return end
   if deck_builder_click(controller, x, y) then return end
   if team_select_click(controller, x, y) then return end
@@ -624,6 +692,18 @@ local function post_combat_hovering(controller, x, y)
     end
     return false
   end
+  if controller.screen == "prediction" then
+    local p = controller.prediction
+    if not p or p.resolved then return false end
+    local card_rects = View.prediction_card_rects(controller)
+    for _, h in ipairs(controller.state.heroes) do
+      if p.eligible[h.id] and View.point_in(card_rects[h.id], x, y) then return true end
+    end
+    return View.point_in(View.prediction_sacrifice_button, x, y)
+  end
+  if controller.screen == "puits" then
+    return controller.puits ~= nil and View.point_in(View.puits_choose_button, x, y)
+  end
   return false
 end
 
@@ -637,6 +717,9 @@ local function team_select_hovering(controller, x, y)
   if ts.focused_id then
     if View.point_in(View.team_select_cancel_button, x, y) then return true end
     if View.point_in(View.team_select_confirm_button, x, y) then return true end
+    for _, b in ipairs(View.team_select_tab_button_rects()) do
+      if View.point_in(b, x, y) then return true end
+    end
   end
   if View.point_in(View.team_select_deck_rect(#ts.selected_ids), x, y) then return true end
   -- Même filtre que team_select_click (2026-08-30, bug signalé) : sinon le
@@ -655,6 +738,7 @@ local function is_hovering_clickable_tap(controller, x, y)
   if controller.pause_menu_open then return pause_menu_hovering(controller, x, y) end
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
   if controller.debug_card_picker then return debug_card_picker_hovering(controller, x, y) end
+  if controller.power_well then return power_well_hovering(controller, x, y) end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
     return menu_hovering(controller, x, y)
   end
@@ -684,7 +768,8 @@ local function is_hovering_clickable_tap(controller, x, y)
     return false
   end
 
-  if controller.screen == "campfire" or controller.screen == "refuge" or controller.screen == "forge" or controller.screen == "temple" then return post_combat_hovering(controller, x, y) end
+  if controller.screen == "campfire" or controller.screen == "refuge" or controller.screen == "forge" or controller.screen == "temple"
+    or controller.screen == "prediction" or controller.screen == "puits" then return post_combat_hovering(controller, x, y) end
 
   -- Carte "sans cible" en attente de confirmation (2026-08-27) : n'importe où
   -- est cliquable (soit ça valide, soit ça échange/désélectionne, voir
@@ -718,6 +803,7 @@ local function is_hovering_clickable_arrow(controller, x, y)
   if controller.pause_menu_open then return pause_menu_hovering(controller, x, y) end
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
   if controller.debug_card_picker then return debug_card_picker_hovering(controller, x, y) end
+  if controller.power_well then return power_well_hovering(controller, x, y) end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
     return menu_hovering(controller, x, y)
   end
@@ -747,7 +833,8 @@ local function is_hovering_clickable_arrow(controller, x, y)
     return false
   end
 
-  if controller.screen == "campfire" or controller.screen == "refuge" or controller.screen == "forge" or controller.screen == "temple" then return post_combat_hovering(controller, x, y) end
+  if controller.screen == "campfire" or controller.screen == "refuge" or controller.screen == "forge" or controller.screen == "temple"
+    or controller.screen == "prediction" or controller.screen == "puits" then return post_combat_hovering(controller, x, y) end
 
   -- Carte "sans cible" en attente de confirmation (2026-08-27) : même garde
   -- qu'en mode tap ci-dessus -- n'importe où est cliquable.
@@ -783,6 +870,7 @@ function Input.mousemoved(controller, x, y)
   if controller.pause_menu_open then controller:set_hover(nil, nil); return end
   if controller.deck_view_open then controller:set_hover(nil, nil); return end
   if controller.debug_card_picker then controller:set_hover(nil, nil); return end
+  if controller.power_well then controller:set_hover(nil, nil); return end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
     controller:set_hover(nil, nil)
     return
@@ -829,12 +917,12 @@ function Input.mousemoved(controller, x, y)
     local ts = controller.team_select
     if ts then
       -- Cartes affichées au centre (2026-08-30, bug signalé -- "pareil pour
-      -- les cartes") : seulement les 3 Départ, SETTLED (pas la carte de dos
-      -- "Avancées", qui n'a rien à détailler côté glossaire -- ni les cartes
-      -- encore en plein vol, dont la position réelle diverge de leur rect de
-      -- repos tant qu'elles n'ont pas fini d'arriver, voir Controller:update).
+      -- les cartes") : seulement les cartes de l'onglet actif, SETTLED (pas
+      -- celles encore en plein vol, dont la position réelle diverge de leur
+      -- rect de repos tant qu'elles n'ont pas fini d'arriver, voir
+      -- Controller:update).
       for _, a in ipairs(ts.card_anims) do
-        if not a.is_back and a.mode == "in" and a.elapsed >= a.duration and View.point_in(a.to, x, y) then
+        if a.mode == "in" and a.elapsed >= a.duration and View.point_in(a.to, x, y) then
           controller:set_hover("card", a.def)
           return
         end
@@ -922,6 +1010,25 @@ function Input.mousemoved(controller, x, y)
     return
   end
 
+  -- Écran "prediction" (2026-10-03) : même esprit que "temple" juste
+  -- au-dessus -- infobulle mot-clé sur chaque carte "Mise à mort" (un héros
+  -- sans carte éligible n'a qu'une carte de dos, rien à détailler) ET sur
+  -- chaque portrait d'aventurier (description de classe + PV).
+  if controller.screen == "prediction" then
+    local p = controller.prediction
+    if p then
+      local card_rects = View.prediction_card_rects(controller)
+      for _, h in ipairs(controller.state.heroes) do
+        local def = p.eligible[h.id]
+        if def and View.point_in(card_rects[h.id], x, y) then controller:set_hover("card", def); return end
+      end
+    end
+    local hero_id = find_rect(View.temple_hero_rects(controller), x, y)
+    if hero_id then controller:set_hover("hero", hero_id); return end
+    controller:set_hover(nil, nil)
+    return
+  end
+
   if controller.screen ~= "playing" then controller:set_hover(nil, nil); return end
   local state = controller.state
 
@@ -971,6 +1078,7 @@ end
 function Input.wheelmoved(controller, dx, dy)
   if controller.deck_view_open then controller:scroll_deck_view(dy); return end
   if controller.debug_card_picker then controller:scroll_debug_card_picker(dy); return end
+  if controller.power_well then controller:scroll_power_well(dy); return end
   -- Écran "Construis ton deck" (2026-09-02, demande explicite -- "la partie
   -- haute et la partie basse sont indépendantes, chacune leur ascenseur") :
   -- le panneau défilé dépend d'où le curseur se trouve AU MOMENT du cran de

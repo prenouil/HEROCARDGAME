@@ -37,6 +37,9 @@ require("src.ui.view.deck_builder")(View, UI)
 require("src.ui.view.campfire")(View, UI)
 require("src.ui.view.refuge")(View, UI)
 require("src.ui.view.temple")(View, UI)
+require("src.ui.view.prediction")(View, UI) -- dépend de View.temple_hero_rects, requis juste avant
+require("src.ui.view.puits")(View, UI)
+require("src.ui.view.power_well")(View, UI)
 require("src.ui.view.forge")(View, UI)
 require("src.ui.view.team_select")(View, UI)
 require("src.ui.view.victory")(View, UI)
@@ -69,18 +72,25 @@ function View.draw(controller)
   -- reste affiché -- ce n'est pas "un reste du combat", juste la toile de
   -- fond du donjon.
   if controller.screen == "campfire" or controller.screen == "forge"
-    or controller.screen == "temple" or controller.screen == "refuge" then
+    or controller.screen == "temple" or controller.screen == "refuge"
+    or controller.screen == "prediction" or controller.screen == "puits" then
     Background.draw(controller.state.enemies, UI.W, UI.H)
     if controller.screen == "campfire" and controller.campfire then View.draw_campfire(controller)
     elseif controller.screen == "forge" and controller.forge then View.draw_forge(controller)
     elseif controller.screen == "temple" and controller.temple then View.draw_temple(controller)
     elseif controller.screen == "refuge" and controller.refuge then View.draw_refuge(controller)
+    elseif controller.screen == "prediction" and controller.prediction then View.draw_prediction(controller)
+    elseif controller.screen == "puits" and controller.puits then View.draw_puits(controller)
     end
-    -- Infobulles : seuls Forge/Temple en ont une (Campfire/Refuge n'en ont
-    -- jamais eu, aucune régression à corriger là).
-    if controller.screen == "forge" or controller.screen == "temple" then
+    -- Infobulles : seuls Forge/Temple/Prédiction en ont une (Campfire/
+    -- Refuge/Puit n'en ont jamais eu, aucune régression à corriger là).
+    if controller.screen == "forge" or controller.screen == "temple" or controller.screen == "prediction" then
       View.draw_tooltip(controller)
     end
+    -- Fenêtre partagée "Choisis un pouvoir à oublier à jamais" (2026-10-03) :
+    -- par-dessus "puits" OU "prediction" -- no-op sinon (controller.power_well
+    -- nil), même schéma que View.draw_deck_view ci-dessous.
+    View.draw_power_well(controller)
     View.draw_deck_view(controller)
     View.draw_pause_menu(controller)
     love.graphics.setColor(1, 1, 1, 1)

@@ -61,6 +61,42 @@ function Game.next_uid(state)
   return state.uid_counter
 end
 
+--- Toutes les instances de carte actuellement possédées, deck + main +
+-- défausse confondus (2026-10-03, "Le Puit de l'Oubli"/"Prédiction de la
+-- Mort" -- "Sacrifier un pouvoir") : même balayage que
+-- Forge.upgradable_instances, mais SANS filtre -- n'importe quelle carte
+-- possédée peut être oubliée à jamais, y compris une carte du pilier du
+-- sacrifice ou déjà améliorée (contrairement à la Forge).
+function Game.all_owned_card_instances(state)
+  local out = {}
+  local function scan(pile)
+    for _, c in ipairs(pile) do out[#out + 1] = c end
+  end
+  scan(state.deck)
+  scan(state.hand)
+  scan(state.discard)
+  return out
+end
+
+--- Retire DÉFINITIVEMENT l'instance `uid` de deck/main/défausse, où qu'elle
+-- se trouve (2026-10-03, "Le Puit de l'Oubli"/"Prédiction de la Mort" --
+-- "Sacrifier un pouvoir") : contrairement à l'épuisement normal (qui déplace
+-- vers state.exhausted, voir Game.finish_card), cette carte ne revient plus
+-- JAMAIS, dans aucune pile. Retourne vrai si une instance a bien été trouvée
+-- et retirée.
+function Game.destroy_card_instance(state, uid)
+  local function remove_from(pile)
+    for i, c in ipairs(pile) do
+      if c.uid == uid then
+        table.remove(pile, i)
+        return true
+      end
+    end
+    return false
+  end
+  return remove_from(state.deck) or remove_from(state.hand) or remove_from(state.discard)
+end
+
 -- ---------- pilier du sacrifice (2026-09-28) : mise à mort / Legs / Héritage / Écho ----------
 -- Première passe MÉCANIQUE seulement (demande explicite de Zgrubulu -- "on
 -- code toutes les mécaniques, mais pas les textes des cartes") : les 4

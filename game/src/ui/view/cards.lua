@@ -394,49 +394,4 @@ function M.draw_faded_card(def, x, y, alpha, desc_color, highlight)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
---- Dos de carte représentant TOUTES les cartes Avancées d'une classe d'un
--- coup (2026-08-30, écran de choix d'équipe, demande explicite -- "à la
--- place de montrer les cartes avancées, on montre 1 seule carte de dos avec
--- le nombre de cartes avancées actuellement débloquées pour ce personnage") :
--- même identité de classe (couleur) que les vraies cartes, mais face cachée
--- (motif croisé, pas de nom/texte/coût) -- seul le NOMBRE change d'une
--- classe à l'autre (dérivé de Cards.list, jamais codé en dur -- voir
--- Controller:team_select_spawn_cards).
-function M.draw_card_back_face(w, h, class_id, count)
-  local palette = Theme.card_class[class_id] or Theme.card_class.generic
-  UI.panel(0, 0, w, h, palette.bg)
-  UI.set(Theme.black); love.graphics.setLineWidth(2)
-  love.graphics.rectangle("line", 0, 0, w, h, 10, 10)
-  UI.set(palette.border); love.graphics.setLineWidth(1)
-  love.graphics.rectangle("line", 3, 3, w - 6, h - 6, 8, 8)
-  UI.set(palette.border, 0.4)
-  love.graphics.setLineWidth(1)
-  for i = -3, 3 do
-    love.graphics.line(w / 2 + i * 12, 8, w / 2 + i * 12 + 26, h - 8)
-    love.graphics.line(w / 2 + i * 12 + 26, 8, w / 2 + i * 12, h - 8)
-  end
-  love.graphics.setLineWidth(1)
-  UI.set(Theme.text)
-  love.graphics.setFont(Fonts.get(30))
-  love.graphics.printf(tostring(count), 0, h / 2 - 34, w, "center")
-  UI.text("cartes avancées\ndébloquées", 3, h / 2 + 2, w - 6, 9, Theme.muted, "center")
-end
-
---- Même détour par canvas que draw_faded_card ci-dessus (fondu uniforme +
--- push/origin()/pop, même correctif).
-function M.draw_faded_card_back(class_id, count, x, y, alpha)
-  UI.card_flight_canvas = UI.card_flight_canvas or love.graphics.newCanvas(UI.CARD_W, UI.CARD_H)
-  love.graphics.push()
-  love.graphics.origin()
-  local prev_canvas = love.graphics.getCanvas()
-  love.graphics.setCanvas(UI.card_flight_canvas)
-  love.graphics.clear(0, 0, 0, 0)
-  M.draw_card_back_face(UI.CARD_W, UI.CARD_H, class_id, count)
-  love.graphics.setCanvas(prev_canvas)
-  love.graphics.pop()
-  love.graphics.setColor(1, 1, 1, alpha)
-  love.graphics.draw(UI.card_flight_canvas, x, y)
-  love.graphics.setColor(1, 1, 1, 1)
-end
-
 return M

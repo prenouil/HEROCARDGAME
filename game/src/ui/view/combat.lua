@@ -1453,7 +1453,13 @@ return function(View, UI)
         if pt.canvas and pt.quad then
           love.graphics.setColor(1, 1, 1, 1 - p)
           local rot = (pt.rot0 or 0) + (pt.vrot or 0) * pt.t
-          love.graphics.draw(pt.canvas, pt.quad, x, y, rot, 1, 1, pt.tile / 2, pt.tile / 2)
+          -- `pt.tile_w`/`pt.tile_h` (2026-10-03, éclatement de carte -- voir
+          -- Controller:spawn_card_shatter) : tuiles NON carrées (ratio 2:3
+          -- d'une carte), contrairement à `pt.tile` seul (ennemi, grille
+          -- carrée) -- repli sur `pt.tile` des 2 côtés quand absents, jamais
+          -- de régression sur l'éclatement d'ennemi existant.
+          local ox, oy = (pt.tile_w or pt.tile) / 2, (pt.tile_h or pt.tile) / 2
+          love.graphics.draw(pt.canvas, pt.quad, x, y, rot, 1, 1, ox, oy)
         else
           UI.set(pt.color or Theme.hp, 1 - p)
           love.graphics.rectangle("fill", x - 2, y - 2, 4, 4)
@@ -1462,6 +1468,11 @@ return function(View, UI)
     end
     love.graphics.setColor(1, 1, 1, 1)
   end
+  -- Exposé (2026-10-03, "Le Puit de l'Oubli") : draw_power_well
+  -- (view/power_well.lua) a besoin de redessiner les mêmes particules que le
+  -- combat (éclatement de carte, voir Controller:spawn_card_shatter) sur un
+  -- écran "camp", jamais atteint par le grand aiguillage de draw_combat.
+  View.draw_particles = draw_particles
 
   --- Rend l'icône (sprite réel si dispo, sinon silhouette vectorielle) d'un
   -- ennemi dans un nouveau canvas carré de `size` px, puis le découpe en
@@ -1489,6 +1500,34 @@ return function(View, UI)
       end
     end
     return canvas, quads, tile
+  end
+
+  --- Même principe que View.capture_enemy_shatter juste au-dessus, pour une
+  -- CARTE plutôt qu'un ennemi (2026-10-03, "Le Puit de l'Oubli" -- "la carte
+  -- se craquèle et explose en pixel") : rend la face réelle de `def` (CardUI.
+  -- draw_card_face, à sa taille canonique CARD_W/CARD_H) dans un canvas, puis
+  -- la découpe en `cols`x`rows` tuiles -- grille volontairement NON carrée
+  -- (contrairement à l'ennemi) pour coller au ratio 2:3 d'une carte plutôt
+  -- que de l'écraser dans une grille carrée. Appelée UNE SEULE FOIS par
+  -- Controller:spawn_card_shatter au moment de l'éclatement.
+  function View.capture_card_shatter(def, cols, rows)
+    local canvas = love.graphics.newCanvas(UI.CARD_W, UI.CARD_H)
+    love.graphics.push()
+    love.graphics.origin()
+    local prev_canvas = love.graphics.getCanvas()
+    love.graphics.setCanvas(canvas)
+    love.graphics.clear(0, 0, 0, 0)
+    CardUI.draw_card_face(def, UI.CARD_W, UI.CARD_H, tostring(def.cost or 0), def.desc, Theme.muted, false, false, false, false)
+    love.graphics.setCanvas(prev_canvas)
+    love.graphics.pop()
+    local tile_w, tile_h = UI.CARD_W / cols, UI.CARD_H / rows
+    local quads = {}
+    for gy = 0, rows - 1 do
+      for gx = 0, cols - 1 do
+        quads[#quads + 1] = { quad = love.graphics.newQuad(gx * tile_w, gy * tile_h, tile_w, tile_h, UI.CARD_W, UI.CARD_H), gx = gx, gy = gy }
+      end
+    end
+    return canvas, quads, tile_w, tile_h
   end
 
   local function quad_bezier(t, x0, y0, cx, cy, x1, y1)

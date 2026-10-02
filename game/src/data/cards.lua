@@ -7,13 +7,23 @@
 -- Chaque carte porte un champ `upgrade` optionnel (2026-08-10, écran "La
 -- Forge") : {desc, effect} de la version "+" -- voir Cards.upgraded_def.
 --
--- Cartes regroupées par classe : chaque classe a 3 cartes "depart" (sa
--- "Coup direct" + son "Encaisser" + 1 carte propre) et 3 cartes "avance" --
+-- Cartes regroupées par classe : chaque classe avait 3 cartes "depart" (sa
+-- "Coup direct" + son "Encaisser" + 1 carte propre) et le reste en "avance" --
 -- 1 exemplaire de chaque carte "depart" des 4 classes sélectionnées à
 -- l'écran de choix d'équipe forme le deck de départ (2026-08-29, voir
 -- Deck.build_starting_deck/Deck.starting_cards_for_class). Le Guerrier a échangé ses cartes
 -- "depart"/"avance" (2026-08-24) : "Coup de taille" est désormais "depart"
 -- (dégâts réduits 2->3) et "Coup d'estoc" "avance" -- l'inverse d'avant.
+--
+-- Réduction à 2 cartes "depart" par classe (2026-10-03, demande explicite --
+-- "je voudrais diminuer le nombre de carte de départ de chaque classe") :
+-- une 3ᵉ carte de chaque classe repasse en "avance" (Coup de taille/
+-- Infranchissable/Barrière/Repli stratégique/Sceau de faiblesse/Air
+-- belliqueux) -- `Deck.starting_cards_for_class` dérive toujours le deck de
+-- départ depuis `tier == "depart"`, aucune autre source de vérité à tenir
+-- synchronisée ; seul un multiplicateur figé (`team_select.lua`, affichage
+-- du nombre de cartes dans le paquet à l'écran de choix d'équipe) devait
+-- être mis à jour en conséquence (3 -> 2).
 --
 -- Encaisser (Guerrier/Paladin/Assassin) et Barrière (Mage, l'équivalent du
 -- Mage) ciblent désormais un ALLIÉ (2026-08-24, confirmé explicitement par le
@@ -117,7 +127,7 @@ Cards.list = {
     },
   },
   {
-    code = "coup-taille", name = "Coup de taille", class_id = "guerrier", tier = "depart", cost = 1,
+    code = "coup-taille", name = "Coup de taille", class_id = "guerrier", tier = "avance", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "all-enemies",
     types = { "offensive" },
     desc = 'Inflige 3 "epee" à tous les ennemis.',
@@ -343,7 +353,7 @@ Cards.list = {
     -- Bouclier "programmé" (2026-08-28, voir Game.schedule_shield) : la
     -- version améliorée programme 2 gains DISTINCTS (au début du tour+1 ET du
     -- tour+2), pas un seul gain doublé plus tard.
-    code = "infranchissable", name = "Infranchissable", class_id = "paladin", tier = "depart", cost = 1,
+    code = "infranchissable", name = "Infranchissable", class_id = "paladin", tier = "avance", cost = 1,
     cats = { "defense" }, dmg_type = nil, target = "self",
     types = { "support" },
     desc = 'Gagne 10 "bouclier". Gagne 10 "bouclier" au début du prochain tour. Gagne "Provocation" 2.',
@@ -508,7 +518,7 @@ Cards.list = {
     },
   },
   {
-    code = "barriere", name = "Barrière", class_id = "mage", tier = "depart", cost = 1, mana_cost = 0,
+    code = "barriere", name = "Barrière", class_id = "mage", tier = "avance", cost = 1, mana_cost = 0,
     cats = { "defense" }, dmg_type = nil, target = "ally",
     types = { "support" },
     desc = 'L\'allié gagne 2 "bouclier". Gagne 1 "mana".',
@@ -650,7 +660,7 @@ Cards.list = {
     -- bouclier plancher inconditionnel comme avant). Amélioré non précisé par
     -- le porteur de projet -- inféré à 9/ennemi (même ratio ×1.5 que l'ancien
     -- palier 4->6), à confirmer.
-    code = "repli-strategique", name = "Repli stratégique", class_id = "assassin", tier = "depart", cost = 1,
+    code = "repli-strategique", name = "Repli stratégique", class_id = "assassin", tier = "avance", cost = 1,
     cats = { "defense", "furtif" }, dmg_type = nil, target = "ally",
     -- Type (2026-09-03) : Support -- redirige des ennemis (les fait changer
     -- de cible) mais ne leur inflige jamais rien ; l'action utile pour le
@@ -857,7 +867,7 @@ Cards.list = {
     -- idiome que "Le Blessé" (voir combat.lua) -- pour que le gain de
     -- Corruption générique (déclenché DANS deal_damage sur toute vraie perte
     -- de PV) s'applique automatiquement, sans le recalculer ici.
-    code = "sceau-faiblesse", name = "Sceau de faiblesse", class_id = "necromancien", tier = "depart", cost = 0,
+    code = "sceau-faiblesse", name = "Sceau de faiblesse", class_id = "necromancien", tier = "avance", cost = 0,
     cats = { "sort", "debuff" }, dmg_type = nil, target = "enemy",
     -- Type (2026-09-03) : Offensive seule -- la perte de PV est un COÛT payé
     -- par le lanceur (comme les autres cartes à auto-sacrifice du
@@ -1036,7 +1046,7 @@ Cards.list = {
     -- générique "+6 flat, consommé" (consume_inspiration dans combat.lua) :
     -- les deux peuvent s'appliquer sur LE MÊME coup si le Barde porte
     -- lui-même de l'Inspiration.
-    code = "air-belliqueux", name = "Air belliqueux", class_id = "barde", tier = "depart", cost = 1,
+    code = "air-belliqueux", name = "Air belliqueux", class_id = "barde", tier = "avance", cost = 1,
     cats = { "melee", "degats" }, dmg_type = "physique", target = "enemy",
     types = { "offensive" },
     desc = 'Inflige 3 "epee" à un ennemi. +2 par charge d\'Inspiration sur les alliés.',

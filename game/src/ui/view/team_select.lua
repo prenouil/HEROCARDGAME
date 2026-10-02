@@ -85,20 +85,69 @@ return function(View, UI)
     w = TEAM_ACTION_BTN_W, h = TEAM_ACTION_BTN_H, label = "Valider",
   }
 
-  -- Cartes du héros mis en avant (2026-08-29/30) : jusqu'à 3 par rangée,
-  -- centrées sur TOUTE la largeur.
+  -- Cartes du héros mis en avant (2026-08-29/30) : empilées en lignes
+  -- centrées (voir team_select_card_row_rects).
   local TEAM_CARD_Y = 190
   local TEAM_CARD_ROW_GAP = 8
-  local TEAM_CARD_ROW1_MAX = 3
-  function View.team_select_card_rects(count)
+
+  -- Boutons d'onglet "Départ / Trépas" / "Avancé" / "Artefact" (2026-10-03,
+  -- demande explicite -- "juste à droite du portrait, alignés verticalement")
+  -- : colonne entre le projecteur (s'arrête à TEAM_SPOTLIGHT_X + W = 300) et
+  -- la zone de cartes, qui ne peut donc plus se centrer sur TOUTE la largeur
+  -- de l'écran comme avant -- voir TEAM_CARD_REGION_X/W ci-dessous.
+  local TEAM_TAB_BTN_X = View.team_select_spotlight_rect.x + TEAM_SPOTLIGHT_W + 20
+  local TEAM_TAB_BTN_Y = View.team_select_spotlight_rect.y
+  local TEAM_TAB_BTN_W, TEAM_TAB_BTN_H, TEAM_TAB_BTN_GAP = 150, 46, 12
+  local TEAM_TABS = {
+    { id = "depart", label = "Départ / Trépas" },
+    { id = "avance", label = "Avancé" },
+    { id = "artefact", label = "Artefact" },
+  }
+  --- Rects FIXES des 3 boutons d'onglet (2026-10-03) : jamais recalculés par
+  -- aventurier/onglet actif, seul `ts.active_tab` (dessiné en surbrillance,
+  -- voir draw_team_select) et leur présence/absence (via ts.tab_button_anims,
+  -- voir Controller:team_select_spawn_cards) changent.
+  function View.team_select_tab_button_rects()
     local rects = {}
-    local row1_count = math.min(count, TEAM_CARD_ROW1_MAX)
-    local row1 = UI.centered_row(row1_count, UI.CARD_W, UI.CARD_H, TEAM_CARD_Y)
-    for i = 1, row1_count do rects[i] = row1[i] end
-    if count > TEAM_CARD_ROW1_MAX then
-      local row2_count = count - TEAM_CARD_ROW1_MAX
-      local row2 = UI.centered_row(row2_count, UI.CARD_W, UI.CARD_H, TEAM_CARD_Y + UI.CARD_H + TEAM_CARD_ROW_GAP)
-      for i = 1, row2_count do rects[TEAM_CARD_ROW1_MAX + i] = row2[i] end
+    for i, tab in ipairs(TEAM_TABS) do
+      rects[i] = {
+        id = tab.id, label = tab.label,
+        x = TEAM_TAB_BTN_X, y = TEAM_TAB_BTN_Y + (i - 1) * (TEAM_TAB_BTN_H + TEAM_TAB_BTN_GAP),
+        w = TEAM_TAB_BTN_W, h = TEAM_TAB_BTN_H,
+      }
+    end
+    return rects
+  end
+
+  -- Zone de cartes : commence après la colonne de boutons (2026-10-03),
+  -- jamais centrée sur l'écran entier désormais qu'elle doit cohabiter avec
+  -- eux -- marge de 20px avant le bord droit de l'écran.
+  local TEAM_CARD_REGION_X = TEAM_TAB_BTN_X + TEAM_TAB_BTN_W + 30
+  local TEAM_CARD_REGION_W = UI.W - TEAM_CARD_REGION_X - 20
+
+  local function centered_row_in_card_region(count, item_w, item_h, y, gap)
+    gap = gap or UI.ROW_GAP
+    local total = count * item_w + math.max(0, count - 1) * gap
+    local x0 = TEAM_CARD_REGION_X + (TEAM_CARD_REGION_W - total) / 2
+    local rects = {}
+    for i = 1, count do rects[i] = { x = x0 + (i - 1) * (item_w + gap), y = y, w = item_w, h = item_h } end
+    return rects
+  end
+
+  --- `row_counts` : nombre de cartes sur chaque ligne, dans l'ordre d'affichage
+  -- (2026-10-03, refonte des onglets Départ/Trépas-Avancé-Artefact -- voir
+  -- Controller:team_select_tab_rows) -- chaque ligne centrée indépendamment
+  -- dans la zone de cartes, empilées du haut vers le bas. Remplace l'ancien
+  -- team_select_card_rects(count), à scission fixe 3+reste : chaque appelant
+  -- décide maintenant lui-même la taille de chaque ligne (2+3 pour Départ/
+  -- Trépas, groupes de 4 pour Avancé).
+  function View.team_select_card_row_rects(row_counts)
+    local rects = {}
+    local y = TEAM_CARD_Y
+    for _, n in ipairs(row_counts) do
+      local row = centered_row_in_card_region(n, UI.CARD_W, UI.CARD_H, y)
+      for i = 1, n do rects[#rects + 1] = row[i] end
+      y = y + UI.CARD_H + TEAM_CARD_ROW_GAP
     end
     return rects
   end
@@ -232,6 +281,20 @@ return function(View, UI)
     UI.text(tostring(card_count), rect.x, rect.y + rect.h / 2 - 4, rect.w, 16, Theme.text, "center")
   end
 
+  --- Un des 3 boutons d'onglet "Départ / Trépas"/"Avancé"/"Artefact"
+  -- (2026-10-03, demande explicite) : fond accent + texte sombre quand c'est
+  -- l'onglet actif, style neutre sinon. `alpha` multiplie tout -- utilisé
+  -- pendant le vol d'entrée/sortie (voir draw_team_select).
+  local function draw_team_tab_button(r, label, active, alpha)
+    UI.set(active and Theme.accent or Theme.panel_light, alpha)
+    love.graphics.rectangle("fill", r.x, r.y, r.w, r.h, 8, 8)
+    UI.set(Theme.accent, alpha)
+    love.graphics.setLineWidth(active and 3 or 1)
+    love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 8, 8)
+    love.graphics.setLineWidth(1)
+    UI.text(label, r.x + 4, r.y + r.h / 2 - 7, r.w - 8, 14, active and Theme.bg or Theme.text, "center")
+  end
+
   local function draw_team_select(controller)
     local ts = controller.team_select
     Background.draw(nil, UI.W, UI.H)
@@ -266,8 +329,7 @@ return function(View, UI)
     for _, a in ipairs(ts.card_anims) do
       local delay = a.delay or 0
       if a.elapsed < delay then
-        if a.is_back then CardUI.draw_faded_card_back(a.class_id, a.count, a.from.x, a.from.y, 1)
-        else CardUI.draw_faded_card(a.def, a.from.x, a.from.y, 1) end
+        CardUI.draw_faded_card(a.def, a.from.x, a.from.y, 1)
       else
         local elapsed_since_start = a.elapsed - delay
         local p = math.min(1, elapsed_since_start / a.duration)
@@ -275,10 +337,26 @@ return function(View, UI)
         local x = a.from.x + (a.to.x - a.from.x) * ease
         local y = a.from.y + (a.to.y - a.from.y) * ease
         local alpha = a.mode == "in" and math.min(1, p * 1.6) or (1 - p)
-        if alpha > 0 then
-          if a.is_back then CardUI.draw_faded_card_back(a.class_id, a.count, x, y, alpha)
-          else CardUI.draw_faded_card(a.def, x, y, alpha) end
-        end
+        if alpha > 0 then CardUI.draw_faded_card(a.def, x, y, alpha) end
+      end
+    end
+
+    -- Boutons d'onglet en vol (2026-10-03) : même idiome que les cartes
+    -- juste au-dessus (ease_out_back à l'entrée, quadratique à la sortie),
+    -- jamais de `a.delay` ici (pas de rassemblement différé les concernant).
+    -- `ts.active_tab` pilote la surbrillance une fois posé (voir ci-dessous),
+    -- en vol elles gardent leur style neutre -- la cible n'est pas encore
+    -- "la carte affichée" tant que l'anim n'est pas finie.
+    for _, a in ipairs(ts.tab_button_anims) do
+      local p = math.min(1, a.elapsed / a.duration)
+      local ease = a.mode == "in" and UI.ease_out_back(a.elapsed, a.duration) or (1 - (1 - p) ^ 2)
+      local x = a.from.x + (a.to.x - a.from.x) * ease
+      local y = a.from.y + (a.to.y - a.from.y) * ease
+      local alpha = a.mode == "in" and math.min(1, p * 1.6) or (1 - p)
+      if alpha > 0 then
+        local settled = a.mode == "in" and a.elapsed >= a.duration
+        draw_team_tab_button({ x = x, y = y, w = a.to.w, h = a.to.h }, a.label,
+          settled and ts.active_tab == a.tab_id, alpha)
       end
     end
 
@@ -306,8 +384,10 @@ return function(View, UI)
       draw_team_hero_slot(r, Heroes.by_id(ts.focused_id), hover_t_for(ts.focused_id), true, false)
     end
 
+    -- Libellé "Ton équipe" retiré (2026-10-03, demande explicite) : la
+    -- rangée du bas (cases vertes, voir in_party plus bas) se lit déjà
+    -- sans légende.
     local party_rects = View.team_select_party_rects(controller)
-    UI.text("Ton équipe", TEAM_PARTY_LEFT, TEAM_BOTTOM_Y - 16, 200, 10, Theme.muted, "left")
     for _, id in ipairs(ts.selected_ids) do
       if id ~= ts.focused_id and not moving_ids[id] then
         draw_team_hero_slot(party_rects[id], Heroes.by_id(id), hover_t_for(id), false, true)
@@ -324,10 +404,10 @@ return function(View, UI)
       end
     end
 
-    -- 3 cartes "depart" par aventurier confirmé, pas 6 (2026-08-30, bug
-    -- signalé) : ce chiffre doit rester cohérent avec
+    -- 2 cartes "depart" par aventurier confirmé (2026-08-30, bug signalé --
+    -- réduit de 3 à 2 le 2026-10-03) : ce chiffre doit rester cohérent avec
     -- Controller:team_select_spawn_cards.
-    draw_team_deck(View.team_select_deck_rect(#ts.selected_ids), #ts.selected_ids * 3)
+    draw_team_deck(View.team_select_deck_rect(#ts.selected_ids), #ts.selected_ids * 2)
 
     local lb = View.team_select_launch_button
     local ready = #ts.selected_ids == ts.max_team_size

@@ -329,6 +329,45 @@ describe("Game.sync_camoufle_visibility", function()
   end)
 end)
 
+-- "Le Puit de l'Oubli"/"Prédiction de la Mort" (2026-10-03, bouton
+-- "Sacrifier un pouvoir") : retrait DÉFINITIF d'une carte possédée, où
+-- qu'elle soit -- voir game/src/rules/prediction.lua pour l'éligibilité des
+-- cartes "Mise à mort" de l'évènement lui-même.
+describe("Game.all_owned_card_instances / Game.destroy_card_instance", function()
+  local function make_pile_state()
+    return {
+      deck = { { uid = 1, def = {} }, { uid = 2, def = {} } },
+      hand = { { uid = 3, def = {} } },
+      discard = { { uid = 4, def = {} } },
+    }
+  end
+
+  it("Game.all_owned_card_instances réunit deck + main + défausse", function()
+    local state = make_pile_state()
+    local out = Game.all_owned_card_instances(state)
+    assert.are.equal(4, #out)
+  end)
+
+  it("Game.destroy_card_instance retire l'instance de la pile où elle se trouve, où qu'elle soit (deck/main/défausse)", function()
+    local state = make_pile_state()
+    assert.is_true(Game.destroy_card_instance(state, 2)) -- dans le deck
+    assert.are.equal(1, #state.deck)
+    assert.are.equal(1, state.deck[1].uid)
+
+    assert.is_true(Game.destroy_card_instance(state, 3)) -- dans la main
+    assert.are.equal(0, #state.hand)
+
+    assert.is_true(Game.destroy_card_instance(state, 4)) -- dans la défausse
+    assert.are.equal(0, #state.discard)
+  end)
+
+  it("renvoie faux sans rien modifier si l'uid n'existe dans aucune pile", function()
+    local state = make_pile_state()
+    assert.is_false(Game.destroy_card_instance(state, 999))
+    assert.are.equal(4, #Game.all_owned_card_instances(state))
+  end)
+end)
+
 -- Game.start_turn fait bien plus que consommer ces 2 files (télégraphie
 -- ennemie, pioche, PO...) -- besoin d'un état COMPLET (Game.reset_run), pas
 -- d'une fixture minimale, pour ne pas planter sur une dépendance sans rapport

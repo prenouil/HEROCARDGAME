@@ -7,9 +7,9 @@ local Rng = require("src.util.rng")
 local Combat = require("src.rules.combat")
 
 describe("Deck.starting_cards_for_class", function()
-  it("renvoie exactement les 3 cartes 'depart' de la classe demandée", function()
+  it("renvoie exactement les 2 cartes 'depart' de la classe demandée (2026-10-03, réduit de 3)", function()
     local cards = Deck.starting_cards_for_class("guerrier")
-    assert.are.equal(3, #cards)
+    assert.are.equal(2, #cards)
     for _, def in ipairs(cards) do
       assert.are.equal("guerrier", def.class_id)
       assert.are.equal("depart", def.tier)
@@ -50,14 +50,14 @@ describe("Deck.build_starting_deck", function()
     local uid = 0
     local function next_uid() uid = uid + 1; return uid end
     local deck = Deck.build_starting_deck({ "guerrier", "mage" }, next_uid, Rng.new(1))
-    assert.are.equal(6, #deck) -- 3 + 3
+    assert.are.equal(4, #deck) -- 2 + 2
     local class_counts = {}
     for _, c in ipairs(deck) do
       class_counts[c.def.class_id] = (class_counts[c.def.class_id] or 0) + 1
       assert.is_not_nil(c.uid)
     end
-    assert.are.equal(3, class_counts.guerrier)
-    assert.are.equal(3, class_counts.mage)
+    assert.are.equal(2, class_counts.guerrier)
+    assert.are.equal(2, class_counts.mage)
   end)
 end)
 

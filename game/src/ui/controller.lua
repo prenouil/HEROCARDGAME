@@ -7,6 +7,7 @@ local Combat = require("src.rules.combat")
 local Draft = require("src.rules.draft")
 local Forge = require("src.rules.forge")
 local Temple = require("src.rules.temple")
+local Prediction = require("src.rules.prediction")
 -- Écran "Choisis ton équipe" (2026-08-29, avant chaque run -- voir
 -- Controller:enter_team_select) : catalogue des 6 aventuriers débloqués
 -- (Heroes.defs) et leurs cartes (Cards.list, filtrées par class_id).
@@ -203,6 +204,24 @@ local FORGE_BURST_PARTICLE_COUNT = 16
 -- (laisser le joueur voir/lire le résultat avant d'enchaîner).
 local TEMPLE_CHOICE_ANIM_DURATION = 0.5
 local TEMPLE_CHOICE_HOLD_PAUSE = 1.0
+
+-- "Prédiction de la Mort" (2026-10-03) : même timing que le Temple ci-dessus,
+-- même raison d'être -- le joueur voit l'aventurier/la carte choisie avant
+-- d'enchaîner.
+local PREDICTION_CHOICE_ANIM_DURATION = 0.5
+local PREDICTION_CHOICE_HOLD_PAUSE = 1.0
+
+-- "Le Puit de l'Oubli"/"Prédiction de la Mort" -- "Sacrifier un pouvoir à la
+-- place" (2026-10-03, demande explicite -- "la carte se zoom lentement, puis
+-- se craquèle et explose en pixel") : 2 phases distinctes, jouées l'une après
+-- l'autre par Controller:choose_power_well_card -- POWER_WELL_ZOOM_DURATION
+-- (le zoom lent) puis POWER_WELL_SHATTER_DURATION (le temps que les fragments
+-- finissent de retomber/s'estomper, voir Controller:spawn_card_shatter,
+-- même idiome que ENEMY_DEATH_PARTICLE_DURATION ci-dessus).
+local POWER_WELL_ZOOM_DURATION = 1.1
+local POWER_WELL_SHATTER_DURATION = 1.4
+local POWER_WELL_SHATTER_GRID_COLS = 6
+local POWER_WELL_SHATTER_GRID_ROWS = 9
 
 -- Écran "Choisis ton équipe" (2026-08-29, demande explicite -- avant chaque
 -- run, choisir 4 des 6 `Heroes.defs`) : durée du vol des cartes du héros mis
@@ -487,6 +506,20 @@ function Controller.new()
   self.temple = nil
   self.temple_choice_anim = nil -- { chosen_index, t = elapsed }, voir Controller:confirm_temple_choice
   self.temple_choice_anim_duration = TEMPLE_CHOICE_ANIM_DURATION -- lu par view.lua pour l'easing
+  -- { eligible = {[hero_id] = def, ...}, chosen_hero_id = nil|id, resolved = bool|nil },
+  -- voir Controller:enter_prediction_screen (2026-10-03, "Prédiction de la Mort").
+  self.prediction = nil
+  self.prediction_choice_anim = nil -- { chosen_hero_id, t = elapsed }, voir Controller:choose_prediction_card
+  self.prediction_choice_anim_duration = PREDICTION_CHOICE_ANIM_DURATION -- lu par view.lua pour l'easing
+  -- {} (aucun champ, juste un marqueur d'écran actif), voir
+  -- Controller:enter_puits_screen (2026-10-03, "Le Puit de l'Oubli").
+  self.puits = nil
+  -- Fenêtre PARTAGÉE "Choisis un pouvoir à oublier à jamais" (2026-10-03) --
+  -- { scroll = 0, on_complete = fn, anim = nil|{uid, def, t, phase="zoom"|"shatter"} } :
+  -- ouverte par-dessus "puits" OU "prediction" (bouton "Sacrifier un pouvoir à
+  -- la place"), voir Controller:open_power_well_picker, seul écrivain.
+  self.power_well = nil
+  self.power_well_zoom_duration = POWER_WELL_ZOOM_DURATION -- lu par view.lua pour l'easing
   self.victory_anim = nil -- { t = elapsed } pendant le zoom+bump du titre "Victoire !"
   self.victory_title_duration = VICTORY_TITLE_DURATION -- lu par view.lua pour l'easing
   self.draft_cards_shown = false -- les 3 cartes (de dos) n'apparaissent qu'après le titre
@@ -799,6 +832,16 @@ function Controller:scroll_debug_card_picker(dy)
   self.debug_card_picker.scroll = math.max(0, math.min(max_scroll, self.debug_card_picker.scroll - dy * DECK_VIEW_SCROLL_STEP))
 end
 
+--- Molette de la fenêtre "Choisis un pouvoir à oublier à jamais" (2026-10-03) :
+-- même formule que scroll_debug_card_picker juste au-dessus. Ignorée pendant
+-- l'animation de zoom/éclatement (voir power_well_choosable, input.lua) --
+-- la grille n'est de toute façon plus affichée à ce moment-là.
+function Controller:scroll_power_well(dy)
+  if not self.power_well or self.power_well.anim then return end
+  local max_scroll = View.power_well_layout(self).max_scroll
+  self.power_well.scroll = math.max(0, math.min(max_scroll, self.power_well.scroll - dy * DECK_VIEW_SCROLL_STEP))
+end
+
 -- ---------- écran "Choisis ton équipe" ----------
 
 --- Entre sur l'écran de choix d'équipe (2026-08-29, demande explicite --
@@ -823,6 +866,10 @@ function Controller:enter_team_select(mode)
     mode = mode, available_ids = available, selected_ids = {},
     max_team_size = (mode == "solo") and 1 or 4,
     focused_id = nil, card_anims = {}, hero_anims = {},
+    -- Onglets Départ/Trépas, Avancé, Artefact (2026-10-03) : voir
+    -- Controller:team_select_spawn_cards/team_select_switch_tab.
+    -- "depart" toujours actif par défaut à chaque nouveau focus.
+    active_tab = "depart", tab_button_anims = {},
   }
 end
 
@@ -897,23 +944,101 @@ function Controller:team_select_move_hero(id, from, to, duration)
   ts.hero_anims[#ts.hero_anims + 1] = { id = id, from = from, to = to, elapsed = 0, duration = duration or TEAM_HERO_MOVE_DURATION }
 end
 
---- Les 3 cartes "depart" de `class_id`, PLUS le nombre de cartes "avance"
--- (2026-08-30, demande explicite -- "il ne faut en fait afficher que les 3
--- cartes de départ. À la place de montrer les cartes avancées, on montre 1
--- seule carte de dos avec le nombre de cartes avancées actuellement
--- débloquées") : ce nombre est dérivé de Cards.list, jamais codé en dur --
--- vaut 3 pour toute classe aujourd'hui (aucun système de déblocage
--- n'existe encore), mais suivrait automatiquement si une classe en gagnait
--- plus tard. Voir Controller:team_select_spawn_cards, seul appelant.
-local function depart_cards_and_advance_count(class_id)
-  local depart, advance_count = {}, 0
+--- Les cartes "depart" de `class_id`, dans l'ordre de `Cards.list` (2026-08-30,
+-- vaut 2 pour toute classe depuis le 2026-10-03, réduit de 3).
+local function depart_cards_for_class(class_id)
+  local out = {}
+  for _, def in ipairs(Cards.list) do
+    if def.class_id == class_id and def.tier == "depart" then out[#out + 1] = def end
+  end
+  return out
+end
+
+--- Le trio Legs/Héritage/Écho de `class_id`, dans CET ordre fixe (2026-10-03,
+-- onglet "Départ / Trépas" -- "la ligne d'en dessous" des cartes de départ) :
+-- seule la version DE BASE de l'Écho (jamais `-ameliore`, doublon du même
+-- slot conceptuel -- même convention que la Forge/le deck-builder, qui ne
+-- montrent jamais les 2 versions côte à côte).
+local function sacrifice_trio_for_class(class_id)
+  local legs, heritage, echo
   for _, def in ipairs(Cards.list) do
     if def.class_id == class_id then
-      if def.tier == "depart" then depart[#depart + 1] = def
-      elseif def.tier == "avance" then advance_count = advance_count + 1 end
+      if def.code:match("^legs%-") then legs = def
+      elseif def.code:match("^heritage%-") then heritage = def
+      elseif def.code:match("^echo%-") and not def.is_upgraded then echo = def
+      end
     end
   end
-  return depart, advance_count
+  local out = {}
+  if legs then out[#out + 1] = legs end
+  if heritage then out[#out + 1] = heritage end
+  if echo then out[#out + 1] = echo end
+  return out
+end
+
+--- La carte "Mise à mort" de `class_id`, s'il en existe une (2026-10-03,
+-- toujours en 1ʳᵉ position de l'onglet "Avancé" -- voir team_select_tab_rows).
+local function mise_a_mort_for_class(class_id)
+  for _, def in ipairs(Cards.list) do
+    if def.class_id == class_id and def.code:match("^mise%-a%-mort%-") then return def end
+  end
+end
+
+--- Toutes les autres cartes "avance" de `class_id` (2026-10-03, onglet
+-- "Avancé" -- exclut les 3 familles posthumes déjà montrées dans l'onglet
+-- "Départ / Trépas" et la carte "Mise à mort" déjà placée en tête par
+-- team_select_tab_rows) : inclut les Enchantements, qui restent de simples
+-- cartes "avance" comme les autres -- l'onglet "Artefact" est une mécanique
+-- strictement nouvelle, encore vide, sans lien avec le type "Enchantement"
+-- existant (demande explicite du porteur de projet).
+local function other_advance_cards_for_class(class_id)
+  local out = {}
+  for _, def in ipairs(Cards.list) do
+    if def.class_id == class_id and def.tier == "avance"
+      and not def.code:match("^legs%-") and not def.code:match("^heritage%-")
+      and not def.code:match("^echo%-") and not def.code:match("^mise%-a%-mort%-") then
+      out[#out + 1] = def
+    end
+  end
+  return out
+end
+
+-- Max de cartes par ligne sur l'onglet "Avancé" (2026-10-03, demande
+-- explicite) -- l'onglet "Départ / Trépas" a ses 2 lignes à taille FIXE
+-- (cartes de départ, puis le trio Legs/Héritage/Écho), jamais regroupées par
+-- ce plafond.
+local TEAM_TAB_ADVANCE_ROW_MAX = 4
+
+--- Cartes de l'onglet `tab` pour `class_id`, déjà réparties en lignes
+-- (2026-10-03) : chaque ligne est une liste de defs, consommée telle quelle
+-- par View.team_select_card_row_rects (1 ligne = 1 rangée centrée). Seul
+-- point d'entrée utilisé par Controller:team_select_spawn_cards -- jamais
+-- une 2ᵉ logique de filtrage ailleurs.
+local function team_select_tab_rows(class_id, tab)
+  if tab == "avance" then
+    local flat = {}
+    local mam = mise_a_mort_for_class(class_id)
+    if mam then flat[#flat + 1] = mam end
+    for _, d in ipairs(other_advance_cards_for_class(class_id)) do flat[#flat + 1] = d end
+    local rows = {}
+    for i = 1, #flat, TEAM_TAB_ADVANCE_ROW_MAX do
+      local row = {}
+      for j = i, math.min(i + TEAM_TAB_ADVANCE_ROW_MAX - 1, #flat) do row[#row + 1] = flat[j] end
+      rows[#rows + 1] = row
+    end
+    return rows
+  elseif tab == "artefact" then
+    -- Mécanique pas encore construite (2026-10-03, "ce sera le prochain
+    -- chantier") : toujours vide pour l'instant, par construction.
+    return {}
+  else
+    local rows = {}
+    local depart = depart_cards_for_class(class_id)
+    if #depart > 0 then rows[#rows + 1] = depart end
+    local trio = sacrifice_trio_for_class(class_id)
+    if #trio > 0 then rows[#rows + 1] = trio end
+    return rows
+  end
 end
 
 --- Bascule chaque vol "in" encore actif en vol "out" (2026-08-29) : point
@@ -933,11 +1058,12 @@ end
 -- avec un vol individuel plus lent (TEAM_CARD_GATHER_DURATION). Absent
 -- (Annuler/Retirer/changement de focus) : comportement inchangé, envol
 -- groupé instantané vers un bord aléatoire, vitesse normale.
-function Controller:team_select_fly_out_current(gather_target)
-  local ts = self.team_select
-  if not ts then return end
+-- Factorisé en `fly_out_list` (2026-10-03, boutons d'onglet Départ/Trépas-
+-- Avancé-Artefact) : même bascule in->out, réutilisée pour ts.tab_button_anims
+-- ci-dessous ET par Controller:team_select_switch_tab pour ts.card_anims seul.
+local function fly_out_list(ctrl, list, gather_target)
   local i = 0
-  for _, a in ipairs(ts.card_anims) do
+  for _, a in ipairs(list) do
     if a.mode == "in" then
       i = i + 1
       local p = math.min(1, a.elapsed / a.duration)
@@ -955,7 +1081,7 @@ function Controller:team_select_fly_out_current(gather_target)
         -- commentaire sur TEAM_CARD_BURST_COUNT : les 6 cartes s'envolent ici
         -- réellement l'une après l'autre, contrairement au bloc `else`
         -- ci-dessous.
-        self:schedule_sfx("flup", a.delay)
+        ctrl:schedule_sfx("flup", a.delay)
       else
         a.to = View.team_select_offscreen_rect(a.to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
         a.duration = TEAM_CARD_FLY_DURATION
@@ -964,6 +1090,18 @@ function Controller:team_select_fly_out_current(gather_target)
       a.elapsed = 0
     end
   end
+  return i
+end
+
+function Controller:team_select_fly_out_current(gather_target)
+  local ts = self.team_select
+  if not ts then return end
+  local i = fly_out_list(self, ts.card_anims, gather_target)
+  -- Boutons d'onglet (2026-10-03) : s'envolent TOUJOURS vers un bord
+  -- aléatoire, jamais vers le deck même quand `gather_target` est fourni
+  -- (Valider) -- ce ne sont pas des cartes du deck du joueur, juste un
+  -- élément d'interface de cet écran.
+  fly_out_list(self, ts.tab_button_anims, nil)
   -- Rafale courte, pas 1 son par carte (2026-08-30, "c'était une erreur...
   -- pas 6 fois, 2-3 fois, sinon ça surcharge") : les 6 cartes s'envolent
   -- TOUTES EN MÊME TEMPS ici (aucun a.delay), un flup par carte sonnait donc
@@ -984,41 +1122,81 @@ function Controller:team_select_play_card_burst()
   end
 end
 
---- Fait voler TOUTES les cartes de `id` depuis un bord aléatoire (chacune le
--- sien, indépendamment) jusqu'à sa position cible au centre (2026-08-29) --
--- AJOUTE ces entrées à `ts.card_anims`, ne le vide jamais (les vols "out" en
--- cours, voir team_select_fly_out_current ci-dessus, doivent pouvoir
--- continuer à se dessiner/s'auto-supprimer en parallèle, voir
--- Controller:update). Abandonne si le focus a déjà changé entre-temps
--- (appelé via self.seq -- voir Controller:team_select_focus).
+--- Fait voler TOUTES les cartes de `rows` (une entrée par ligne, chacune une
+-- liste de defs -- voir team_select_tab_rows) depuis un bord aléatoire
+-- (chacune le sien, indépendamment) jusqu'à sa position cible (2026-10-03,
+-- extrait de l'ex-team_select_spawn_cards pour être partagé avec
+-- team_select_switch_tab, qui ne doit PAS refaire voler les boutons
+-- d'onglet) -- AJOUTE ces entrées à `ts.card_anims`, ne le vide jamais (les
+-- vols "out" en cours doivent pouvoir continuer à se dessiner/s'auto-
+-- supprimer en parallèle, voir Controller:update).
+local function spawn_card_rows(ts, rows)
+  local row_counts = {}
+  for _, row in ipairs(rows) do row_counts[#row_counts + 1] = #row end
+  local targets = View.team_select_card_row_rects(row_counts)
+  local idx = 0
+  for _, row in ipairs(rows) do
+    for _, card_def in ipairs(row) do
+      idx = idx + 1
+      local to = targets[idx]
+      local from = View.team_select_offscreen_rect(to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
+      ts.card_anims[#ts.card_anims + 1] = {
+        def = card_def, from = from, to = to, elapsed = 0,
+        duration = TEAM_CARD_FLY_DURATION, mode = "in",
+      }
+    end
+  end
+end
+
+--- Fait voler les cartes ET les boutons d'onglet du héros `id` fraîchement
+-- mis en avant (2026-08-29 pour les cartes, 2026-10-03 pour les boutons) --
+-- `ts.active_tab` initialisé une seule fois sur "depart" (Controller:
+-- enter_team_select), jamais réinitialisé ici (2026-10-03, correction
+-- explicite -- "si je change d'aventurier, je veux que l'onglet sélectionné
+-- soit gardé") : changer d'aventurier montre ses cartes sur l'onglet DÉJÀ
+-- actif, pas systématiquement "Départ / Trépas".
+-- Abandonne si le focus a déjà changé entre-temps (appelé via self.seq --
+-- voir Controller:team_select_focus).
 function Controller:team_select_spawn_cards(id)
   local ts = self.team_select
   if not ts or ts.focused_id ~= id then return end
   local def = Heroes.by_id(id)
-  local depart, advance_count = depart_cards_and_advance_count(def.class_id)
-  -- +1 pour la carte de dos "cartes Avancées" (2026-08-30, demande explicite) --
-  -- voir View.team_select_card_rects, sa grille s'adapte déjà à N'IMPORTE QUEL
-  -- nombre d'items, jamais figée à 6.
-  local targets = View.team_select_card_rects(#depart + 1)
-  for i, card_def in ipairs(depart) do
-    local to = targets[i]
-    local from = View.team_select_offscreen_rect(to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
-    ts.card_anims[#ts.card_anims + 1] = {
-      def = card_def, from = from, to = to, elapsed = 0,
+  spawn_card_rows(ts, team_select_tab_rows(def.class_id, ts.active_tab))
+  -- Boutons d'onglet (2026-10-03, demande explicite -- "ces boutons
+  -- arrivent et partent avec le même effet que les cartes quand on
+  -- sélectionne un nouvel aventurier") : liés au changement d'AVENTURIER
+  -- mis en avant, jamais à un changement d'onglet (voir
+  -- Controller:team_select_switch_tab, qui ne les touche jamais).
+  for _, btn in ipairs(View.team_select_tab_button_rects()) do
+    local from = View.team_select_offscreen_rect(btn, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
+    ts.tab_button_anims[#ts.tab_button_anims + 1] = {
+      tab_id = btn.id, label = btn.label, from = from, to = btn, elapsed = 0,
       duration = TEAM_CARD_FLY_DURATION, mode = "in",
     }
   end
-  local back_to = targets[#depart + 1]
-  local back_from = View.team_select_offscreen_rect(back_to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
-  ts.card_anims[#ts.card_anims + 1] = {
-    is_back = true, class_id = def.class_id, count = advance_count,
-    from = back_from, to = back_to, elapsed = 0,
-    duration = TEAM_CARD_FLY_DURATION, mode = "in",
-  }
-  -- Rafale courte, pas 1 flup par carte (2026-08-30 -- voir le commentaire
-  -- sur TEAM_CARD_BURST_COUNT) : les 4 cartes (3 Départ + 1 dos) arrivent
-  -- toutes ensemble.
+  -- Rafale courte, pas 1 flup par carte/bouton (2026-08-30 -- voir le
+  -- commentaire sur TEAM_CARD_BURST_COUNT) : tout arrive ensemble.
   self:team_select_play_card_burst()
+end
+
+--- Clique un des 3 onglets de la fiche du héros mis en avant (2026-10-03,
+-- demande explicite) : fait sortir puis rentrer UNIQUEMENT les cartes
+-- affichées -- jamais les boutons d'onglet eux-mêmes, qui restent fixes (seul
+-- Controller:team_select_spawn_cards les fait voler, au changement
+-- d'aventurier). Idempotent (reclique le même onglet déjà actif).
+function Controller:team_select_switch_tab(tab)
+  local ts = self.team_select
+  if not ts or not ts.focused_id or ts.active_tab == tab then return end
+  ts.active_tab = tab
+  local i = fly_out_list(self, ts.card_anims, nil)
+  if i > 0 then self:team_select_play_card_burst() end
+  local class_id = Heroes.by_id(ts.focused_id).class_id
+  local self_ = self
+  self.seq:push(function() end, TEAM_CARD_FLY_DURATION)
+  self.seq:push(function()
+    spawn_card_rows(self_.team_select, team_select_tab_rows(class_id, tab))
+    self_:team_select_play_card_burst()
+  end)
 end
 
 --- Clique un aventurier (disponible OU déjà dans l'équipe -- "il peut être
@@ -1221,6 +1399,10 @@ function Controller:clear_animation_state()
   self.forge_upgrade_anim = nil
   self.temple = nil
   self.temple_choice_anim = nil
+  self.prediction = nil
+  self.prediction_choice_anim = nil
+  self.puits = nil
+  self.power_well = nil
   self.victory_anim = nil
   self.draft_cards_shown = false
   self.draft_flip = {}
@@ -2646,6 +2828,14 @@ function Controller:update(dt)
       a.elapsed = a.elapsed + dt
       if a.elapsed >= a.duration then table.remove(hero_anims, i) end
     end
+    -- Boutons d'onglet (2026-10-03) : même idiome de purge que ts_anims
+    -- ci-dessus -- "in" jamais retiré tout seul, "out" une fois son vol fini.
+    local tab_anims = self.team_select.tab_button_anims
+    for i = #tab_anims, 1, -1 do
+      local a = tab_anims[i]
+      a.elapsed = a.elapsed + dt
+      if a.mode == "out" and a.elapsed >= a.duration then table.remove(tab_anims, i) end
+    end
   end
   for i = #self.floaters, 1, -1 do
     local f = self.floaters[i]
@@ -2858,6 +3048,8 @@ function Controller:update(dt)
   for _, f in pairs(self.draft_flip) do f.t = f.t + dt end
   if self.forge_upgrade_anim then self.forge_upgrade_anim.t = self.forge_upgrade_anim.t + dt end
   if self.temple_choice_anim then self.temple_choice_anim.t = self.temple_choice_anim.t + dt end
+  if self.prediction_choice_anim then self.prediction_choice_anim.t = self.prediction_choice_anim.t + dt end
+  if self.power_well and self.power_well.anim then self.power_well.anim.t = self.power_well.anim.t + dt end
   if self.camp_entrance then self.camp_entrance.t = self.camp_entrance.t + dt end
 end
 
@@ -3489,12 +3681,20 @@ function Controller:enter_post_combat_camp_choice()
     return
   end
 
+  -- "Prédiction de la Mort" et "Le Puit de l'Oubli" (2026-10-03, nouveaux
+  -- évènements) : rejoignent le même tirage que campfire/forge/temple, sous
+  -- la même règle "jamais 2 fois de suite" -- "Le Puit de l'Oubli" reste
+  -- TOUJOURS viable (comme la Forge, le deck a toujours au moins 1 carte à y
+  -- perdre) ; "Prédiction de la Mort" exige >= 2 aventuriers vivants ET au
+  -- moins 1 carte "Mise à mort" encore éligible (Prediction.viable, même
+  -- règle que le draft -- voir son commentaire).
   local rng = self.state.rng.post_combat
   local viable = {}
-  for _, t in ipairs({ "campfire", "forge", "temple" }) do
+  for _, t in ipairs({ "campfire", "forge", "temple", "prediction", "puits" }) do
     local ok = true
     if t == "campfire" then ok = campfire_viable(self.state)
-    elseif t == "temple" then ok = Temple.any_type_viable(self.state) end
+    elseif t == "temple" then ok = Temple.any_type_viable(self.state)
+    elseif t == "prediction" then ok = Prediction.viable(self.state) end
     if ok then viable[#viable + 1] = t end
   end
   local candidates = {}
@@ -3510,7 +3710,9 @@ function Controller:enter_post_combat_camp_choice()
   self.last_post_combat_event = chosen
   if chosen == "campfire" then self:enter_campfire_screen()
   elseif chosen == "forge" then self:enter_forge_screen()
-  else self:enter_temple_screen() end
+  elseif chosen == "temple" then self:enter_temple_screen()
+  elseif chosen == "prediction" then self:enter_prediction_screen()
+  else self:enter_puits_screen() end
 end
 
 --- Point de sortie commun aux 3 écrans "camp" (2026-08-30) : `post_combat_queue`
@@ -3807,6 +4009,196 @@ function Controller:finish_temple(pause)
     self_.temple_choice_anim = nil
     self_:advance_post_combat_queue()
   end)
+end
+
+--- Entre sur l'écran "Prédiction de la Mort" (2026-10-03, demande explicite --
+-- "on présente les 4 aventuriers comme pour les temples. Au-dessus d'eux, à
+-- la place des temples, on présente les cartes de mise à mort") : calcule
+-- UNE SEULE FOIS, à l'entrée, la carte "Mise à mort" éligible de chaque héros
+-- vivant (Prediction.eligible_cards) -- un héros mort ou dont la carte est
+-- déjà prise n'a simplement pas de clé dans `eligible` (voir draw_prediction,
+-- qui lui montre alors une carte de dos non interactive, jamais rien du
+-- tout). Appelée seulement quand Prediction.viable(state) est déjà vrai
+-- (voir Controller:enter_post_combat_camp_choice) : jamais besoin de sauter
+-- cet écran comme pour le Temple/Draft, sa viabilité est déjà garantie.
+function Controller:enter_prediction_screen()
+  self.screen = "prediction"
+  self.prediction = { eligible = Prediction.eligible_cards(self.state) }
+end
+
+local function prediction_choosable(self)
+  local p = self.prediction
+  return self.screen == "prediction" and p ~= nil and not p.resolved
+end
+
+--- Le joueur choisit la carte "Mise à mort" de `hero_id` (2026-10-03) :
+-- l'ajoute au deck et marque son code dans state.run.drafted_mise_a_mort,
+-- EXACTEMENT comme Controller:choose_draft_card (même bookkeeping, jamais une
+-- 2ᵉ source de vérité -- voir Draft.pick_cards/Prediction.eligible_cards, qui
+-- lisent tous deux ce même champ). Refuse silencieusement un hero_id hors de
+-- `eligible` (héros mort ou carte déjà prise -- grisé/dos de carte côté UI).
+function Controller:choose_prediction_card(hero_id)
+  if not prediction_choosable(self) then return end
+  local p = self.prediction
+  local def = p.eligible[hero_id]
+  if not def then return end
+  p.resolved = true
+  p.chosen_hero_id = hero_id
+  local uid = Game.next_uid(self.state)
+  self.state.deck[#self.state.deck + 1] = { uid = uid, def = def }
+  if self.state.run then self.state.run.drafted_mise_a_mort[def.code] = true end
+  Combat.log(self.state, def.name .. " ajoutée au deck.", "sys")
+  Sfx.play("flup")
+  self.prediction_choice_anim = { chosen_hero_id = hero_id, t = 0 }
+  self:finish_prediction(PREDICTION_CHOICE_ANIM_DURATION + PREDICTION_CHOICE_HOLD_PAUSE)
+end
+
+--- "Sacrifier un pouvoir à la place" (2026-10-03, demande explicite) : ouvre
+-- EXACTEMENT la même fenêtre/le même mécanisme que "Le Puit de l'Oubli"
+-- (voir Controller:open_power_well_picker) -- conclut "Prédiction de la Mort"
+-- une fois une carte réellement détruite (jamais si le joueur referme la
+-- fenêtre sans rien choisir, voir Controller:close_power_well_picker -- il
+-- retrouve alors l'écran normal, toujours résolvable).
+function Controller:prediction_open_sacrifice()
+  if not prediction_choosable(self) then return end
+  local self_ = self
+  self:open_power_well_picker(function() self_:finish_prediction() end)
+end
+
+function Controller:finish_prediction(pause)
+  local self_ = self
+  self.seq:push(function() end, pause or POST_COMBAT_RESOLVE_PAUSE)
+  self.seq:push(function()
+    self_.prediction = nil
+    self_.prediction_choice_anim = nil
+    self_:advance_post_combat_queue()
+  end)
+end
+
+--- Entre sur l'écran "Le Puit de l'Oubli" (2026-10-03, demande explicite) :
+-- simple écran d'intro (texte + bouton "Choisir une carte", voir
+-- draw_puits) -- la vraie sélection vit dans la fenêtre PARTAGÉE
+-- Controller:open_power_well_picker, ouverte seulement au clic sur ce bouton
+-- (voir Controller:puits_open_picker).
+function Controller:enter_puits_screen()
+  self.screen = "puits"
+  self.puits = {}
+end
+
+function Controller:puits_open_picker()
+  if self.screen ~= "puits" or not self.puits then return end
+  local self_ = self
+  self:open_power_well_picker(function() self_:finish_puits() end)
+end
+
+function Controller:finish_puits(pause)
+  local self_ = self
+  self.seq:push(function() end, pause or POST_COMBAT_RESOLVE_PAUSE)
+  self.seq:push(function()
+    self_.puits = nil
+    self_:advance_post_combat_queue()
+  end)
+end
+
+-- ---------- fenêtre partagée "Choisis un pouvoir à oublier à jamais" ----------
+-- ("Le Puit de l'Oubli" ET "Prédiction de la Mort" -- "Sacrifier un pouvoir à
+-- la place", 2026-10-03, demande explicite -- "cela affiche la même fenêtre
+-- avec le même mécanisme") : overlay par-dessus l'écran "puits" OU
+-- "prediction" (comme self.deck_view_open/self.debug_card_picker, voir
+-- draw_power_well dans view/power_well.lua) -- `on_complete` (appelé une fois
+-- la carte VRAIMENT détruite, animation comprise, jamais si la fenêtre se
+-- referme sans choix) conclut l'évènement appelant, jamais codé en dur ici --
+-- un seul mécanisme, 2 appelants distincts.
+
+--- Ouvre la fenêtre, remise à 0 (2026-10-03) : `on_complete` est appelé
+-- UNE FOIS, à la toute fin de l'animation de la carte choisie (voir
+-- Controller:choose_power_well_card) -- jamais si le joueur la referme sans
+-- rien choisir (voir Controller:close_power_well_picker).
+function Controller:open_power_well_picker(on_complete)
+  self.power_well = { scroll = 0, on_complete = on_complete, anim = nil }
+end
+
+--- "Retour" (2026-10-03) : referme la fenêtre SANS rien détruire -- l'écran
+-- appelant ("puits" ou "prediction") reste normalement résolvable ensuite.
+-- Ignore silencieusement pendant l'animation (voir power_well_choosable) :
+-- la carte choisie doit aller jusqu'au bout une fois lancée.
+function Controller:close_power_well_picker()
+  local pw = self.power_well
+  if pw and pw.anim then return end
+  self.power_well = nil
+end
+
+local function power_well_choosable(self)
+  local pw = self.power_well
+  return pw ~= nil and pw.anim == nil
+end
+
+--- Choisit `uid` pour l'oublier à jamais (2026-10-03, demande explicite --
+-- "la carte se zoom lentement, puis se craquèle et explose en pixel. Elle est
+-- retirée définitivement du deck") : la carte n'est réellement détruite
+-- qu'à l'instant de l'éclatement (POWER_WELL_ZOOM_DURATION plus tard, jamais
+-- avant -- sinon elle redeviendrait indisponible ailleurs pendant que le
+-- joueur regarde encore le zoom). Refuse silencieusement un uid introuvable
+-- (déjà détruit/jamais possédé) ou un 2ᵉ clic pendant l'animation en cours.
+function Controller:choose_power_well_card(uid)
+  if not power_well_choosable(self) then return end
+  local pw = self.power_well
+  local instance, index
+  for i, c in ipairs(Game.all_owned_card_instances(self.state)) do
+    if c.uid == uid then instance, index = c, i end
+  end
+  if not instance then return end
+  -- `from` (2026-10-03) : rect ÉCRAN de sa case dans la grille au moment même
+  -- du clic -- figé pour toute la durée du zoom (la grille se referme dès que
+  -- `pw.anim` est posé, voir draw_power_well, donc jamais besoin de le
+  -- recalculer frame par frame).
+  local from = View.power_well_rect_at(self, index, math.max(0, math.min(View.power_well_layout(self).max_scroll, pw.scroll or 0)))
+  pw.anim = { uid = uid, def = instance.def, t = 0, phase = "zoom", from = from }
+  Sfx.play("flup")
+  local self_ = self
+  self.seq:push(function() end, POWER_WELL_ZOOM_DURATION)
+  self.seq:push(function()
+    pw.anim.phase = "shatter"
+    pw.anim.t = 0
+    Game.destroy_card_instance(self_.state, uid)
+    Combat.log(self_.state, instance.def.name .. " oubliée à jamais.", "sys")
+    local r = View.power_well_center_rect()
+    self_:spawn_card_shatter(r.x + r.w / 2, r.y + r.h / 2, instance.def)
+    Sfx.play("forge_impact")
+  end)
+  self.seq:push(function() end, POWER_WELL_SHATTER_DURATION)
+  self.seq:push(function()
+    local cb = pw.on_complete
+    self_.power_well = nil
+    if cb then cb() end
+  end)
+end
+
+--- Découpe l'image RÉELLE de la carte `def` en petites tuiles qui partent
+-- chacune dans SA direction (2026-10-03, "Le Puit de l'Oubli" -- même idiome
+-- que Controller:spawn_enemy_shatter pour la mort d'un ennemi, voir son
+-- commentaire) : grille volontairement NON carrée (POWER_WELL_SHATTER_GRID_
+-- COLS/ROWS) pour coller au ratio 2:3 d'une carte plutôt que de l'écraser
+-- dans une grille carrée.
+function Controller:spawn_card_shatter(cx, cy, def)
+  local canvas, quads, tile_w, tile_h = View.capture_card_shatter(def, POWER_WELL_SHATTER_GRID_COLS, POWER_WELL_SHATTER_GRID_ROWS)
+  local center_x, center_y = (POWER_WELL_SHATTER_GRID_COLS - 1) / 2, (POWER_WELL_SHATTER_GRID_ROWS - 1) / 2
+  for _, q in ipairs(quads) do
+    local dx, dy = q.gx - center_x, q.gy - center_y
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len < 0.001 then dx, dy, len = 1, 0, 1 end
+    dx, dy = dx / len, dy / len
+    local speed = 70 + math.random() * 120
+    self.particles[#self.particles + 1] = {
+      x = cx - (tile_w * POWER_WELL_SHATTER_GRID_COLS) / 2 + q.gx * tile_w + tile_w / 2,
+      y = cy - (tile_h * POWER_WELL_SHATTER_GRID_ROWS) / 2 + q.gy * tile_h + tile_h / 2,
+      vx = dx * speed + (math.random() - 0.5) * 30,
+      vy = dy * speed - 40 + (math.random() - 0.5) * 30,
+      t = 0, duration = ENEMY_DEATH_PARTICLE_DURATION,
+      canvas = canvas, quad = q.quad, tile_w = tile_w, tile_h = tile_h,
+      rot0 = math.random() * math.pi * 2, vrot = (math.random() - 0.5) * 6,
+    }
+  end
 end
 
 --- Dernière étape de la file "camp" (Forge/Temple épuisées, ou aucune des deux

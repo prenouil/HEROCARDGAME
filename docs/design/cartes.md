@@ -10,6 +10,8 @@ Reconstruit depuis le code le 2026-08-30 (`game/src/data/cards.lua`, 36 cartes �
 
 Aucune autre dérive trouvée sur les 48 cartes (noms, coûts, mots-clés, Type, textes des 46 autres cartes) : tout correspond exactement au code actuel.
 
+**Réduction du deck de départ le 2026-10-03** (demande explicite — "je voudrais diminuer le nombre de carte de départ de chaque classe") : chaque classe passe de 3 à 2 cartes "Départ" — une 3ᵉ carte de chaque classe repasse "Avancé" (toujours obtenable via le Draft, juste plus garantie dès le départ) : Coup de taille (Guerrier), Infranchissable (Paladin), Barrière (Mage), Repli stratégique (Assassin), Sceau de faiblesse (Nécromancien), Air belliqueux (Barde). Aucun autre champ changé (coût, texte, mécanique identiques) — `Deck.starting_cards_for_class`/`Deck.build_starting_deck` dérivent déjà dynamiquement le deck de départ depuis `tier == "depart"`, aucune liste figée à mettre à jour ailleurs dans le code.
+
 Notes de lecture :
 - **Palier** : "Départ" (fait partie du deck de départ de la classe si elle est sélectionnée en équipe) ou "Avancé" (obtenue en jeu via le Draft de fin de combat).
 - **Coût** : énergie (ressource d'équipe partagée, 3/tour) ; si la carte consomme en plus une ressource propre à sa classe, elle est notée à la suite (ex. "1 + 1 mana", "1 (+0-3 Corruption)" pour un coût variable plafonné). Si le coût change à l'amélioration (rare — seul cas actuel : "Coup de taille"), noté "base (amélioré)".
@@ -24,7 +26,7 @@ Notes de lecture :
 |---|---|---|---|---|---|---|
 | Combat aguerri | Départ | 0 | Offensive + Support | melee, degats, defense | Inflige 4 "epee" à un ennemi OU 4 "bouclier" à un allié. | Inflige 6 "epee" à un ennemi OU 6 "bouclier" à un allié. |
 | Coup appuyé | Départ | 1 | Offensive | melee, degats | Inflige 6 "epee" et "Vulnerabilite" 2 à un ennemi. | Inflige 9 "epee" et "Vulnerabilite" 3 à un ennemi. |
-| Coup de taille | Départ | 1 (0 amélioré) | Offensive | melee, degats | Inflige 3 "epee" à tous les ennemis. | Coût 0. Inflige 3 "epee" à tous les ennemis. |
+| Coup de taille | Avancé | 1 (0 amélioré) | Offensive | melee, degats | Inflige 3 "epee" à tous les ennemis. | Coût 0. Inflige 3 "epee" à tous les ennemis. |
 | Coup Contandant | Avancé | 1 | Offensive | melee, degats | Inflige 4 "epee". Inflige 4 "epee" de plus si l'ennemi a du "bouclier" ou "Vulnerabilite". | Inflige 6 "epee". Inflige 6 "epee" de plus si l'ennemi a du "bouclier" ou "Vulnerabilite". |
 | Avalanche de coups | Avancé | 1 | Offensive | melee, degats | Inflige 4 "epee", son coût devient 0 jusqu'à la fin du combat. S'il tue la cible, revient en main. | Inflige 6 "epee", son coût devient 0 jusqu'à la fin du combat. S'il tue la cible, revient en main. |
 | Riposte | Avancé | 2 | Offensive + Support | melee, degats, defense | Annule chaque attaque de "cibleennemi", renvoie la moitié des dégâts. | Annule chaque attaque de "cibleennemi", renvoie la totalité des dégâts. |
@@ -48,7 +50,7 @@ Historique : "Coup appuyé"/"Avalanche de coups" ont remplacé "Encaisser"/"Coup
 |---|---|---|---|---|---|---|
 | Rempart | Départ | 1 | Support | defense | L'allié ciblé gagne 4 "bouclier". Gagne 4 "bouclier". | L'allié ciblé gagne 6 "bouclier". Gagne 6 "bouclier". |
 | Provocateur | Départ | 1 | Support | defense | L'allié ciblé gagne 4 "bouclier". Gagne "Provocation" 2. | L'allié ciblé gagne 6 "bouclier". Gagne "Provocation" 3. |
-| Infranchissable | Départ | 1 | Support | defense | Gagne 10 "bouclier". Gagne 10 "bouclier" au début du prochain tour. Gagne "Provocation" 2. | Gagne 15 "bouclier". Gagne 15 "bouclier" au début des 2 prochains tours. Gagne "Provocation" 3. |
+| Infranchissable | Avancé | 1 | Support | defense | Gagne 10 "bouclier". Gagne 10 "bouclier" au début du prochain tour. Gagne "Provocation" 2. | Gagne 15 "bouclier". Gagne 15 "bouclier" au début des 2 prochains tours. Gagne "Provocation" 3. |
 | Raillerie | Avancé | 2 | Support | defense | L'ennemi ciblé cible le Paladin. Gagne 8 "bouclier". | L'ennemi ciblé cible le Paladin. Gagne 12 "bouclier". |
 | Clairvoyance | Avancé | 0 | Support | sort, amnesie | "Pioche" 1. Gagne 1 "energie". "soin" 4. "Amnesie" | "Pioche" 2. Gagne 1 "energie". "soin" 6. "Amnesie" |
 | Lumière divine | Avancé | 2 | Support | defense, soin, sort, amnesie | Tous les alliés gagnent 6 "bouclier". "soin" 4 à tous les alliés. "Amnesie" | Tous les alliés gagnent 9 "bouclier". "soin" 6 à tous les alliés. "Amnesie" |
@@ -64,7 +66,7 @@ Refonte complète du 2026-08-28 : "Coup direct"/"Encaisser" disparaissent totale
 | Nom | Palier | Coût | Type | Mots-clés | Texte (base) | Texte amélioré |
 |---|---|---|---|---|---|---|
 | Main de feu | Départ | 1 + 0 mana | Offensive | melee, degats, feu | Inflige 2 "etincelle" à un ennemi. Gagne 1 mana. | Inflige 3 "etincelle" à un ennemi. Gagne 2 mana. |
-| Barrière | Départ | 1 + 0 mana | Support | defense | L'allié gagne 2 "bouclier". Gagne 1 mana. | L'allié gagne 3 "bouclier". Gagne 2 mana. |
+| Barrière | Avancé | 1 + 0 mana | Support | defense | L'allié gagne 2 "bouclier". Gagne 1 mana. | L'allié gagne 3 "bouclier". Gagne 2 mana. |
 | Missile magique | Départ | 1 + 1 mana | Offensive | sort, distance, degats | Inflige 8 "etincelle". | Inflige 12 "etincelle". |
 | Image miroir | Avancé | 1 + 1 mana | Support | sort, defense | Gagne "Esquive" 2. | Gagne "Esquive" 3. |
 | Tornade de feu | Avancé | 1 + 2 mana | Offensive | sort, distance, degats, feu | Inflige 8 "fireball" à tous les ennemis. | Inflige 12 "fireball" à tous les ennemis. |
@@ -82,7 +84,7 @@ Seule classe dont les 2 cartes de base portent un nom propre ("Main de feu"/"Bar
 |---|---|---|---|---|---|---|
 | Plan d'attaque | Départ | 1 | Offensive | melee, degats, furtif | Si Camouflé, inflige 8 "epee", sinon inflige 4 "epee". "Furtif" | Si Camouflé, inflige 12 "epee", sinon inflige 6 "epee". "Furtif" |
 | Se cacher | Départ | 1 | Support | defense, furtif | L'Assassin gagne 8 "bouclier". "Furtif" | L'Assassin gagne 12 "bouclier". "Furtif" |
-| Repli stratégique | Départ | 1 | Support | defense, furtif | Si "cibleennemi", ces ennemis changent de cible pour l'allié ciblé, qui gagne 6 "bouclier" par ennemi. "Furtif" | Si "cibleennemi", ces ennemis changent de cible pour l'allié ciblé, qui gagne 9 "bouclier" par ennemi. "Furtif" |
+| Repli stratégique | Avancé | 1 | Support | defense, furtif | Si "cibleennemi", ces ennemis changent de cible pour l'allié ciblé, qui gagne 6 "bouclier" par ennemi. "Furtif" | Si "cibleennemi", ces ennemis changent de cible pour l'allié ciblé, qui gagne 9 "bouclier" par ennemi. "Furtif" |
 | En traître | Avancé | 1 | Offensive | melee, degats, furtif | Si Camouflé, inflige 6 "epee" et "Saignements" 3, reste Camouflé. "Furtif" | Si Camouflé, inflige 8 "epee" et "Saignements" 4, reste Camouflé. "Furtif" |
 | Assassinat | Avancé | 1 | Offensive + Support | melee, degats, furtif | Camouflé : 12 "epee". Sinon : "Discrétion" 5, "Puissance" 2, remonte sur le deck. "Furtif" | Camouflé : 18 "epee". Sinon : "Discrétion" 10, "Puissance" 2, remonte sur le deck. "Furtif" |
 | Préparation | Avancé | 1 | Support | defense, furtif | Gagne 4 "bouclier", 1 "energie" et "Discrétion" 3. "Furtif" | Gagne 6 "bouclier", 2 "energie" et "Discrétion" 5. "Furtif" |
@@ -106,7 +108,7 @@ Conçu avec agent_content (2026-08-29). `corruption_cost_cap` = coût variable e
 | Nom | Palier | Coût | Type | Mots-clés | Texte (base) | Texte amélioré |
 |---|---|---|---|---|---|---|
 | Rite mineur | Départ | 1 (+0-3 Corruption) | Offensive + Support | sort, degats, soin | Inflige 6 "necrose" à un ennemi. Se soigne de 2×X. | Inflige 9 "necrose" à un ennemi. Se soigne de 3×X. |
-| Sceau de faiblesse | Départ | 0 | Offensive | sort, debuff | Perd 2 "PV". Applique "Vulnerabilite" 3 à un ennemi. | Perd 2 "PV". Applique "Vulnerabilite" 4 à un ennemi. |
+| Sceau de faiblesse | Avancé | 0 | Offensive | sort, debuff | Perd 2 "PV". Applique "Vulnerabilite" 3 à un ennemi. | Perd 2 "PV". Applique "Vulnerabilite" 4 à un ennemi. |
 | Voile d'ossements | Départ | 1 | Support | defense | Perd 2 "PV" : l'allié ciblé gagne 1 "bouclier" par Corruption. | Perd 3 "PV" : l'allié ciblé gagne 2 "bouclier" par Corruption. |
 | Pacte funeste | Avancé | 1 | Offensive | sort, degats | Perd la moitié de ses "PV" actuels. Inflige 2 "necrose" par PV perdu à un ennemi. | Perd le tiers de ses "PV" actuels. Inflige 3 "necrose" par PV perdu à un ennemi. |
 | Servant d'os | Avancé | 2 (+0-4 Corruption) | Offensive | sort, degats | Inflige X "brut" à un ennemi aléatoire, au début des 3 prochains tours. | Inflige X "brut" à un ennemi aléatoire, au début des 4 prochains tours. |
@@ -129,7 +131,7 @@ Conçu avec agent_content (2026-08-29). "Inspiration" est un statut générique 
 
 | Nom | Palier | Coût | Type | Mots-clés | Texte (base) | Texte amélioré |
 |---|---|---|---|---|---|---|
-| Air belliqueux | Départ | 1 | Offensive | melee, degats | Inflige 3 "epee" à un ennemi. +2 par charge d'Inspiration sur les alliés. | Inflige 5 "epee" à un ennemi. +3 par charge d'Inspiration sur les alliés. |
+| Air belliqueux | Avancé | 1 | Offensive | melee, degats | Inflige 3 "epee" à un ennemi. +2 par charge d'Inspiration sur les alliés. | Inflige 5 "epee" à un ennemi. +3 par charge d'Inspiration sur les alliés. |
 | Chœur de bataille | Départ | 1 | Support | sort | Tous les alliés gagnent "Inspiration" 2. | Tous les alliés gagnent "Inspiration" 3. |
 | Improvisation | Départ | 0 | Support | sort | Gagne "Inspiration" 2. "Pioche" 1. | Gagne "Inspiration" 3. "Pioche" 1. |
 | Dernier rappel | Avancé | 1 | Support | sort | L'allié ciblé ne perd pas d'Inspiration à la fin de ce tour et gagne "Inspiration" 3. | L'allié ciblé ne perd pas d'Inspiration à la fin des 2 prochains tours et gagne "Inspiration" 5. |
