@@ -53,9 +53,17 @@ function Draft.pick_cards(state)
   -- disparue de toute pile), contrairement à `is_owned` plus bas (qui ne
   -- regarde QUE ce qui est encore possédé maintenant, jamais l'historique).
   local drafted_mise_a_mort = (state.run and state.run.drafted_mise_a_mort) or {}
+  -- Statut bloqué/débloqué (2026-10-05, demande explicite -- voir le
+  -- commentaire de Cards.is_unlocked_by_default) : une carte "avance"
+  -- verrouillée ne doit jamais sortir au draft. La carte "Mise à mort" est
+  -- exemptée de cette condition (`def.code:match(...)` ci-dessous) -- elle
+  -- reste verrouillée dans la base de données (voir cards.lua), mais sa
+  -- propre règle "jamais 2 fois dans le run" juste au-dessus la limite déjà
+  -- suffisamment ; ce n'est pas elle que ce nouveau système doit gater.
   local eligible = {}
   for _, def in ipairs(Cards.list) do
-    if present_classes[def.class_id] and not def.not_draftable and not drafted_mise_a_mort[def.code] then
+    if present_classes[def.class_id] and not def.not_draftable and not drafted_mise_a_mort[def.code]
+      and (Cards.is_unlocked_by_default(def) or def.code:match("^mise%-a%-mort%-")) then
       eligible[#eligible + 1] = def
     end
   end

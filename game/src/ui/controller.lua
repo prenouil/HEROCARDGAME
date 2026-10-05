@@ -991,12 +991,18 @@ end
 -- cartes "avance" comme les autres -- l'onglet "Artefact" est une mécanique
 -- strictement nouvelle, encore vide, sans lien avec le type "Enchantement"
 -- existant (demande explicite du porteur de projet).
+-- Statut bloqué/débloqué (2026-10-05, demande explicite -- voir le commentaire
+-- de Cards.is_unlocked_by_default) : l'onglet "Avancé" ne doit prévisualiser
+-- que des cartes que le joueur peut réellement obtenir -- une carte verrouillée
+-- n'y apparaît donc pas (jamais grisée/visible, simplement absente, comme pour
+-- le Draft -- voir son propre commentaire).
 local function other_advance_cards_for_class(class_id)
   local out = {}
   for _, def in ipairs(Cards.list) do
     if def.class_id == class_id and def.tier == "avance"
       and not def.code:match("^legs%-") and not def.code:match("^heritage%-")
-      and not def.code:match("^echo%-") and not def.code:match("^mise%-a%-mort%-") then
+      and not def.code:match("^echo%-") and not def.code:match("^mise%-a%-mort%-")
+      and Cards.is_unlocked_by_default(def) then
       out[#out + 1] = def
     end
   end

@@ -1780,6 +1780,35 @@ function Cards.by_code(code)
   return nil
 end
 
+--- Statut bloqué/débloqué (2026-10-05, demande explicite -- "chaque carte a
+-- maintenant un statut bloqué / non bloqué... la base de données indique
+-- quelles cartes sont bloquées de base") : fondation de données pour une
+-- future progression méta, SANS la save du joueur (ses déblocages
+-- supplémentaires viendront plus tard -- voir Cards.is_unlocked_by_default,
+-- qui ne connaît QUE cette base). Toutes les cartes "depart" sont débloquées
+-- de base (elles composent le deck de départ -- les verrouiller n'aurait pas
+-- de sens) ; parmi les cartes "avance", seule la liste ci-dessous, fournie
+-- explicitement par le porteur de projet, l'est aussi -- tout le reste (les 3
+-- autres cartes "avance" de chaque classe, et l'intégralité du pilier du
+-- sacrifice -- Legs/Héritage/Écho) reste verrouillé tant qu'aucune save ne le
+-- débloque. La carte "Mise à mort" de chaque classe n'apparaît PAS dans cette
+-- liste (verrouillée par cette seule fonction) mais reste exemptée côté
+-- appelants qui la traitent déjà à part (Draft.pick_cards, team_select_tab_rows
+-- -- voir leurs commentaires) : sa propre règle "jamais 2 fois dans le run"
+-- suffit déjà à en limiter l'accès, inchangée par ce nouveau système.
+Cards.DEFAULT_UNLOCKED_AVANCE_CODES = {
+  ["coup-taille"] = true, ["coup-estoc"] = true, ["instinct-chasseur"] = true,
+  ["infranchissable"] = true, ["raillerie"] = true, ["bouclier-pointes"] = true,
+  ["barriere"] = true, ["tornade-feu"] = true, ["boule-feu"] = true,
+  ["assassinat"] = true, ["preparation"] = true, ["ombre-patiente"] = true,
+  ["sceau-faiblesse"] = true, ["communion-morts"] = true, ["rite-chair"] = true,
+  ["air-belliqueux"] = true, ["dernier-rappel"] = true, ["tournee-finale"] = true,
+}
+
+function Cards.is_unlocked_by_default(def)
+  return def.tier == "depart" or Cards.DEFAULT_UNLOCKED_AVANCE_CODES[def.code] == true
+end
+
 --- Version améliorée d'un def de base (écran "La Forge", 2026-08-10, demande
 -- explicite -- une seule amélioration possible par carte, jamais de palier
 -- au-delà). Conserve `code` (les recherches Cards.by_code/le glossaire
