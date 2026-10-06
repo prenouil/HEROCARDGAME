@@ -10,7 +10,30 @@ Reconstruit depuis le code le 2026-08-30 (`game/src/data/cards.lua`, 36 cartes �
 
 Aucune autre dérive trouvée sur les 48 cartes (noms, coûts, mots-clés, Type, textes des 46 autres cartes) : tout correspond exactement au code actuel.
 
+**Statut débloqué/verrouillé ajouté le 2026-10-05** (voir section dédiée plus bas) : fondation de méta-progression consommée par le Draft et l'onglet "Avancé" du choix d'équipe, sans impact sur le contenu des cartes lui-même.
+
 **Réduction du deck de départ le 2026-10-03** (demande explicite — "je voudrais diminuer le nombre de carte de départ de chaque classe") : chaque classe passe de 3 à 2 cartes "Départ" — une 3ᵉ carte de chaque classe repasse "Avancé" (toujours obtenable via le Draft, juste plus garantie dès le départ) : Coup de taille (Guerrier), Infranchissable (Paladin), Barrière (Mage), Repli stratégique (Assassin), Sceau de faiblesse (Nécromancien), Air belliqueux (Barde). Aucun autre champ changé (coût, texte, mécanique identiques) — `Deck.starting_cards_for_class`/`Deck.build_starting_deck` dérivent déjà dynamiquement le deck de départ depuis `tier == "depart"`, aucune liste figée à mettre à jour ailleurs dans le code.
+
+## Statut débloqué/verrouillé (2026-10-05, fondation de méta-progression)
+
+Toutes les cartes "Départ" sont débloquées de base (elles composent le deck de départ — les verrouiller n'aurait pas de sens). Parmi les cartes "Avancé", seules **18** (`Cards.DEFAULT_UNLOCKED_AVANCE_CODES`, 3 par classe sur les 6 que compte chaque classe) sont débloquées de base — le reste doit être débloqué (`Cards.is_unlocked_by_default(def) = def.tier == "depart" or DEFAULT_UNLOCKED_AVANCE_CODES[def.code]`) :
+
+| Classe | 3 cartes débloquées de base |
+|---|---|
+| Guerrier | Coup de taille, Coup Contandant, Instinct du Chasseur |
+| Paladin | Infranchissable, Raillerie, Bouclier de pointes |
+| Mage | Barrière, Tornade de feu, Boule de feu |
+| Assassin | Assassinat, Préparation, Ombre Patiente |
+| Nécromancien | Sceau de faiblesse, Lien morbide, Rite de la Chair |
+| Barde | Air belliqueux, Dernier rappel, Tournée finale |
+
+Les cartes **"Mise à mort"** sont volontairement EXEMPTÉES de ce système (toujours proposables au Draft/listées dans l'onglet "Avancé" du choix d'équipe, quel que soit leur statut dans la base de données) — leur propre règle "jamais 2 fois par run" (`state.run.drafted_mise_a_mort`) suffit déjà à en limiter l'accès. Legs/Héritage/Écho n'entrent jamais dans ce système non plus : `not_draftable`, jamais proposées au Draft, affichées inconditionnellement dans l'onglet "Départ / Trépas" du choix d'équipe (voir `docs/design/sacrifice.md`).
+
+**Lecteurs de ce statut** :
+- **Draft** (`Draft.pick_cards`, fin de combat) : une carte "avance" verrouillée n'est JAMAIS proposée.
+- **Onglet "Avancé" du choix d'équipe** (`other_advance_cards_for_class`, `controller.lua`) : une carte verrouillée n'y apparaît jamais (absente, jamais grisée/visible — même traitement que le Draft).
+
+**Déblocages supplémentaires du mode "Aventure"** (`save_data.unlocked_cards`, voir `docs/design/aventure.md`) : une carte débloquée pendant la partie via une "Quête pour le \<classe\>" rejoint l'ensemble des cartes visibles dans l'onglet "Avancé" du choix d'équipe (`other_advance_cards_for_class` reçoit `save_data` en mode Aventure et teste `unlocked_cards[def.code]` en plus de la liste de base) — **mais PAS au Draft** : `Draft.pick_cards(state)` ne reçoit jamais `save_data` et ne teste que `Cards.is_unlocked_by_default(def)`. **Écart de code signalé** (pas corrigé, pas documenté comme un comportement voulu) : une carte ainsi débloquée est visible en aperçu avant de lancer un run, mais ne peut jamais être réellement obtenue pendant ce run via le Draft tant que ce branchement manque — voir `docs/design/aventure.md`, section "Point ouvert".
 
 Notes de lecture :
 - **Palier** : "Départ" (fait partie du deck de départ de la classe si elle est sélectionnée en équipe) ou "Avancé" (obtenue en jeu via le Draft de fin de combat).

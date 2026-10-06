@@ -1,10 +1,10 @@
 # Classes
 
-Reconstruit depuis le code le 2026-08-30 (`game/src/data/heroes.lua`). Remplace toute mention de classes/rôles dans le Google Doc et le GDD BMAD, obsolètes sur ce point (voir écarts en bas de page).
+Reconstruit depuis le code le 2026-08-30 (`game/src/data/heroes.lua`), **mis à jour le 2026-10-06** avec le statut débloqué/verrouillé des classes (voir section dédiée en bas de page). Remplace toute mention de classes/rôles dans le Google Doc et le GDD BMAD, obsolètes sur ce point (voir écarts en bas de page).
 
 ## Roster
 
-Catalogue de 6 aventuriers débloqués (`Heroes.defs`). À l'écran "Choisis ton équipe", le joueur en sélectionne 4 parmi les 6 pour composer une run — aucune classe n'est filtrée ou verrouillée à cet écran. Équipe par défaut (utilisée uniquement quand aucune sélection explicite n'est fournie, ex. "Tester un boss" au menu) : Guerrier, Paladin, Mage, Assassin. Exception : le mode "Run Solo" (2026-09-02) réduit cette sélection à **1 seul** aventurier — voir `docs/design/modes.md`.
+Catalogue de 6 aventuriers (`Heroes.defs`). À l'écran "Choisis ton équipe", le joueur en sélectionne 4 parmi les 6 pour composer une run — **aucune classe n'est filtrée ou verrouillée à cet écran pour "Jouer un run"/"Run Solo"/"Tester un boss"**. Équipe par défaut (utilisée uniquement quand aucune sélection explicite n'est fournie, ex. "Tester un boss" au menu) : Guerrier, Paladin, Mage, Assassin. Exceptions : le mode "Run Solo" (2026-09-02) réduit cette sélection à **1 seul** aventurier, et le mode "Aventure" (2026-10-05) filtre le roster disponible aux classes débloquées pour la sauvegarde en cours — voir "Statut débloqué/verrouillé" ci-dessous et `docs/design/modes.md`.
 
 | Classe | Icône | PV de base | Ressource propre |
 |---|---|---|---|
@@ -54,6 +54,14 @@ Insuffle de l'"Inspiration" à ses alliés pour amplifier leur prochaine carte, 
 - -1 charge à l'utilisation, ET -1 automatique en fin de tour (les deux peuvent se cumuler le même tour)
 - Repart à 0 à chaque nouveau combat
 - "Inspiration" est un statut générique : n'importe quel héros peut le porter (pas seulement le Barde), c'est le cœur de la synergie inter-classes du Barde — jouer une carte Barde PUIS une carte d'une autre classe dans le même tour.
+
+## Statut débloqué/verrouillé (2026-10-05, mode "Aventure" uniquement)
+
+Fondation de méta-progression (`Heroes.DEFAULT_UNLOCKED_CLASS_IDS`, `Heroes.is_unlocked_by_default`) : **4 classes débloquées de base — Guerrier, Paladin, Mage, Assassin — Nécromancien et Barde verrouillés de base.** Seul l'écran de choix d'équipe en mode "Aventure" (`Controller:enter_team_select(mode="adventure")`) filtre dessus (`Quests.unlocked_class_set` = union de `Heroes.DEFAULT_UNLOCKED_CLASS_IDS` et de `save_data.unlocked_classes`, les compagnons débloqués PENDANT cette sauvegarde) — les 3 autres modes ("Jouer un run", "Run Solo", "Tester un boss") restent délibérément non concernés, aucun des deux n'ayant de notion de progression à faire respecter : les 6 classes y sont toujours disponibles, y compris Nécromancien/Barde.
+
+Un compagnon verrouillé se débloque via la quête "Recherche de compagnon" de l'écran "Sélection de quête" du mode Aventure (uniquement en cas de victoire du run) — voir `docs/design/aventure.md` pour le détail complet du système de quêtes/sauvegardes (difficulté, reroll, écran "Félicitations").
+
+Ce statut est indépendant de celui des CARTES (voir `docs/design/cartes.md`, "Statut débloqué/verrouillé") : toutes les cartes "depart"/"avance" de base de Nécromancien/Barde existent déjà dans `cards.lua` et restent affichables (ex. dans l'onglet "Avancé" du choix d'équipe une fois la classe débloquée) — verrouiller une CLASSE revient seulement à la retirer du roster sélectionnable en mode Aventure, pas à retoucher son contenu.
 
 ## Écart code vs. anciens documents
 
