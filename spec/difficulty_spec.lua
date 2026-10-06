@@ -41,6 +41,25 @@ describe("Game.start_next_combat difficulté (budget des combats suivants)", fun
   end)
 end)
 
+-- 2026-10-07, bug corrigé (signalé par un audit de documentation) : voir le
+-- commentaire de Draft.pick_cards (spec/draft_spec.lua couvre le filtrage
+-- lui-même) -- ici, on vérifie seulement que Game.reset_run transmet bien
+-- `unlocked_cards` jusque dans `state.run`, seul maillon qui manquait.
+describe("Game.reset_run unlocked_cards (bug corrigé -- transmission au Draft)", function()
+  it("omis (nil) : state.run.unlocked_cards est une table vide, jamais nil", function()
+    local state = Game.new_state()
+    Game.reset_run(state, 12345, { "guerrier", "paladin", "mage", "assassin" }, "bounded")
+    assert.are.same({}, state.run.unlocked_cards)
+  end)
+
+  it("fourni : reporté tel quel dans state.run.unlocked_cards", function()
+    local state = Game.new_state()
+    local unlocked = { ["avalanche-coups"] = true }
+    Game.reset_run(state, 12345, { "guerrier", "paladin", "mage", "assassin" }, "bounded", 3, unlocked)
+    assert.is_true(state.run.unlocked_cards["avalanche-coups"])
+  end)
+end)
+
 describe("Game.start_boss_combat difficulté (niveau du boss)", function()
   it("difficulté omise (nil) : niveau 1, comme avant", function()
     local state = Game.new_state()

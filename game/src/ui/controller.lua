@@ -465,6 +465,11 @@ function Controller.new()
   -- silencieuse à 1. nil (= 1, voir Controller:reset_run) pour les 3 modes
   -- historiques, qui n'ont aucune notion de difficulté de quête.
   self.last_difficulty = nil
+  -- Même logique de confort, pour les cartes débloquées de la save (2026-10-07,
+  -- bug corrigé -- voir le commentaire de Draft.pick_cards/Game.reset_run) :
+  -- snapshot utilisé pour relancer un run "Aventure" avec le même ensemble
+  -- débloqué. nil (= aucune, voir Game.reset_run) pour les 3 modes historiques.
+  self.last_unlocked_cards = nil
   -- { mode, available_ids = {id,...}, selected_ids = {id,...}, focused_id,
   -- card_anims = {{def, from, to, elapsed, duration, mode="in"|"out"}, ...} },
   -- voir Controller:enter_team_select.
@@ -1484,7 +1489,13 @@ function Controller:team_select_launch()
   -- enter_post_combat_sequence/enter_post_combat_camp_choice). `self.active_quest.difficulty`
   -- (2026-10-07) : figée par Controller:choose_quest, voir son commentaire.
   if mode == "adventure" then
-    self:reset_run("bounded", selected_ids, self.active_quest and self.active_quest.difficulty)
+    -- `unlocked_cards` (2026-10-07, bug corrigé -- voir le commentaire de
+    -- Draft.pick_cards) : relu depuis la save, jamais depuis `self.quest_select`
+    -- (déjà vidé à ce stade, voir Controller:choose_quest) -- les cartes
+    -- débloquées de CETTE save doivent être réellement proposables au Draft
+    -- pendant ce run, pas seulement visibles en aperçu dans l'onglet Avancé.
+    self:reset_run("bounded", selected_ids, self.active_quest and self.active_quest.difficulty,
+      Save.load_slot(self.save_slot).unlocked_cards)
     return
   end
   self:reset_run(mode, selected_ids)
@@ -1528,7 +1539,13 @@ function Controller:team_select_autofill()
     return
   end
   if mode == "adventure" then
-    self:reset_run("bounded", selected_ids, self.active_quest and self.active_quest.difficulty)
+    -- `unlocked_cards` (2026-10-07, bug corrigé -- voir le commentaire de
+    -- Draft.pick_cards) : relu depuis la save, jamais depuis `self.quest_select`
+    -- (déjà vidé à ce stade, voir Controller:choose_quest) -- les cartes
+    -- débloquées de CETTE save doivent être réellement proposables au Draft
+    -- pendant ce run, pas seulement visibles en aperçu dans l'onglet Avancé.
+    self:reset_run("bounded", selected_ids, self.active_quest and self.active_quest.difficulty,
+      Save.load_slot(self.save_slot).unlocked_cards)
     return
   end
   self:reset_run(mode, selected_ids)
@@ -1764,12 +1781,16 @@ end
 -- Controller:choose_quest/team_select_launch) : même confort que
 -- `selected_ids" -- absent, reconduit self.last_difficulty (lui-même nil = 1
 -- pour les 3 modes historiques, jamais fourni explicitement).
-function Controller:reset_run(mode, selected_ids, difficulty)
+-- `unlocked_cards` (optionnel, 2026-10-07, bug corrigé -- voir le commentaire
+-- de Draft.pick_cards/Game.reset_run) : même confort, via self.last_unlocked_cards.
+function Controller:reset_run(mode, selected_ids, difficulty, unlocked_cards)
   self.run_mode = mode or self.run_mode or "infini"
   selected_ids = selected_ids or self.last_selected_ids or Heroes.DEFAULT_PARTY_IDS
   self.last_selected_ids = selected_ids
   difficulty = difficulty or self.last_difficulty or 1
   self.last_difficulty = difficulty
+  unlocked_cards = unlocked_cards or self.last_unlocked_cards
+  self.last_unlocked_cards = unlocked_cards
   self.screen = "playing"
   self:clear_animation_state()
   -- Une NOUVELLE run ne doit rien hériter de l'historique "camp" d'une run
@@ -1784,7 +1805,7 @@ function Controller:reset_run(mode, selected_ids, difficulty)
   -- jamais pour "Tester le boss" (Controller:start_boss_test, qui ne passe
   -- pas par cette fonction).
   Sfx.play("run_start")
-  Game.reset_run(self.state, nil, selected_ids, self.run_mode, difficulty)
+  Game.reset_run(self.state, nil, selected_ids, self.run_mode, difficulty, unlocked_cards)
   -- Game.start_turn (appelé par reset_run) ne peut plus infliger de dégâts à
   -- ce jour -- garde-fou conservé par précaution, voir advance_after_discard_sequenced.
   if self.state.over then self:handle_combat_victory(); return end

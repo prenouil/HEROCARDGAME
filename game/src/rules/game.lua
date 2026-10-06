@@ -928,7 +928,13 @@ end
 -- (optionnel, 2026-10-07 -- voir budget_for_run_combat ci-dessus) : nil =
 -- 1, comportement STRICTEMENT inchangé pour tous les appelants existants
 -- (seul Controller:team_select_launch en mode "adventure" le fournit).
-function Game.reset_run(state, seed, selected_ids, mode, difficulty)
+-- `unlocked_cards` (optionnel, 2026-10-07, BUG CORRIGÉ -- voir le commentaire
+-- de Draft.pick_cards) : snapshot de save_data.unlocked_cards au lancement du
+-- run -- une seule fois ici, jamais relu depuis le disque en cours de run (les
+-- récompenses de quête ne s'appliquent qu'à LA FIN d'un run, rien ne peut
+-- changer cet ensemble entre-temps). nil = table vide, comportement inchangé
+-- pour tous les appelants hors "Aventure".
+function Game.reset_run(state, seed, selected_ids, mode, difficulty, unlocked_cards)
   selected_ids = selected_ids or Heroes.DEFAULT_PARTY_IDS
   local heroes = {}
   for i, id in ipairs(selected_ids) do heroes[i] = fresh_hero(Heroes.by_id(id)) end
@@ -941,7 +947,10 @@ function Game.reset_run(state, seed, selected_ids, mode, difficulty)
   -- disparu (épuisement), contrairement à un simple scan deck/main/défausse
   -- (voir Draft.pick_cards/Controller:choose_draft_card, seuls lecteur et
   -- écrivain).
-  state.run = { combat_index = 1, is_boss = false, mode = mode, difficulty = difficulty or 1, drafted_mise_a_mort = {} }
+  state.run = {
+    combat_index = 1, is_boss = false, mode = mode, difficulty = difficulty or 1,
+    unlocked_cards = unlocked_cards or {}, drafted_mise_a_mort = {},
+  }
   state.rng = Game.new_rng_streams(seed)
   if mode == "bounded" then state.run.biomes = pick_run_biomes(state.rng.encounter) end
   local budget = budget_for_run_combat(state, 1)

@@ -55,15 +55,27 @@ function Draft.pick_cards(state)
   local drafted_mise_a_mort = (state.run and state.run.drafted_mise_a_mort) or {}
   -- Statut bloqué/débloqué (2026-10-05, demande explicite -- voir le
   -- commentaire de Cards.is_unlocked_by_default) : une carte "avance"
-  -- verrouillée ne doit jamais sortir au draft. La carte "Mise à mort" est
-  -- exemptée de cette condition (`def.code:match(...)` ci-dessous) -- elle
-  -- reste verrouillée dans la base de données (voir cards.lua), mais sa
-  -- propre règle "jamais 2 fois dans le run" juste au-dessus la limite déjà
-  -- suffisamment ; ce n'est pas elle que ce nouveau système doit gater.
+  -- verrouillée ne doit jamais sortir au draft. `state.run.unlocked_cards`
+  -- (2026-10-07, BUG CORRIGÉ -- signalé par un audit de documentation : une
+  -- carte débloquée PENDANT une sauvegarde "Aventure" via une "Quête pour le
+  -- <classe>" apparaissait bien dans l'aperçu de l'onglet "Avancé" du choix
+  -- d'équipe, mais n'était jamais réellement proposée au Draft, aucun
+  -- appelant ne transmettant cette information jusqu'ici) : posé par
+  -- Game.reset_run (snapshot de save_data.unlocked_cards au lancement du run,
+  -- jamais relu depuis le disque pendant le run -- les récompenses de quête ne
+  -- s'appliquent de toute façon qu'À LA FIN d'un run, voir Controller:
+  -- resolve_adventure_quest, donc rien ne peut changer entre-temps) -- table
+  -- vide pour tout run hors "Aventure" (Game.reset_run n'en reçoit jamais).
+  -- La carte "Mise à mort" est exemptée de cette condition (`def.code:match(...)`
+  -- ci-dessous) -- elle reste verrouillée dans la base de données (voir
+  -- cards.lua), mais sa propre règle "jamais 2 fois dans le run" juste
+  -- au-dessus la limite déjà suffisamment ; ce n'est pas elle que ce système
+  -- de verrouillage doit gater.
+  local unlocked_cards = (state.run and state.run.unlocked_cards) or {}
   local eligible = {}
   for _, def in ipairs(Cards.list) do
     if present_classes[def.class_id] and not def.not_draftable and not drafted_mise_a_mort[def.code]
-      and (Cards.is_unlocked_by_default(def) or def.code:match("^mise%-a%-mort%-")) then
+      and (Cards.is_unlocked_by_default(def) or unlocked_cards[def.code] or def.code:match("^mise%-a%-mort%-")) then
       eligible[#eligible + 1] = def
     end
   end

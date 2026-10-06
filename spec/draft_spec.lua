@@ -102,6 +102,37 @@ describe("Draft.pick_cards", function()
     assert.is_true(seen)
   end)
 
+  -- 2026-10-07, bug corrigé (signalé par un audit de documentation) : une
+  -- carte débloquée PENDANT une sauvegarde "Aventure" (via une "Quête pour le
+  -- <classe>", save_data.unlocked_cards) apparaissait dans l'aperçu de
+  -- l'onglet "Avancé" du choix d'équipe mais n'était jamais réellement
+  -- proposée au Draft -- Game.reset_run ne transmettait jamais cette
+  -- information. `state.run.unlocked_cards` est maintenant lu ici exactement
+  -- comme `Cards.is_unlocked_by_default`.
+  it("propose une carte normalement verrouillée si son code est dans state.run.unlocked_cards", function()
+    local seen = false
+    for seed = 1, 40 do
+      local state = make_state({ "guerrier" }, seed)
+      state.run = { unlocked_cards = { ["avalanche-coups"] = true } }
+      local picks = Draft.pick_cards(state)
+      for _, def in ipairs(picks) do
+        if def.code == "avalanche-coups" then seen = true end
+      end
+    end
+    assert.is_true(seen)
+  end)
+
+  it("ne propose PAS une carte verrouillée absente de state.run.unlocked_cards (confirme que le test ci-dessus teste bien le déblocage)", function()
+    for seed = 1, 40 do
+      local state = make_state({ "guerrier" }, seed)
+      state.run = { unlocked_cards = {} }
+      local picks = Draft.pick_cards(state)
+      for _, def in ipairs(picks) do
+        assert.are_not.equal("avalanche-coups", def.code, "seed " .. seed)
+      end
+    end
+  end)
+
   it("carte améliorée : jamais au tout premier draft du run (2026-09-30, demande explicite -- 0% au début)", function()
     for seed = 1, 30 do
       local state = make_state({ "guerrier", "paladin", "mage", "assassin" }, seed)
