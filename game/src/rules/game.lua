@@ -903,14 +903,32 @@ function Game.current_biome(state)
   return state.run.combat_index <= 4 and state.run.biomes[1] or state.run.biomes[2]
 end
 
+--- Décale la courbe de budget d'(difficulté - 1) combats (2026-10-07, demande
+-- explicite -- "il faut brancher [la difficulté des quêtes] sur le budget de
+-- rencontre réel") : `state.run.difficulty` (1 par défaut -- absent pour
+-- "Tester un boss"/"Run Solo", qui ne passent jamais par Game.reset_run, et
+-- toujours 1 pour "Jouer un run"/"infini", jamais fourni explicitement par
+-- Controller:reset_run pour ces modes) laisse alors le budget EXACTEMENT
+-- inchangé (n + 0 = n) -- seul un run "Aventure" lancé depuis une quête de
+-- classe/compagnon de difficulté > 1 (voir Quests.class_quest_difficulty/
+-- companion_quest_difficulty, Controller:choose_quest) avance la courbe plus
+-- loin dès le 1er combat, EXACTEMENT comme si ce nombre de combats avait déjà
+-- été remporté.
+local function budget_for_run_combat(state, n)
+  return Encounter.budget_for_combat(n + ((state.run.difficulty or 1) - 1))
+end
+
 -- `mode` (optionnel, 2026-09-01, "bounded"|"infini"|nil -- même vocabulaire
 -- que Controller.run_mode, mais ce module n'en connaissait rien jusqu'ici) :
 -- SEUL mode qui reçoit la mécanique de biomes (tirage des 2 biomes, rencontre
 -- confinée à un biome, Élite au 4e/8e combat) -- "infini" (bientôt retiré du
 -- jeu, demande explicite de ne rien lui ajouter) et l'absence de mode ("Tester
 -- le boss", qui ne passe même pas par cette fonction) gardent l'ancien
--- comportement : pool complet, jamais de state.run.biomes.
-function Game.reset_run(state, seed, selected_ids, mode)
+-- comportement : pool complet, jamais de state.run.biomes. `difficulty`
+-- (optionnel, 2026-10-07 -- voir budget_for_run_combat ci-dessus) : nil =
+-- 1, comportement STRICTEMENT inchangé pour tous les appelants existants
+-- (seul Controller:team_select_launch en mode "adventure" le fournit).
+function Game.reset_run(state, seed, selected_ids, mode, difficulty)
   selected_ids = selected_ids or Heroes.DEFAULT_PARTY_IDS
   local heroes = {}
   for i, id in ipairs(selected_ids) do heroes[i] = fresh_hero(Heroes.by_id(id)) end
@@ -923,10 +941,10 @@ function Game.reset_run(state, seed, selected_ids, mode)
   -- disparu (épuisement), contrairement à un simple scan deck/main/défausse
   -- (voir Draft.pick_cards/Controller:choose_draft_card, seuls lecteur et
   -- écrivain).
-  state.run = { combat_index = 1, is_boss = false, mode = mode, drafted_mise_a_mort = {} }
+  state.run = { combat_index = 1, is_boss = false, mode = mode, difficulty = difficulty or 1, drafted_mise_a_mort = {} }
   state.rng = Game.new_rng_streams(seed)
   if mode == "bounded" then state.run.biomes = pick_run_biomes(state.rng.encounter) end
-  local budget = Encounter.budget_for_combat(1)
+  local budget = budget_for_run_combat(state, 1)
   local instances = Encounter.generate_encounter(budget, state.rng.encounter, Game.current_biome(state))
   local enemies = {}
   for i, inst in ipairs(instances) do
@@ -952,7 +970,7 @@ end
 function Game.start_next_combat(state)
   state.run.combat_index = state.run.combat_index + 1
   state.run.is_boss = false
-  local budget = Encounter.budget_for_combat(state.run.combat_index)
+  local budget = budget_for_run_combat(state, state.run.combat_index)
   local heroes = {}
   for i, h in ipairs(state.heroes) do heroes[i] = carried_hero(h) end
   state.heroes = heroes
@@ -1073,8 +1091,12 @@ function Game.start_boss_combat(state)
   -- boss (déjà incrémenté ci-dessus) compris -- aucun cas particulier requis
   -- ici. nil pour un run sans biomes (ne devrait pas arriver pour un run
   -- "bounded" réel, mais Encounter.boss_encounter retombe alors sur un
-  -- tirage aléatoire par sécurité, jamais une erreur).
-  state.enemies = Encounter.boss_encounter(function() return Game.next_uid(state) end, state.rng.encounter, Game.current_biome(state))
+  -- tirage aléatoire par sécurité, jamais une erreur). `state.run.difficulty`
+  -- (2026-10-07, demande explicite -- voir budget_for_run_combat) comme
+  -- niveau du boss : nil -> défaut 1 (Encounter.boss_encounter), comportement
+  -- inchangé pour "Jouer un run" (toujours 1).
+  state.enemies = Encounter.boss_encounter(
+    function() return Game.next_uid(state) end, state.rng.encounter, Game.current_biome(state), state.run.difficulty)
   local reclaimed = {}
   for _, c in ipairs(state.deck) do reclaimed[#reclaimed + 1] = c end
   for _, c in ipairs(state.hand) do reclaimed[#reclaimed + 1] = c end

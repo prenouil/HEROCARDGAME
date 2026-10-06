@@ -4,6 +4,7 @@
 -- voir Game.select_card) : il ne reste que 2 temps, carte -> cible.
 
 local View = require("src.ui.view")
+local Save = require("src.ui.save")
 -- Molette sur l'écran "Construis ton deck" (2026-09-02) : Input.wheelmoved ne
 -- reçoit que dx/dy (crans de molette, voir main.lua), jamais la position du
 -- curseur -- seul endroit de ce fichier qui a besoin de la relire lui-même
@@ -127,7 +128,8 @@ local function menu_click(controller, x, y)
   if controller.screen == "menu" then
     for _, b in ipairs(View.menu_buttons) do
       if View.point_in(b, x, y) then
-        if b.id == "boss" then controller:enter_team_select("boss_test")
+        if b.id == "adventure" then controller:enter_adventure_slots()
+        elseif b.id == "boss" then controller:enter_team_select("boss_test")
         elseif b.id == "run" then controller:enter_team_select("bounded")
         elseif b.id == "solo" then controller:enter_team_select("solo")
         elseif b.id == "options" then controller:enter_options()
@@ -140,6 +142,56 @@ local function menu_click(controller, x, y)
   end
   if controller.screen == "options" then
     if View.point_in(View.back_button, x, y) then controller:back_to_menu() end
+    return true
+  end
+  -- Écran "Aventure" (2026-10-05, demande explicite) : un clic sur un
+  -- emplacement le crée s'il n'existe pas encore puis route vers le choix
+  -- d'équipe (voir Controller:choose_adventure_slot) ; la croix rouge
+  -- supprime sa sauvegarde SANS y entrer (testée avant le bouton d'emplacement
+  -- lui-même, même si les 2 rects ne se chevauchent jamais -- par principe,
+  -- comme power_well_click teste "Retour" avant la grille) ; "Retour" revient
+  -- au menu, même schéma que les autres écrans à bouton unique.
+  if controller.screen == "adventure_slots" then
+    for _, b in ipairs(View.adventure_slot_delete_buttons) do
+      if Save.slot_exists(b.slot) and View.point_in(b, x, y) then
+        controller:delete_adventure_slot(b.slot)
+        return true
+      end
+    end
+    for _, b in ipairs(View.adventure_slot_buttons) do
+      if View.point_in(b, x, y) then controller:choose_adventure_slot(b.slot); return true end
+    end
+    if View.point_in(View.adventure_back_button, x, y) then controller:back_to_menu() end
+    return true
+  end
+  -- Écran "Sélection de quête" (2026-10-06, demande explicite) : `class_id`
+  -- relu depuis `controller.quest_select.data`, JAMAIS recalculé ici -- un
+  -- bandeau "Pas de quête de ..." (class_id absent) n'est simplement pas
+  -- testé, donc pas cliquable. "Retour" renvoie au choix d'emplacement (pas
+  -- directement au menu -- l'étape logiquement précédente), voir
+  -- Controller:enter_adventure_slots.
+  if controller.screen == "quest_select" then
+    local data = controller.quest_select and controller.quest_select.data
+    if data then
+      if View.point_in(View.quest_banners[1], x, y) then controller:choose_quest("main"); return true end
+      for i = 1, 2 do
+        local class_id = data.class_quest_ids and data.class_quest_ids[i]
+        if class_id and View.point_in(View.quest_banners[i + 1], x, y) then
+          controller:choose_quest("class", class_id)
+          return true
+        end
+      end
+      if data.companion_quest_class_id and View.point_in(View.quest_banners[4], x, y) then
+        controller:choose_quest("companion", data.companion_quest_class_id)
+        return true
+      end
+    end
+    if View.point_in(View.quest_back_button, x, y) then controller:enter_adventure_slots() end
+    return true
+  end
+  -- Écran "Félicitations" (2026-10-06, demande explicite) : un seul bouton.
+  if controller.screen == "quest_reward" then
+    if View.point_in(View.quest_reward_continue_button, x, y) then controller:continue_from_quest_reward() end
     return true
   end
   -- Écran "Choisis un boss" (2026-09-02, étendu le même jour -- niveau
@@ -171,6 +223,31 @@ local function menu_hovering(controller, x, y)
   end
   if controller.screen == "options" then
     return View.point_in(View.back_button, x, y)
+  end
+  if controller.screen == "adventure_slots" then
+    for _, b in ipairs(View.adventure_slot_delete_buttons) do
+      if Save.slot_exists(b.slot) and View.point_in(b, x, y) then return true end
+    end
+    for _, b in ipairs(View.adventure_slot_buttons) do
+      if View.point_in(b, x, y) then return true end
+    end
+    return View.point_in(View.adventure_back_button, x, y)
+  end
+  if controller.screen == "quest_select" then
+    local data = controller.quest_select and controller.quest_select.data
+    if data then
+      if View.point_in(View.quest_banners[1], x, y) then return true end
+      for i = 1, 2 do
+        if data.class_quest_ids and data.class_quest_ids[i] and View.point_in(View.quest_banners[i + 1], x, y) then
+          return true
+        end
+      end
+      if data.companion_quest_class_id and View.point_in(View.quest_banners[4], x, y) then return true end
+    end
+    return View.point_in(View.quest_back_button, x, y)
+  end
+  if controller.screen == "quest_reward" then
+    return View.point_in(View.quest_reward_continue_button, x, y)
   end
   if controller.screen == "boss_select" then
     if View.point_in(View.boss_select_level_minus, x, y) or View.point_in(View.boss_select_level_plus, x, y) then
@@ -412,9 +489,23 @@ local function mousepressed_tap(controller, x, y, button)
   if controller.screen == "bossVictory" then return end
   local state = controller.state
 
+  -- Défaite en mode "Aventure" (2026-10-07, demande explicite -- "pas
+  -- d'option rejouer, seulement revenir au menu, plus un bouton admin
+  -- discret qui permet de rejouer le dernier combat") : `controller.save_slot`
+  -- distingue les 2 cas -- jamais de "Rejouer avec la même équipe" pour ce
+  -- mode (repartirait sur une toute NOUVELLE run, contournerait la défaite
+  -- réelle demandée par ce mode) ; le bouton discret restaure directement la
+  -- photo du combat perdu (Controller:restart_combat, déjà utilisée par
+  -- "Recommencer le combat" en pleine partie -- même mécanisme, pas un 2ᵉ).
   if controller.screen == "defeat" then
-    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller)
-    elseif View.point_in(View.overlay_menu_button, x, y) then controller:back_to_menu()
+    if controller.save_slot then
+      if View.point_in(View.overlay_admin_restart_combat_button, x, y) then controller:restart_combat()
+      elseif View.point_in(View.overlay_menu_button_alone, x, y) then controller:back_to_menu()
+      end
+    else
+      if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller)
+      elseif View.point_in(View.overlay_menu_button, x, y) then controller:back_to_menu()
+      end
     end
     return
   end
@@ -527,9 +618,23 @@ local function mousepressed_arrow(controller, x, y, button)
   if controller.screen == "bossVictory" then return end
   local state = controller.state
 
+  -- Défaite en mode "Aventure" (2026-10-07, demande explicite -- "pas
+  -- d'option rejouer, seulement revenir au menu, plus un bouton admin
+  -- discret qui permet de rejouer le dernier combat") : `controller.save_slot`
+  -- distingue les 2 cas -- jamais de "Rejouer avec la même équipe" pour ce
+  -- mode (repartirait sur une toute NOUVELLE run, contournerait la défaite
+  -- réelle demandée par ce mode) ; le bouton discret restaure directement la
+  -- photo du combat perdu (Controller:restart_combat, déjà utilisée par
+  -- "Recommencer le combat" en pleine partie -- même mécanisme, pas un 2ᵉ).
   if controller.screen == "defeat" then
-    if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller)
-    elseif View.point_in(View.overlay_menu_button, x, y) then controller:back_to_menu()
+    if controller.save_slot then
+      if View.point_in(View.overlay_admin_restart_combat_button, x, y) then controller:restart_combat()
+      elseif View.point_in(View.overlay_menu_button_alone, x, y) then controller:back_to_menu()
+      end
+    else
+      if View.point_in(View.overlay_restart_button, x, y) then restart_after_defeat(controller)
+      elseif View.point_in(View.overlay_menu_button, x, y) then controller:back_to_menu()
+      end
     end
     return
   end
@@ -739,7 +844,9 @@ local function is_hovering_clickable_tap(controller, x, y)
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
   if controller.debug_card_picker then return debug_card_picker_hovering(controller, x, y) end
   if controller.power_well then return power_well_hovering(controller, x, y) end
-  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
+  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select"
+    or controller.screen == "adventure_slots" or controller.screen == "quest_select"
+    or controller.screen == "quest_reward" then
     return menu_hovering(controller, x, y)
   end
   if controller.screen == "deck_builder" then return deck_builder_hovering(controller, x, y) end
@@ -748,6 +855,9 @@ local function is_hovering_clickable_tap(controller, x, y)
   local state = controller.state
 
   if controller.screen == "defeat" then
+    if controller.save_slot then
+      return View.point_in(View.overlay_admin_restart_combat_button, x, y) or View.point_in(View.overlay_menu_button_alone, x, y)
+    end
     return View.point_in(View.overlay_restart_button, x, y) or View.point_in(View.overlay_menu_button, x, y)
   end
 
@@ -804,7 +914,9 @@ local function is_hovering_clickable_arrow(controller, x, y)
   if controller.deck_view_open then return deck_view_hovering(controller, x, y) end
   if controller.debug_card_picker then return debug_card_picker_hovering(controller, x, y) end
   if controller.power_well then return power_well_hovering(controller, x, y) end
-  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select" then
+  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "boss_select"
+    or controller.screen == "adventure_slots" or controller.screen == "quest_select"
+    or controller.screen == "quest_reward" then
     return menu_hovering(controller, x, y)
   end
   if controller.screen == "deck_builder" then return deck_builder_hovering(controller, x, y) end
@@ -813,6 +925,9 @@ local function is_hovering_clickable_arrow(controller, x, y)
   local state = controller.state
 
   if controller.screen == "defeat" then
+    if controller.save_slot then
+      return View.point_in(View.overlay_admin_restart_combat_button, x, y) or View.point_in(View.overlay_menu_button_alone, x, y)
+    end
     return View.point_in(View.overlay_restart_button, x, y) or View.point_in(View.overlay_menu_button, x, y)
   end
 
@@ -871,7 +986,9 @@ function Input.mousemoved(controller, x, y)
   if controller.deck_view_open then controller:set_hover(nil, nil); return end
   if controller.debug_card_picker then controller:set_hover(nil, nil); return end
   if controller.power_well then controller:set_hover(nil, nil); return end
-  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory" then
+  if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory"
+    or controller.screen == "adventure_slots" or controller.screen == "quest_select"
+    or controller.screen == "quest_reward" then
     controller:set_hover(nil, nil)
     return
   end

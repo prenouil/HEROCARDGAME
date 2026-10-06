@@ -38,6 +38,23 @@ function Heroes.by_id(id)
   return nil
 end
 
+-- Statut bloqué/débloqué (2026-10-05, demande explicite -- "dans la même idée
+-- que pour les cartes" -- voir Cards.is_unlocked_by_default/son commentaire,
+-- même fondation de données, mêmes règles : pas encore de save qui débloque
+-- des classes SUPPLÉMENTAIRES, cette liste reste pour l'instant le seul
+-- critère) : Guerrier/Paladin/Mage/Assassin débloqués de base, Nécromancien/
+-- Barde verrouillés -- seul l'écran "Aventure" (Controller:enter_team_select,
+-- mode "adventure") filtre dessus ; les autres modes (Jouer un run/Run Solo/
+-- Tester un boss) restent délibérément non concernés, aucun des 2 n'ayant de
+-- notion de progression à faire respecter.
+Heroes.DEFAULT_UNLOCKED_CLASS_IDS = {
+  guerrier = true, paladin = true, mage = true, assassin = true,
+}
+
+function Heroes.is_unlocked_by_default(id)
+  return Heroes.DEFAULT_UNLOCKED_CLASS_IDS[id] == true
+end
+
 -- Équipe par défaut (2026-08-29) : les 4 héros historiques, utilisés quand
 -- aucune sélection explicite n'est fournie (Game.start_boss_test -- "Tester
 -- le boss" au menu reste un raccourci fixe, pas concerné par l'écran de

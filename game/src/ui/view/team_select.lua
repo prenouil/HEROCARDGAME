@@ -4,6 +4,8 @@ local Theme = require("src.ui.theme")
 local Background = require("src.ui.background")
 local Heroes = require("src.data.heroes")
 local CardUI = require("src.ui.view.cards")
+local Quests = require("src.rules.quests")
+local Save = require("src.ui.save")
 
 return function(View, UI)
   -- Écran "Choisis ton équipe" (2026-08-29, avant chaque run -- 4 aventuriers
@@ -341,6 +343,38 @@ return function(View, UI)
       end
     end
 
+    -- "Nombre de cartes restant à débloquer" (2026-10-07, demande explicite) :
+    -- seulement sur l'onglet "Avancé" en mode "Aventure" -- les 3 autres modes
+    -- n'ont aucune notion de déblocage à montrer (toutes leurs cartes "avance"
+    -- débloquées de base sont de toute façon déjà là), voir le commentaire de
+    -- other_advance_cards_for_class (controller.lua). Positionnée sous la
+    -- dernière carte RÉELLEMENT affichée (`a.mode == "in"`, qu'elle soit encore
+    -- en vol ou déjà posée) plutôt qu'à une position fixe -- le nombre de
+    -- lignes de l'onglet Avancé varie selon la classe (groupes de 4, voir
+    -- TEAM_TAB_ADVANCE_ROW_MAX dans controller.lua). `Save.load_slot` relu à
+    -- chaque frame (coût négligeable, même convention que draw_adventure_slots/
+    -- Save.slot_exists -- voir son commentaire) plutôt que mis en cache ici :
+    -- reflète toujours le tout dernier déblocage, sans jamais pouvoir se
+    -- désynchroniser du disque.
+    if ts.mode == "adventure" and ts.active_tab == "avance" and ts.focused_id then
+      local max_bottom = TEAM_CARD_Y
+      for _, a in ipairs(ts.card_anims) do
+        if a.mode == "in" then max_bottom = math.max(max_bottom, a.to.y + a.to.h) end
+      end
+      local class_id = Heroes.by_id(ts.focused_id).class_id
+      local save_data = Save.load_slot(controller.save_slot)
+      local remaining = #Quests.locked_cards_for_class(class_id, save_data)
+      local label
+      if remaining == 0 then
+        label = "Toutes les cartes de cette classe sont débloquées."
+      elseif remaining == 1 then
+        label = "1 carte restante à débloquer."
+      else
+        label = remaining .. " cartes restantes à débloquer."
+      end
+      UI.text(label, TEAM_CARD_REGION_X, max_bottom + 16, TEAM_CARD_REGION_W, 14, Theme.muted, "center")
+    end
+
     -- Boutons d'onglet en vol (2026-10-03) : même idiome que les cartes
     -- juste au-dessus (ease_out_back à l'entrée, quadratique à la sortie),
     -- jamais de `a.delay` ici (pas de rassemblement différé les concernant).
@@ -370,8 +404,13 @@ return function(View, UI)
 
       local already_in = false
       for _, sid in ipairs(ts.selected_ids) do if sid == ts.focused_id then already_in = true end end
+      -- Aventurier imposé par une quête (2026-10-06, "Quête pour le <classe>") :
+      -- "Retirer" reste affiché mais grisé/inerte, même traitement visuel que
+      -- "Valider" quand l'équipe est déjà complète -- voir Controller:
+      -- team_select_confirm, qui applique le même refus côté logique.
+      local locked = already_in and ts.locked_ids and ts.locked_ids[ts.focused_id]
       local vb = View.team_select_confirm_button
-      local blocked = (not already_in) and #ts.selected_ids >= ts.max_team_size
+      local blocked = locked or ((not already_in) and #ts.selected_ids >= ts.max_team_size)
       UI.set(blocked and Theme.panel or Theme.accent)
       love.graphics.rectangle("fill", vb.x, vb.y, vb.w, vb.h, 8, 8)
       UI.text(already_in and "Retirer" or "Valider", vb.x, vb.y + 14, vb.w, 14, blocked and Theme.muted or Theme.bg, "center")

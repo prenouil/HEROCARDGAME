@@ -22,8 +22,22 @@ return function(View, UI)
   -- self.last_selected_ids/self.run_mode SANS rien de neuf à câbler.
   View.overlay_restart_button = { x = UI.W / 2 - 130, y = UI.H / 2 + 40, w = 260, h = 40, label = "Rejouer avec la même équipe" }
   View.overlay_menu_button = { x = UI.W / 2 - 130, y = UI.H / 2 + 88, w = 260, h = 40, label = "Retourner au menu" }
+  -- Défaite en mode "Aventure" (2026-10-07, demande explicite -- "pas
+  -- d'option rejouer, seulement revenir au menu") : "Retourner au menu" migre
+  -- à LA PLACE de "Rejouer avec la même équipe" (seul bouton restant, recentré
+  -- plutôt que laissé en place avec un vide au-dessus -- voir son usage
+  -- conditionnel dans draw_defeat_overlay ci-dessous).
+  View.overlay_menu_button_alone = { x = UI.W / 2 - 130, y = UI.H / 2 + 40, w = 260, h = 40, label = "Retourner au menu" }
+  -- "Bouton admin discret" (2026-10-07, demande explicite) : petit, en bas à
+  -- droite, style volontairement effacé (bordure/texte Theme.muted, jamais
+  -- UI.draw_menu_style_button -- réservé aux VRAIES actions du joueur) --
+  -- restaure directement la photo du combat perdu, voir Controller:
+  -- restart_combat (Input.lua, seul appelant).
+  View.overlay_admin_restart_combat_button = { x = UI.W - 280, y = UI.H - 36, w = 260, h = 24, label = "Admin : rejouer le dernier combat" }
 
-  --- Écran de défaite : voile noir + titre + bouton rejouer/menu.
+  --- Écran de défaite : voile noir + titre + bouton rejouer/menu -- en mode
+  -- "Aventure" (`controller.save_slot`), seul "Retourner au menu" s'affiche
+  -- (recentré, voir overlay_menu_button_alone) plus le bouton admin discret.
   function View.draw_defeat_overlay(controller)
     UI.set(Theme.black, 0.75); love.graphics.rectangle("fill", 0, 0, UI.W, UI.H)
     UI.text("Défaite…", 0, UI.H / 2 - 40, UI.W, 26, Theme.text)
@@ -32,8 +46,17 @@ return function(View, UI)
     -- écrire des erreurs comme '1 chevaux'") : accepte l'accord fautif à 1
     -- combat plutôt que la parenthèse.
     UI.text("Le run s'arrête après " .. combats_won_text(controller) .. " combats remportés.", 0, UI.H / 2, UI.W, 12, Theme.muted)
-    UI.draw_menu_style_button(View.overlay_restart_button)
-    UI.draw_menu_style_button(View.overlay_menu_button)
+    if controller.save_slot then
+      UI.draw_menu_style_button(View.overlay_menu_button_alone)
+      local b = View.overlay_admin_restart_combat_button
+      UI.set(Theme.panel_light); love.graphics.rectangle("fill", b.x, b.y, b.w, b.h, 6, 6)
+      UI.set(Theme.muted); love.graphics.setLineWidth(1)
+      love.graphics.rectangle("line", b.x, b.y, b.w, b.h, 6, 6)
+      UI.text(b.label, b.x, b.y + 6, b.w, 11, Theme.muted, "center")
+    else
+      UI.draw_menu_style_button(View.overlay_restart_button)
+      UI.draw_menu_style_button(View.overlay_menu_button)
+    end
   end
 
   -- Rendu des cartes de draft (écran de victoire), REGROUPÉ (2026-09-02) sous

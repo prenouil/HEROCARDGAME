@@ -8,6 +8,7 @@ local Draft = require("src.rules.draft")
 local Forge = require("src.rules.forge")
 local Temple = require("src.rules.temple")
 local Prediction = require("src.rules.prediction")
+local Quests = require("src.rules.quests")
 -- Écran "Choisis ton équipe" (2026-08-29, avant chaque run -- voir
 -- Controller:enter_team_select) : catalogue des 6 aventuriers débloqués
 -- (Heroes.defs) et leurs cartes (Cards.list, filtrées par class_id).
@@ -22,6 +23,7 @@ local Sequencer = require("src.util.sequencer")
 -- ou défaussée ; voir View.hand_rects_for/deck_pile_rect/discard_pile_rect.
 local View = require("src.ui.view")
 local Sfx = require("src.ui.sfx")
+local Save = require("src.ui.save")
 -- Uniquement pour les couleurs des particules de cendres/étincelles
 -- (2026-08-28, voir Controller:spawn_ash) -- draw_particles (view.lua) reste
 -- l'unique endroit qui dessine réellement, ce module ne fait que choisir la
@@ -428,6 +430,26 @@ function Controller.new()
   -- pick_debug_card et View.draw_debug_card_picker (view/debug_card_picker.lua).
   self.debug_card_picker = nil
   self.run_mode = nil
+  -- Emplacement de sauvegarde actif du mode "Aventure" (2026-10-05, prémices --
+  -- voir Controller:choose_adventure_slot, seul écrivain) : nil hors de ce
+  -- mode, jamais remis à zéro par reset_run/clear_animation_state (un run
+  -- "Aventure" en cours reste associé à son emplacement jusqu'au retour au
+  -- menu). Pas encore lu ailleurs -- future lecture/écriture de la
+  -- progression, voir le commentaire de Save (src/ui/save.lua).
+  self.save_slot = nil
+  -- Quête choisie sur "Sélection de quête" pour la run EN COURS (2026-10-06,
+  -- demande explicite) : `{kind = "main"|"class"|"companion", class_id}` --
+  -- posée par Controller:choose_quest, lue/consommée par
+  -- Controller:resolve_adventure_quest à la fin du run (victoire OU défaite),
+  -- jamais persistée sur disque (si la partie quitte sans que le run se
+  -- termine, rien n'est perdu -- elle n'avait de toute façon encore rien
+  -- rapporté). nil hors du mode "Aventure", ou tant qu'aucune quête n'a
+  -- encore été choisie.
+  self.active_quest = nil
+  -- Récompense à mettre en évidence sur l'écran "Félicitations" (2026-10-06,
+  -- demande explicite) : voir Controller:enter_quest_reward_screen, seul
+  -- écrivain -- nil tant qu'aucune récompense n'attend d'être montrée.
+  self.quest_reward = nil
   -- Dernière équipe lancée avec succès (2026-08-29, écran de choix
   -- d'équipe) : liste de 4 ids -- reconduite par "Rejouer" après une défaite
   -- (voir restart_after_defeat, input.lua) sans repasser par l'écran de
@@ -435,6 +457,14 @@ function Controller.new()
   -- run n'a encore été lancée via cet écran (Heroes.DEFAULT_PARTY_IDS sert
   -- alors de repli, voir Controller:reset_run).
   self.last_selected_ids = nil
+  -- Dernière difficulté de quête lancée avec succès (2026-10-07, demande
+  -- explicite -- "il faut les brancher sur le budget de rencontre réel") :
+  -- même logique de confort que self.last_selected_ids juste au-dessus --
+  -- "Rejouer" après une défaite (restart_after_defeat, input.lua) reprend la
+  -- MÊME difficulté que le run qui vient d'échouer, jamais retombée
+  -- silencieuse à 1. nil (= 1, voir Controller:reset_run) pour les 3 modes
+  -- historiques, qui n'ont aucune notion de difficulté de quête.
+  self.last_difficulty = nil
   -- { mode, available_ids = {id,...}, selected_ids = {id,...}, focused_id,
   -- card_anims = {{def, from, to, elapsed, duration, mode="in"|"out"}, ...} },
   -- voir Controller:enter_team_select.
@@ -858,12 +888,37 @@ end
 -- 1 seul aventurier au lieu de 4 -- toute la logique de cap/"prêt"/auto-fill
 -- ci-dessous et dans view.lua/input.lua lit CE champ plutôt qu'un 4 en dur,
 -- pour rester correcte pour les 2 tailles sans dupliquer l'écran.
-function Controller:enter_team_select(mode)
+-- `forced_class_id` (2026-10-06, demande explicite -- "Quête pour le
+-- <classe>... indique quel personnage sera automatiquement sélectionné dans
+-- la team") : pré-rempli DIRECTEMENT dans `selected_ids` (jamais via
+-- l'animation normale "disponible -> projecteur -> équipe" -- "automatiquement
+-- sélectionné" se lit comme un fait déjà acquis dès l'arrivée sur l'écran,
+-- pas un évènement à regarder se jouer) et retiré de `available_ids` --
+-- `ts.locked_ids` empêche ensuite Controller:team_select_confirm/
+-- team_select_autofill de le retirer, voir leurs commentaires. nil pour tous
+-- les autres cas (3 modes historiques, "Histoire principale"/"Recherche de
+-- compagnon" en mode "Aventure" -- ces 2 dernières n'imposent personne).
+function Controller:enter_team_select(mode, forced_class_id)
   self.screen = "team_select"
+  -- Mode "Aventure" (2026-10-05, demande explicite -- "le joueur arrive alors
+  -- sur la fenêtre de sélection d'équipe avec seulement les classes
+  -- débloquées visibles") : seul ce mode filtre -- "Jouer un run"/"Run Solo"/
+  -- "Tester un boss" restent délibérément le catalogue complet, voir le
+  -- commentaire de Heroes.DEFAULT_UNLOCKED_CLASS_IDS. `Quests.unlocked_class_set`
+  -- (2026-10-06) ajoute les classes débloquées PENDANT cette save (via
+  -- "Recherche de compagnon") à l'ensemble de base -- jamais juste
+  -- Heroes.is_unlocked_by_default seul, qui ignorerait ces déblocages.
+  local unlocked = (mode == "adventure") and Quests.unlocked_class_set(Save.load_slot(self.save_slot)) or nil
   local available = {}
-  for _, def in ipairs(Heroes.defs) do available[#available + 1] = def.id end
+  for _, def in ipairs(Heroes.defs) do
+    if (not unlocked or unlocked[def.id]) and def.id ~= forced_class_id then
+      available[#available + 1] = def.id
+    end
+  end
   self.team_select = {
-    mode = mode, available_ids = available, selected_ids = {},
+    mode = mode, available_ids = available,
+    selected_ids = forced_class_id and { forced_class_id } or {},
+    locked_ids = forced_class_id and { [forced_class_id] = true } or nil,
     max_team_size = (mode == "solo") and 1 or 4,
     focused_id = nil, card_anims = {}, hero_anims = {},
     -- Onglets Départ/Trépas, Avancé, Artefact (2026-10-03) : voir
@@ -995,14 +1050,20 @@ end
 -- de Cards.is_unlocked_by_default) : l'onglet "Avancé" ne doit prévisualiser
 -- que des cartes que le joueur peut réellement obtenir -- une carte verrouillée
 -- n'y apparaît donc pas (jamais grisée/visible, simplement absente, comme pour
--- le Draft -- voir son propre commentaire).
-local function other_advance_cards_for_class(class_id)
+-- le Draft -- voir son propre commentaire). `save_data` (optionnel, 2026-10-06,
+-- mode "Aventure" -- une carte débloquée via une "Quête pour le <classe>" doit
+-- apparaître ici comme n'importe quelle autre carte débloquée de base, jamais
+-- rester absente juste parce qu'elle vient d'une autre source de déblocage) :
+-- nil pour les 3 modes historiques (Jouer un run/Run Solo/Tester un boss), qui
+-- n'ont aucune notion de save -- comportement inchangé pour eux.
+local function other_advance_cards_for_class(class_id, save_data)
+  local unlocked_cards = (save_data and save_data.unlocked_cards) or {}
   local out = {}
   for _, def in ipairs(Cards.list) do
     if def.class_id == class_id and def.tier == "avance"
       and not def.code:match("^legs%-") and not def.code:match("^heritage%-")
       and not def.code:match("^echo%-") and not def.code:match("^mise%-a%-mort%-")
-      and Cards.is_unlocked_by_default(def) then
+      and (Cards.is_unlocked_by_default(def) or unlocked_cards[def.code]) then
       out[#out + 1] = def
     end
   end
@@ -1020,12 +1081,12 @@ local TEAM_TAB_ADVANCE_ROW_MAX = 4
 -- par View.team_select_card_row_rects (1 ligne = 1 rangée centrée). Seul
 -- point d'entrée utilisé par Controller:team_select_spawn_cards -- jamais
 -- une 2ᵉ logique de filtrage ailleurs.
-local function team_select_tab_rows(class_id, tab)
+local function team_select_tab_rows(class_id, tab, save_data)
   if tab == "avance" then
     local flat = {}
     local mam = mise_a_mort_for_class(class_id)
     if mam then flat[#flat + 1] = mam end
-    for _, d in ipairs(other_advance_cards_for_class(class_id)) do flat[#flat + 1] = d end
+    for _, d in ipairs(other_advance_cards_for_class(class_id, save_data)) do flat[#flat + 1] = d end
     local rows = {}
     for i = 1, #flat, TEAM_TAB_ADVANCE_ROW_MAX do
       local row = {}
@@ -1067,6 +1128,11 @@ end
 -- Factorisé en `fly_out_list` (2026-10-03, boutons d'onglet Départ/Trépas-
 -- Avancé-Artefact) : même bascule in->out, réutilisée pour ts.tab_button_anims
 -- ci-dessous ET par Controller:team_select_switch_tab pour ts.card_anims seul.
+-- `gather_target` accepte aussi une FONCTION `function(a) return rect|nil end`
+-- (2026-10-05, demande explicite -- "Valider" qui distingue départ/trio, voir
+-- team_select_confirm_gather) : rappelée par entrée pour choisir SA cible
+-- (deck ou aventurier) -- un simple rect reste le cas normal (toutes les
+-- entrées convergent au même endroit, inchangé pour tous les autres appels).
 local function fly_out_list(ctrl, list, gather_target)
   local i = 0
   for _, a in ipairs(list) do
@@ -1076,8 +1142,9 @@ local function fly_out_list(ctrl, list, gather_target)
       local cur = { x = a.from.x + (a.to.x - a.from.x) * p, y = a.from.y + (a.to.y - a.from.y) * p, w = a.to.w, h = a.to.h }
       a.mode = "out"
       a.from = cur
-      if gather_target then
-        a.to = { x = gather_target.x, y = gather_target.y, w = gather_target.w, h = gather_target.h }
+      local target = (type(gather_target) == "function") and gather_target(a) or gather_target
+      if target then
+        a.to = { x = target.x, y = target.y, w = target.w, h = target.h }
         a.duration = TEAM_CARD_GATHER_DURATION
         a.delay = (i - 1) * TEAM_CARD_GATHER_STAGGER
         -- 1 "flup" PAR carte, espacé du même délai que son vol (2026-08-30,
@@ -1136,18 +1203,27 @@ end
 -- d'onglet) -- AJOUTE ces entrées à `ts.card_anims`, ne le vide jamais (les
 -- vols "out" en cours doivent pouvoir continuer à se dessiner/s'auto-
 -- supprimer en parallèle, voir Controller:update).
+-- `row_index` conservé sur chaque entrée (2026-10-05, demande explicite --
+-- "Valider" doit distinguer la ligne des cartes de départ de celle du trio
+-- Legs/Héritage/Écho pour le rassemblement, voir team_select_confirm_gather) :
+-- sur l'onglet "Départ / Trépas", team_select_tab_rows renvoie TOUJOURS
+-- `{depart, trio}` dans cet ordre fixe (chaque classe a au moins 1 carte
+-- "depart", invariant déjà établi -- voir son commentaire) -- row_index 1 =
+-- départ, row_index 2 = trio. Sans signification particulière sur les autres
+-- onglets (jamais lu en dehors du rassemblement, qui force d'abord l'onglet
+-- "Départ / Trépas").
 local function spawn_card_rows(ts, rows)
   local row_counts = {}
   for _, row in ipairs(rows) do row_counts[#row_counts + 1] = #row end
   local targets = View.team_select_card_row_rects(row_counts)
   local idx = 0
-  for _, row in ipairs(rows) do
+  for row_index, row in ipairs(rows) do
     for _, card_def in ipairs(row) do
       idx = idx + 1
       local to = targets[idx]
       local from = View.team_select_offscreen_rect(to, TEAM_CARD_SIDES[math.random(#TEAM_CARD_SIDES)])
       ts.card_anims[#ts.card_anims + 1] = {
-        def = card_def, from = from, to = to, elapsed = 0,
+        def = card_def, from = from, to = to, elapsed = 0, row_index = row_index,
         duration = TEAM_CARD_FLY_DURATION, mode = "in",
       }
     end
@@ -1167,7 +1243,10 @@ function Controller:team_select_spawn_cards(id)
   local ts = self.team_select
   if not ts or ts.focused_id ~= id then return end
   local def = Heroes.by_id(id)
-  spawn_card_rows(ts, team_select_tab_rows(def.class_id, ts.active_tab))
+  -- `save_data` (2026-10-06, mode "Aventure") : voir le commentaire de
+  -- other_advance_cards_for_class -- nil pour les 3 autres modes.
+  local save_data = (ts.mode == "adventure") and Save.load_slot(self.save_slot) or nil
+  spawn_card_rows(ts, team_select_tab_rows(def.class_id, ts.active_tab, save_data))
   -- Boutons d'onglet (2026-10-03, demande explicite -- "ces boutons
   -- arrivent et partent avec le même effet que les cartes quand on
   -- sélectionne un nouvel aventurier") : liés au changement d'AVENTURIER
@@ -1197,10 +1276,15 @@ function Controller:team_select_switch_tab(tab)
   local i = fly_out_list(self, ts.card_anims, nil)
   if i > 0 then self:team_select_play_card_burst() end
   local class_id = Heroes.by_id(ts.focused_id).class_id
+  -- `save_data` (2026-10-06, mode "Aventure") : voir le commentaire de
+  -- Controller:team_select_spawn_cards -- capturé AVANT le délai du seq (le
+  -- mode ne change jamais en cours d'écran, autant lire le disque une seule
+  -- fois ici plutôt que re-fetch dans la closure différée).
+  local save_data = (ts.mode == "adventure") and Save.load_slot(self.save_slot) or nil
   local self_ = self
   self.seq:push(function() end, TEAM_CARD_FLY_DURATION)
   self.seq:push(function()
-    spawn_card_rows(self_.team_select, team_select_tab_rows(class_id, tab))
+    spawn_card_rows(self_.team_select, team_select_tab_rows(class_id, tab, save_data))
     self_:team_select_play_card_burst()
   end)
 end
@@ -1260,6 +1344,54 @@ function Controller:team_select_cancel()
   ts.focused_id = nil
 end
 
+--- Rassemblement déclenché par "Valider" un AJOUT (2026-10-05, demande
+-- explicite -- "il faut revenir sur l'onglet Départ / Trépas, puis seul les
+-- cartes de départ vont dans le deck, les 3 autres cartes [Legs/Héritage/
+-- Écho] vont se fondre dans l'aventurier lui-même") : si un autre onglet était
+-- affiché (Avancé/Artefact), fait D'ABORD un vrai changement d'onglet vers
+-- "Départ / Trépas" -- EXACTEMENT comme team_select_switch_tab (sortie puis
+-- entrée après un délai, jamais touché aux boutons d'onglet à cette étape,
+-- même règle qu'un changement d'onglet normal) -- puis, une fois ces cartes
+-- posées, les rassemble à leur tour. Si "Départ / Trépas" était déjà actif,
+-- rassemble directement les cartes déjà affichées, sans détour.
+-- `gather()` route chaque entrée de `ts.card_anims` selon son `row_index`
+-- (voir spawn_card_rows) : row_index 2 (le trio) vers le portrait du héros
+-- (sa position d'arrivée dans la rangée équipe, calculée une seule fois ici --
+-- pas besoin de suivre une cible mobile image par image, son propre vol vers
+-- cette même case dure exactement aussi longtemps, voir team_select_move_hero
+-- juste au-dessus dans team_select_confirm), tout le reste (row_index 1, les
+-- cartes de départ) vers le deck -- voir View.team_select_deck_rect.
+function Controller:team_select_confirm_gather(id)
+  local ts = self.team_select
+  local self_ = self
+  local function gather()
+    local tts = self_.team_select
+    if not tts then return end
+    local deck_rect = View.team_select_deck_rect(#tts.selected_ids)
+    local hero_rect = self_:team_select_home_rect(id)
+    self_:team_select_fly_out_current(function(a)
+      return (a.row_index == 2) and hero_rect or deck_rect
+    end)
+  end
+  if ts.active_tab == "depart" then
+    gather()
+    return
+  end
+  ts.active_tab = "depart"
+  local i = fly_out_list(self, ts.card_anims, nil)
+  if i > 0 then self:team_select_play_card_burst() end
+  local class_id = Heroes.by_id(id).class_id
+  self.seq:push(function() end, TEAM_CARD_FLY_DURATION)
+  self.seq:push(function()
+    local tts = self_.team_select
+    if not tts then return end
+    spawn_card_rows(tts, team_select_tab_rows(class_id, "depart"))
+    self_:team_select_play_card_burst()
+  end)
+  self.seq:push(function() end, TEAM_CARD_FLY_DURATION)
+  self.seq:push(gather)
+end
+
 --- "Valider" (2026-08-29) : bascule l'aventurier mis en avant entre les 2
 -- listes -- l'AJOUTE à l'équipe s'il n'y était pas (refusé, sans effet, si
 -- l'équipe compte déjà ts.max_team_size -- bouton visuellement désactivé dans ce cas, voir
@@ -1268,13 +1400,27 @@ end
 -- "Retirer" côté vue). Le portrait se déplace vers sa NOUVELLE rangée
 -- (2026-08-30, "il se déplace en bas") -- calculée APRÈS la bascule de
 -- liste, donc déjà la rangée équipe en cas d'ajout. En cas d'AJOUT
--- seulement, ses cartes convergent vers le deck (grossi d'un cran, voir
--- View.team_select_deck_rect) plutôt que de partir vers des bords aléatoires
--- -- un retrait n'alimente jamais le deck, il se contente de refermer le
--- focus normalement. Referme le focus dans les 2 cas, comme "Annuler".
+-- seulement, ses cartes de départ convergent vers le deck (grossi d'un cran,
+-- voir View.team_select_deck_rect) et son trio Legs/Héritage/Écho se fond
+-- dans SON PROPRE portrait plutôt que de partir vers des bords aléatoires
+-- (2026-10-05, demande explicite -- "seul les cartes de départ vont dans le
+-- deck, les 3 autres cartes vont se fondre dans l'aventurier lui-même" --
+-- voir Controller:team_select_confirm_gather) -- un retrait n'alimente jamais
+-- le deck, il se contente de refermer le focus normalement. Referme le focus
+-- dans les 2 cas, comme "Annuler".
 function Controller:team_select_confirm()
   local ts = self.team_select
   if not ts or not ts.focused_id then return end
+  -- Aventurier imposé par une "Quête pour le <classe>" (2026-10-06, demande
+  -- explicite -- "indique quel personnage sera automatiquement sélectionné") :
+  -- "Retirer" n'a aucun effet sur lui -- voir draw_team_select (view.lua),
+  -- qui grise déjà ce bouton dans ce cas précis, jamais un clic muet sans
+  -- retour visuel.
+  if ts.locked_ids and ts.locked_ids[ts.focused_id] then
+    local already_in = false
+    for _, sid in ipairs(ts.selected_ids) do if sid == ts.focused_id then already_in = true end end
+    if already_in then return end
+  end
   -- Même correctif que team_select_focus (2026-08-30, voir son commentaire) --
   -- le héros validé/retiré ne doit pas hériter du survol qu'il avait dans le
   -- projecteur une fois reparti dans une rangée.
@@ -1303,7 +1449,7 @@ function Controller:team_select_confirm()
   self:team_select_move_hero(id, View.team_select_spotlight_rect, self:team_select_home_rect(id),
     adding and TEAM_HERO_MOVE_DURATION_SLOW or nil)
   if adding then
-    self:team_select_fly_out_current(View.team_select_deck_rect(#ts.selected_ids))
+    self:team_select_confirm_gather(id)
   else
     self:team_select_fly_out_current()
   end
@@ -1331,24 +1477,42 @@ function Controller:team_select_launch()
     self:enter_deck_builder(selected_ids[1])
     return
   end
+  -- Mode "Aventure" (2026-10-05) : lance un run "bounded" normal (mêmes 9
+  -- combats + boss que "Jouer un run") -- "adventure" ne décrit QUE l'écran de
+  -- sélection d'équipe filtré en amont, jamais un run_mode à part entière
+  -- (self.run_mode == "bounded" reste le seul lu par advance_to_next_combat/
+  -- enter_post_combat_sequence/enter_post_combat_camp_choice). `self.active_quest.difficulty`
+  -- (2026-10-07) : figée par Controller:choose_quest, voir son commentaire.
+  if mode == "adventure" then
+    self:reset_run("bounded", selected_ids, self.active_quest and self.active_quest.difficulty)
+    return
+  end
   self:reset_run(mode, selected_ids)
 end
 
 --- "Auto-fill" (2026-09-02, demande explicite -- "choisit immédiatement et
 -- aléatoirement 4 aventuriers et lance l'aventure") : IGNORE la sélection en
--- cours (`ts.selected_ids`/`ts.available_ids`) -- retire 4 ids au hasard
--- directement du roster complet (`Heroes.defs`), sans passer par aucune des
+-- cours (`ts.selected_ids`) -- retire le reste au hasard du roster DISPONIBLE
+-- (`ts.available_ids`, pas `Heroes.defs` -- 2026-10-05, correction nécessaire
+-- pour le mode "Aventure" : son roster est filtré aux classes débloquées, voir
+-- Controller:enter_team_select -- identique à `Heroes.defs` pour les autres
+-- modes, donc sans effet sur leur comportement), sans passer par aucune des
 -- animations de l'écran (focus/vol de cartes/etc.), puis lance exactement
 -- comme Controller:team_select_launch ci-dessus. `math.random` (pas un flux
 -- state.rng dédié) : pur confort d'écran de menu, `state.rng` n'existe pas
 -- encore à ce stade (créé par Game.reset_run lui-même, juste après).
+-- `ts.locked_ids` (2026-10-06, "Quête pour le <classe>") : repart avec
+-- l'aventurier imposé DÉJÀ dedans -- `ts.available_ids` ne le contient de
+-- toute façon jamais (retiré dès Controller:enter_team_select), aucun risque
+-- de le tirer une 2ᵉ fois.
 function Controller:team_select_autofill()
   local ts = self.team_select
   if not ts then return end
-  local pool = {}
-  for _, def in ipairs(Heroes.defs) do pool[#pool + 1] = def.id end
   local selected_ids = {}
-  for _ = 1, ts.max_team_size do
+  for id in pairs(ts.locked_ids or {}) do selected_ids[#selected_ids + 1] = id end
+  local pool = {}
+  for _, id in ipairs(ts.available_ids) do pool[#pool + 1] = id end
+  while #selected_ids < ts.max_team_size and #pool > 0 do
     local idx = math.random(#pool)
     selected_ids[#selected_ids + 1] = table.remove(pool, idx)
   end
@@ -1361,6 +1525,10 @@ function Controller:team_select_autofill()
   end
   if mode == "solo" then
     self:enter_deck_builder(selected_ids[1])
+    return
+  end
+  if mode == "adventure" then
+    self:reset_run("bounded", selected_ids, self.active_quest and self.active_quest.difficulty)
     return
   end
   self:reset_run(mode, selected_ids)
@@ -1387,6 +1555,148 @@ end
 
 function Controller:back_to_menu()
   self:enter_menu()
+end
+
+--- Écran "Aventure" (2026-10-05, prémices explicitement demandées) : fenêtre
+-- intermédiaire à 3 emplacements avant l'écran de choix d'équipe -- voir
+-- Controller:choose_adventure_slot, seul chemin vers "team_select" en mode
+-- "adventure". L'existence de chaque emplacement est relue directement depuis
+-- Save (view/menu.lua, draw_adventure_slots) à chaque frame plutôt que mise en
+-- cache ici -- 3 vérifications de fichier par frame, coût négligeable, jamais
+-- de risque de désynchronisation avec le disque.
+function Controller:enter_adventure_slots()
+  self.screen = "adventure_slots"
+end
+
+--- Clique un des 3 emplacements (2026-10-05) : crée son fichier s'il n'existe
+-- pas encore (Save.create_slot, no-op sinon -- voir son commentaire, génère
+-- déjà ses toutes premières quêtes), retient l'emplacement actif
+-- (self.save_slot) puis route vers "Sélection de quête" (2026-10-06, demande
+-- explicite) -- plus un passage direct vers le choix d'équipe, voir
+-- Controller:enter_quest_select/choose_quest, seul chemin désormais vers
+-- "team_select" en mode "adventure".
+function Controller:choose_adventure_slot(slot)
+  if self.screen ~= "adventure_slots" then return end
+  Save.create_slot(slot)
+  self.save_slot = slot
+  self:enter_quest_select()
+end
+
+--- Écran "Sélection de quête" (2026-10-06, demande explicite -- "chaque
+-- quête est un bandeau horizontal indépendant") : relit la save à chaque
+-- entrée (jamais mise en cache plus longtemps que l'écran -- voir
+-- Controller:choose_quest/resolve_adventure_quest, qui la réécrivent toujours
+-- au disque avant qu'on y revienne).
+-- `Save.create_slot` génère déjà les toutes premières quêtes d'un emplacement
+-- flambant neuf -- mais un emplacement créé par une version ANTÉRIEURE de
+-- cette fonctionnalité (ou tout simplement jamais revisité depuis) peut
+-- arriver ici avec `class_quest_ids` encore vide/`companion_quest_class_id`
+-- encore nil sans que ce soit un résultat légitime de tirage (2026-10-06, bug
+-- corrigé -- "pourquoi je n'ai pas de quêtes disponibles" : capture montrant
+-- les 4 bandeaux "Pas de quête de ..." sur un emplacement qui aurait dû en
+-- avoir). Comble donc ici, à CHAQUE entrée -- jamais un reroll aveugle pour
+-- autant : `Quests.reroll_class_quests` n'est redéclenché que si la liste est
+-- VIDE (un vrai "0 classe éligible" légitime retombe de toute façon sur une
+-- liste vide, donc sans effet observable) ; `Quests.ensure_companion_quest`
+-- est déjà lui-même sans effet s'il y a déjà une cible.
+function Controller:enter_quest_select()
+  self.screen = "quest_select"
+  local data = Save.load_slot(self.save_slot)
+  if #data.class_quest_ids == 0 then Quests.reroll_class_quests(data) end
+  Quests.ensure_companion_quest(data)
+  Save.write_slot(self.save_slot, data)
+  self.quest_select = { data = data }
+end
+
+--- Clique un bandeau de quête (2026-10-06) : `class_id` est fourni par la vue
+-- (lu depuis `self.quest_select.data`, jamais recalculé ici -- un SEUL point
+-- de vérité pour "quelle classe cette quête concerne"). Refuse silencieusement
+-- un bandeau "Pas de quête de ..." (class_id absent -- voir Input.lua, qui ne
+-- les laisse de toute façon pas cliquables). Mémorise la quête choisie
+-- (self.active_quest, consommée à la fin du run -- voir
+-- Controller:resolve_adventure_quest) puis route vers le choix d'équipe --
+-- SEULE une quête de classe impose un aventurier (voir Controller:
+-- enter_team_select, `forced_class_id`) ; "Histoire principale"/"Recherche de
+-- compagnon" laissent les 4 emplacements entièrement libres.
+function Controller:choose_quest(kind, class_id)
+  if self.screen ~= "quest_select" then return end
+  if kind ~= "main" and not class_id then return end
+  -- Difficulté figée AU CHOIX (2026-10-07, demande explicite -- "il faut les
+  -- brancher sur le budget de rencontre réel") : calculée ici, UNE FOIS, sur
+  -- la save telle qu'elle était affichée (self.quest_select.data, identique à
+  -- ce que draw_quest_select vient de montrer -- jamais recalculée plus tard,
+  -- rien ne pourrait de toute façon la faire changer d'ici le lancement du
+  -- run). Transmise telle quelle à Game.reset_run via Controller:reset_run,
+  -- voir Controller:team_select_launch/team_select_autofill.
+  local data = self.quest_select.data
+  local difficulty
+  if kind == "main" then difficulty = data.main_story_difficulty or 1
+  elseif kind == "class" then difficulty = Quests.class_quest_difficulty(class_id, data)
+  elseif kind == "companion" then difficulty = Quests.companion_quest_difficulty(data)
+  end
+  self.active_quest = { kind = kind, class_id = class_id, difficulty = difficulty }
+  self.quest_select = nil
+  self:enter_team_select("adventure", kind == "class" and class_id or nil)
+end
+
+--- Résout la quête de la run qui vient de se terminer (2026-10-06, demande
+-- explicite -- corrigé le jour même après une 1ʳᵉ implémentation trop
+-- généreuse : "NON ! La difficulté ne s'incrémente QUE si le joueur GAGNE la
+-- quête principale... La récompense de déblocage de carte... n'arrive que si
+-- le run est gagné") : `won` distingue les 2 cas -- AUCUNE récompense
+-- (difficulté/carte/compagnon) n'est jamais accordée sur une défaite, voir
+-- Controller:enter_defeat_screen_now (appelle toujours `false`). Seul le
+-- REROLL des 2 quêtes de classe reste inconditionnel ("le reroll des quêtes
+-- de déblocage de carte... s'effectue à la fin de chaque run gagné ou
+-- perdu") -- la quête de compagnon, elle, n'est explicitement rerollée QUE
+-- quand sa propre récompense est accordée (donc seulement sur victoire, voir
+-- plus bas) : elle n'est jamais mentionnée par cette règle, rien ne justifie
+-- de lui appliquer le même reroll à l'aveugle sur une défaite.
+-- Renvoie la récompense tout juste accordée (`{kind="card", def=...}` ou
+-- `{kind="companion", class_id=...}`), ou nil (défaite, pas de quête active,
+-- rien à débloquer) -- lue par Controller:enter_boss_victory pour décider
+-- d'enchaîner ou non sur l'écran "Félicitations" (voir
+-- Controller:enter_quest_reward_screen).
+function Controller:resolve_adventure_quest(won)
+  if not self.save_slot then return nil end
+  local data = Save.load_slot(self.save_slot)
+  local quest = self.active_quest
+  local reward = nil
+  if quest and won then
+    if quest.kind == "main" then
+      data.main_story_difficulty = (data.main_story_difficulty or 1) + 1
+    elseif quest.kind == "class" then
+      local locked = Quests.locked_cards_for_class(quest.class_id, data)
+      if #locked > 0 then
+        local def = locked[math.random(#locked)]
+        data.unlocked_cards[def.code] = true
+        reward = { kind = "card", def = def }
+      end
+    elseif quest.kind == "companion" then
+      data.unlocked_classes[quest.class_id] = true
+      reward = { kind = "companion", class_id = quest.class_id }
+      -- Consommée (2026-10-06, voir Quests.ensure_companion_quest) : une
+      -- nouvelle cible (si une autre classe reste à débloquer) sera choisie
+      -- au prochain écran "Sélection de quête" -- jamais sur une défaite
+      -- (`won` faux), la cible mystère reste alors la même qu'avant ce run.
+      data.companion_quest_class_id = nil
+    end
+  end
+  Quests.reroll_class_quests(data)
+  Quests.ensure_companion_quest(data)
+  Save.write_slot(self.save_slot, data)
+  self.active_quest = nil
+  return reward
+end
+
+--- Croix rouge à côté d'un emplacement (2026-10-05, demande explicite) :
+-- supprime son fichier définitivement -- reste sur l'écran des emplacements
+-- (jamais de confirmation supplémentaire, ni de redirection), le bouton
+-- repasse alors lui-même sur "Nouvelle partie" au prochain rendu (voir
+-- draw_adventure_slots, qui relit Save.slot_exists à chaque frame).
+function Controller:delete_adventure_slot(slot)
+  if self.screen ~= "adventure_slots" then return end
+  Save.delete_slot(slot)
 end
 
 --- Remise à zéro de tout l'état d'animation du Controller (2026-08-21,
@@ -1450,10 +1760,16 @@ end
 -- DERNIÈRE équipe lancée avec succès (self.last_selected_ids -- même confort
 -- que `mode` pour "Rejouer", qui ne repasse jamais par l'écran de sélection),
 -- ou Heroes.DEFAULT_PARTY_IDS si aucune run n'est encore passée par cet écran.
-function Controller:reset_run(mode, selected_ids)
+-- `difficulty` (optionnel, 2026-10-07, mode "Aventure" -- voir
+-- Controller:choose_quest/team_select_launch) : même confort que
+-- `selected_ids" -- absent, reconduit self.last_difficulty (lui-même nil = 1
+-- pour les 3 modes historiques, jamais fourni explicitement).
+function Controller:reset_run(mode, selected_ids, difficulty)
   self.run_mode = mode or self.run_mode or "infini"
   selected_ids = selected_ids or self.last_selected_ids or Heroes.DEFAULT_PARTY_IDS
   self.last_selected_ids = selected_ids
+  difficulty = difficulty or self.last_difficulty or 1
+  self.last_difficulty = difficulty
   self.screen = "playing"
   self:clear_animation_state()
   -- Une NOUVELLE run ne doit rien hériter de l'historique "camp" d'une run
@@ -1468,7 +1784,7 @@ function Controller:reset_run(mode, selected_ids)
   -- jamais pour "Tester le boss" (Controller:start_boss_test, qui ne passe
   -- pas par cette fonction).
   Sfx.play("run_start")
-  Game.reset_run(self.state, nil, selected_ids, self.run_mode)
+  Game.reset_run(self.state, nil, selected_ids, self.run_mode, difficulty)
   -- Game.start_turn (appelé par reset_run) ne peut plus infliger de dégâts à
   -- ce jour -- garde-fou conservé par précaution, voir advance_after_discard_sequenced.
   if self.state.over then self:handle_combat_victory(); return end
@@ -3318,6 +3634,11 @@ function Controller:enter_defeat_screen_now()
   self.screen = "defeat"
   self.seq:clear() -- inutile de finir de dérouler les ennemis restants une fois la défaite actée
   Sfx.play("defeat")
+  -- Conclusion d'un run "Aventure" (2026-10-06, demande explicite) : `false`
+  -- -- une défaite ne rapporte JAMAIS de récompense (voir le commentaire de
+  -- Controller:resolve_adventure_quest), seul le reroll des quêtes de classe
+  -- s'applique quand même. No-op hors du mode "Aventure".
+  self:resolve_adventure_quest(false)
 end
 
 --- Vrai tant qu'au moins une séquence dramatique de mort (voir
@@ -3389,9 +3710,42 @@ function Controller:enter_boss_victory()
   self.card_anims = {}
   self.victory_anim = { t = 0 }
   Sfx.play("victory")
+  -- Conclusion d'un run "Aventure" (2026-10-06, demande explicite) : `true` --
+  -- seule une VICTOIRE accorde une récompense (voir le commentaire de
+  -- Controller:resolve_adventure_quest). Couvre aussi "Tester un boss" (menu,
+  -- jamais de save_slot posé -- no-op, `reward` reste nil) sans distinction
+  -- particulière à faire ici, le garde interne suffit.
+  local reward = self:resolve_adventure_quest(true)
   local self_ = self
   self.seq:push(function() end, BOSS_VICTORY_HOLD_DURATION)
-  self.seq:push(function() self_:enter_menu() end)
+  -- "Après la défaite du Boss, la carte / classe débloquée est mise en
+  -- évidence" (2026-10-06, demande explicite -- nouvel écran dédié, voir
+  -- Controller:enter_quest_reward_screen) : seulement s'il y a effectivement
+  -- une récompense à montrer -- jamais pour "Jouer un run"/"Tester un boss"
+  -- (reward toujours nil), ni pour "Histoire principale" (pas de récompense
+  -- visuelle, juste la difficulté qui augmente).
+  self.seq:push(function()
+    if reward then self_:enter_quest_reward_screen(reward) else self_:enter_menu() end
+  end)
+end
+
+--- Écran "Félicitations" (2026-10-06, demande explicite) : met en évidence LA
+-- récompense tout juste gagnée (voir Controller:resolve_adventure_quest) --
+-- `reward` est soit `{kind="card", def}` (quête de classe) soit
+-- `{kind="companion", class_id}` ("Recherche de compagnon", enfin révélée --
+-- plus de silhouette, voir draw_quest_reward). Un seul bouton "Continuer",
+-- jamais de délai automatique (2026-08-30, même raisonnement que l'écran
+-- "Victoire !" à gains détachés -- une récompense se collecte/s'acquitte d'un
+-- clic explicite, jamais en clignotant puis en disparaissant toute seule).
+function Controller:enter_quest_reward_screen(reward)
+  self.screen = "quest_reward"
+  self.quest_reward = reward
+end
+
+function Controller:continue_from_quest_reward()
+  if self.screen ~= "quest_reward" then return end
+  self.quest_reward = nil
+  self:enter_menu()
 end
 
 --- "Run Solo" (2026-09-03, demande explicite -- voir Controller:handle_combat_victory_now

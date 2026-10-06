@@ -5,6 +5,7 @@ local Background = require("src.ui.background")
 local Sprites = require("src.ui.sprites")
 local Heroes = require("src.data.heroes")
 local Enemies = require("src.data.enemies")
+local Save = require("src.ui.save")
 
 return function(View, UI)
   -- Menu pause (2026-09-02, demande explicite -- ESC) : 2 options empilées,
@@ -32,7 +33,11 @@ return function(View, UI)
     -- "Run Solo" (2026-09-02, demande explicite, sous "Jouer un run") : un
     -- seul aventurier, deck personnalisé construit à la main -- voir
     -- Controller:enter_deck_builder.
+    -- "Aventure" (2026-10-05, demande explicite -- "nouveau bouton aventure
+    -- (en premier dans la liste)") : prémices du mode à sauvegardes
+    -- persistantes -- voir Controller:enter_adventure_slots/choose_adventure_slot.
     local defs = {
+      { id = "adventure", label = "Aventure" },
       { id = "run", label = "Jouer un run" },
       { id = "solo", label = "Run Solo" },
       { id = "boss", label = "Tester un boss" },
@@ -122,6 +127,61 @@ return function(View, UI)
     for _, b in ipairs(View.menu_buttons) do UI.draw_menu_style_button(b) end
   end
   View.draw_menu = draw_menu
+
+  -- Écran "Aventure" (2026-10-05, demande explicite -- "fenêtre intermédiaire
+  -- avec 3 slots") : 3 boutons empilés, même gabarit que View.menu_buttons --
+  -- voir Controller:enter_adventure_slots/choose_adventure_slot.
+  -- Croix rouge de suppression (2026-10-05, demande explicite -- "à côté de
+  -- chaque slot") : son propre petit carré, juste à droite du bouton
+  -- d'emplacement -- voir Controller:delete_adventure_slot. Uniquement
+  -- affichée/cliquable pour un emplacement qui a déjà une sauvegarde (rien à
+  -- supprimer sur "Nouvelle partie"), voir draw_adventure_slots/Input.lua.
+  View.adventure_slot_buttons = {}
+  View.adventure_slot_delete_buttons = {}
+  do
+    local w, h, gap, y0 = 300, 56, 18, 220
+    local del_size, del_gap = 36, 10
+    for i = 1, Save.SLOT_COUNT do
+      local y = y0 + (i - 1) * (h + gap)
+      View.adventure_slot_buttons[i] = { slot = i, x = UI.W / 2 - w / 2, y = y, w = w, h = h }
+      View.adventure_slot_delete_buttons[i] = {
+        slot = i, x = UI.W / 2 - w / 2 + w + del_gap, y = y + (h - del_size) / 2, w = del_size, h = del_size,
+      }
+    end
+  end
+  View.adventure_back_button = { x = UI.W / 2 - 90, y = UI.H - 90, w = 180, h = 40, label = "Retour" }
+
+  local function draw_adventure_slot_delete_button(r)
+    UI.set(Theme.panel_light)
+    love.graphics.rectangle("fill", r.x, r.y, r.w, r.h, 6, 6)
+    UI.set(Theme.hp); love.graphics.setLineWidth(2)
+    love.graphics.rectangle("line", r.x, r.y, r.w, r.h, 6, 6)
+    local pad = 10
+    love.graphics.line(r.x + pad, r.y + pad, r.x + r.w - pad, r.y + r.h - pad)
+    love.graphics.line(r.x + r.w - pad, r.y + pad, r.x + pad, r.y + r.h - pad)
+    love.graphics.setLineWidth(1)
+  end
+
+  local function draw_adventure_slots(controller)
+    Background.draw(nil, UI.W, UI.H)
+    UI.text("Choisis ta sauvegarde", 0, 70, UI.W, 24, Theme.text)
+    for i, b in ipairs(View.adventure_slot_buttons) do
+      -- "Partie X" si l'emplacement a déjà une sauvegarde, "Nouvelle partie"
+      -- sinon (2026-10-05, demande explicite -- "les cadres ayant une
+      -- sauvegarde en cours affichent simplement 'partie X'") : relu
+      -- directement depuis le disque à chaque frame (Save.slot_exists), pas
+      -- mis en cache côté controller -- voir son commentaire.
+      local exists = Save.slot_exists(b.slot)
+      local label = exists and ("Partie " .. b.slot) or "Nouvelle partie"
+      UI.draw_menu_style_button({ x = b.x, y = b.y, w = b.w, h = b.h, label = label })
+      if exists then
+        draw_adventure_slot_delete_button(View.adventure_slot_delete_buttons[i])
+      end
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+    UI.draw_menu_style_button(View.adventure_back_button)
+  end
+  View.draw_adventure_slots = draw_adventure_slots
 
   local function draw_options(controller)
     Background.draw(nil, UI.W, UI.H)

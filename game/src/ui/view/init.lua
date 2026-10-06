@@ -30,6 +30,8 @@ View.point_in = UI.point_in
 require("src.ui.view.cards") -- pas de champs View.* ; requis par combat/forge/deck_view/deck_builder/victory directement
 require("src.ui.view.tooltip")(View, UI)
 require("src.ui.view.menu")(View, UI)
+require("src.ui.view.quest_select")(View, UI)
+require("src.ui.view.quest_reward")(View, UI)
 require("src.ui.view.boss_select")(View, UI)
 require("src.ui.view.deck_view")(View, UI)
 require("src.ui.view.debug_card_picker")(View, UI)
@@ -56,12 +58,15 @@ View.W, View.H = UI.W, UI.H
 function View.draw(controller)
   if controller.screen == "menu" then View.draw_menu(controller); View.draw_pause_menu(controller); return end
   if controller.screen == "options" then View.draw_options(controller); View.draw_pause_menu(controller); return end
+  if controller.screen == "adventure_slots" then View.draw_adventure_slots(controller); View.draw_pause_menu(controller); return end
+  if controller.screen == "quest_select" then View.draw_quest_select(controller); View.draw_pause_menu(controller); return end
   if controller.screen == "boss_select" then View.draw_boss_select(controller); View.draw_tooltip(controller); View.draw_pause_menu(controller); return end
   if controller.screen == "deck_builder" then
     View._deck_builder_fx.draw(controller); View.draw_card_flights(controller); View.draw_tooltip(controller); View.draw_pause_menu(controller)
     return
   end
   if controller.screen == "bossVictory" then View.draw_boss_victory(controller); View.draw_pause_menu(controller); return end
+  if controller.screen == "quest_reward" then View.draw_quest_reward(controller); View.draw_pause_menu(controller); return end
   if controller.screen == "biome_intro" then View.draw_biome_intro(controller); View.draw_pause_menu(controller); return end
   if controller.screen == "team_select" then View.draw_team_select(controller); View.draw_deck_view(controller); View.draw_pause_menu(controller); return end
 
