@@ -325,13 +325,31 @@ return function(View, UI)
       end
     end
 
+    -- "Aucun artefact" (2026-10-30, demande explicite -- onglet "Artefact"
+    -- vide, même animation que les cartes) : `a.def.message` distingue ce
+    -- pseudo-"def" (voir team_select_tab_rows, controller.lua) d'une vraie
+    -- carte -- un cadre sobre avec le texte centré plutôt qu'une fausse face
+    -- de carte (pas de coût/description à y faire tenir).
+    local function draw_card_anim_face(def, x, y, alpha)
+      if def.message then
+        UI.panel(x, y, UI.CARD_W, UI.CARD_H, Theme.panel, alpha)
+        UI.set(Theme.muted, alpha); love.graphics.setLineWidth(2)
+        love.graphics.rectangle("line", x, y, UI.CARD_W, UI.CARD_H, 10, 10)
+        love.graphics.setLineWidth(1)
+        UI.text(def.message, x + 8, y + UI.CARD_H / 2 - 10, UI.CARD_W - 16, 16, Theme.muted, "center")
+        love.graphics.setColor(1, 1, 1, 1)
+      else
+        CardUI.draw_faded_card(def, x, y, alpha)
+      end
+    end
+
     -- Cartes en vol : "in" se fige à sa position cible une fois l'animation
     -- finie. `a.delay` (2026-08-30) : reste VISIBLE, immobile à son point de
     -- départ, tant que son tour n'est pas venu.
     for _, a in ipairs(ts.card_anims) do
       local delay = a.delay or 0
       if a.elapsed < delay then
-        CardUI.draw_faded_card(a.def, a.from.x, a.from.y, 1)
+        draw_card_anim_face(a.def, a.from.x, a.from.y, 1)
       else
         local elapsed_since_start = a.elapsed - delay
         local p = math.min(1, elapsed_since_start / a.duration)
@@ -339,7 +357,7 @@ return function(View, UI)
         local x = a.from.x + (a.to.x - a.from.x) * ease
         local y = a.from.y + (a.to.y - a.from.y) * ease
         local alpha = a.mode == "in" and math.min(1, p * 1.6) or (1 - p)
-        if alpha > 0 then CardUI.draw_faded_card(a.def, x, y, alpha) end
+        if alpha > 0 then draw_card_anim_face(a.def, x, y, alpha) end
       end
     end
 

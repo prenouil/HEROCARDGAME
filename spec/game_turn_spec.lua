@@ -262,6 +262,14 @@ describe("Game.on_card_played", function()
     assert.are.equal(0, assassin.camoufle)
   end)
 
+  -- 2026-10-30, règle d'origine du 2026-08-28 CONFIRMÉE DÉFINITIVE après un
+  -- aller-retour dans la même session (un instant retirée -- "carte furtif ou
+  -- pas" -- puis rétablie le même jour, voir le commentaire de
+  -- Game.on_card_played pour l'historique complet) : citée telle quelle par
+  -- le porteur de projet -- "Ne perds pas la discrétion ou le camouflage en
+  -- étant joué. Donne 2 Discrétion si défaussée sans avoir été jouée." --
+  -- seule la LISTE des cartes "Furtif" a changé (plus systématique sur les 6,
+  -- voir cards.lua), jamais cette règle elle-même.
   it("une carte 'Furtif' NE fait PAS perdre Discrétion/Camouflé à l'Assassin", function()
     local assassin = { discretion = 8, camoufle = 1, hp = 10 }
     local state = make_state({ assassin }, {})

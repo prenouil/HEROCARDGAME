@@ -1101,8 +1101,14 @@ local function team_select_tab_rows(class_id, tab, save_data)
     return rows
   elseif tab == "artefact" then
     -- Mécanique pas encore construite (2026-10-03, "ce sera le prochain
-    -- chantier") : toujours vide pour l'instant, par construction.
-    return {}
+    -- chantier") : toujours vide pour l'instant, par construction. "Aucun
+    -- artefact" (2026-10-30, demande explicite -- "avec la même animation que
+    -- les cartes") : 1 ligne, 1 pseudo-"def" portant seulement `message`
+    -- (jamais une vraie carte de Cards.list) -- traverse tout le pipeline de
+    -- vol existant (spawn_card_rows/View.team_select_card_row_rects) sans
+    -- modification, voir draw_card_anim_face (view/team_select.lua) pour son
+    -- rendu différent d'une vraie carte.
+    return { { { message = "Aucun artefact" } } }
   else
     local rows = {}
     local depart = depart_cards_for_class(class_id)

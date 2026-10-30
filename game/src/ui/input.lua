@@ -983,7 +983,25 @@ end
 
 function Input.mousemoved(controller, x, y)
   if controller.pause_menu_open then controller:set_hover(nil, nil); return end
-  if controller.deck_view_open then controller:set_hover(nil, nil); return end
+  -- Fenêtre "voir le deck" (2026-10-30, demande explicite -- "quand je
+  -- regarde la défausse ou la pioche pendant un combat, les cartes ne
+  -- fournissent pas de tooltip") : AVANT, remettait toujours le survol à nil
+  -- sans jamais le recalculer -- voir aussi le réordonnancement de
+  -- View.draw_tooltip/View.draw_deck_view dans view/combat.lua, sans lequel
+  -- cette infobulle resterait dessinée SOUS le panneau opaque malgré ce
+  -- survol correctement détecté.
+  if controller.deck_view_open then
+    local layout = View.deck_view_layout(controller)
+    local scroll = math.max(0, math.min(layout.max_scroll, controller.deck_view_scroll or 0))
+    for i, entry in ipairs(layout.cards) do
+      if View.point_in(View.deck_view_rect_at(controller, i, scroll), x, y) then
+        controller:set_hover("card", entry.def)
+        return
+      end
+    end
+    controller:set_hover(nil, nil)
+    return
+  end
   if controller.debug_card_picker then controller:set_hover(nil, nil); return end
   if controller.power_well then controller:set_hover(nil, nil); return end
   if controller.screen == "menu" or controller.screen == "options" or controller.screen == "bossVictory"
@@ -1039,7 +1057,10 @@ function Input.mousemoved(controller, x, y)
       -- rect de repos tant qu'elles n'ont pas fini d'arriver, voir
       -- Controller:update).
       for _, a in ipairs(ts.card_anims) do
-        if a.mode == "in" and a.elapsed >= a.duration and View.point_in(a.to, x, y) then
+        -- `not a.def.message` (2026-10-30) : le pseudo-"def" "Aucun artefact"
+        -- (voir team_select_tab_rows, controller.lua) n'est pas une vraie
+        -- carte -- aucune infobulle à lui montrer.
+        if a.mode == "in" and a.elapsed >= a.duration and not a.def.message and View.point_in(a.to, x, y) then
           controller:set_hover("card", a.def)
           return
         end

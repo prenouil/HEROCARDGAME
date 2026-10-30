@@ -1785,12 +1785,20 @@ return function(View, UI)
     View.draw_gold_purse_overlay(controller)
     draw_particles(controller)
     draw_floaters(controller)
+    View.draw_deck_view(controller)
+    View.draw_debug_card_picker(controller)
+    -- Après la fenêtre "voir le deck"/le sélecteur de debug (2026-10-30,
+    -- demande explicite -- "quand je regarde la défausse ou la pioche
+    -- pendant un combat, les cartes ne fournissent pas de tooltip") : ces 2
+    -- panneaux sont OPAQUES (voir UI.panel) -- une infobulle dessinée AVANT
+    -- eux, comme c'était le cas ici, se retrouvait masquée dessous dès que
+    -- l'un des deux était ouvert, même une fois Input.mousemoved corrigé pour
+    -- VRAIMENT détecter le survol d'une carte dans cette grille (voir son
+    -- commentaire). Aucun effet quand aucun des deux n'est ouvert -- ce
+    -- changement d'ordre ne touche que ce cas précis.
     if controller.screen == "playing" or controller.screen == "victory" then
       View.draw_tooltip(controller)
     end
-
-    View.draw_deck_view(controller)
-    View.draw_debug_card_picker(controller)
     View.draw_pause_menu(controller)
     -- "GO" tout en dernier (2026-09-30) : par-dessus absolument tout, même le
     -- menu pause/la fenêtre "voir le deck" -- c'est un signal ponctuel qui

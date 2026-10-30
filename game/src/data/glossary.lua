@@ -87,15 +87,20 @@ Glossary.terms = {
   { key = "discretion", icon = nil, has_icon = false, related = "", explain = "Ressource propre à l'Assassin (0 à 10) : +1 quand un autre héros joue une carte, +5 s'il termine le tour sans en avoir joué. À 10, devient Camouflé. Repart à 0 dès que l'Assassin joue une carte non-Furtif, ou dès qu'il reçoit des dégâts." },
   -- "Furtif" (2026-08-28, ajouté après coup -- l'utilisateur a d'abord donné
   -- les cartes/la description de classe, puis précisé ce mot-clé séparément) :
-  -- porté par toutes les cartes de l'Assassin (voir cards.lua) -- Icone/Statut
-  -- "no" dans le tableur source : jamais de pastille dédiée sur le cadre du
-  -- héros (contrairement à Discrétion, affichée sous le portrait), juste ce
-  -- texte entre guillemets sur la carte elle-même. Effet réel implémenté dans
-  -- Game.on_card_played (pas de perte de Discrétion/Camouflé en la jouant) et
-  -- Game.grant_furtif_discard_discretion (+2 Discrétion si défaussée non
-  -- jouée) -- cette entrée ne sert qu'à l'explication affichée, jamais une
-  -- deuxième source de vérité sur l'effet.
-  { key = "furtif", icon = nil, has_icon = false, related = "", explain = "Donne 2 Discrétion si défaussée sans avoir été jouée." },
+  -- plus systématique sur toutes les cartes de l'Assassin depuis le
+  -- 2026-10-30 (liste définitive donnée explicitement par le porteur de
+  -- projet -- Se cacher/Préparation/Assassinat/En traître/Trahison
+  -- Planifiée, voir cards.lua) -- Icone/Statut "no" dans le tableur source :
+  -- jamais de pastille dédiée sur le cadre du héros (contrairement à
+  -- Discrétion, affichée sous le portrait), juste ce texte entre guillemets
+  -- sur la carte elle-même. Règle citée telle quelle par le porteur de projet
+  -- le 2026-10-30 (confirmée définitive après un aller-retour la même
+  -- session) : "Ne perds pas la discrétion ou le camouflage en étant joué.
+  -- Donne 2 Discrétion si défaussée sans avoir été jouée." -- 1ʳᵉ moitié
+  -- implémentée dans Game.on_card_played (exemption de la remise à zéro),
+  -- 2ᵉ moitié dans Game.grant_furtif_discard_discretion -- cette entrée ne
+  -- sert qu'à l'explication affichée, jamais une 2ᵉ source de vérité.
+  { key = "furtif", icon = nil, has_icon = false, related = "", explain = "Ne perd pas Discrétion/Camouflé en étant jouée. Donne 2 Discrétion si défaussée sans avoir été jouée." },
   -- Provocation (2026-08-28, statut propre au Paladin, clarifié après coup) :
   -- vrai statut de combat contrairement à Discrétion -- badge sur le cadre du
   -- héros comme Puissance/Esquive (voir STATUS_TOOLTIP_FIELDS dans view.lua),

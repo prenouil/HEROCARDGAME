@@ -1564,13 +1564,20 @@ end
 -- un AUTRE héros (jamais lui-même, jamais les ennemis -- confirmé
 -- explicitement) ; sa propre Discrétion repart à 0 dès qu'IL joue une carte
 -- (cohérent avec la fin de Camouflé ci-dessus : jouer une carte = se
--- dévoiler) -- SAUF carte "Furtif" (2026-08-28, clarification explicite du
--- mot-clé : "Ne fait pas perdre de Discrétion") : ce cas ne touche ni
--- discretion ni camoufle, l'action elle-même étant trop discrète pour se
--- trahir. Marque aussi `played_card_this_turn` inconditionnellement (même une
--- carte Furtif compte comme "avoir agi" pour Game.tick_discretion_end_of_turn
--- -- seule la perte de Discrétion/Camouflé est exemptée, pas le fait d'avoir
--- joué).
+-- dévoiler) -- SAUF carte "Furtif" (règle RÉTABLIE le 2026-10-30, citée
+-- explicitement par le porteur de projet : "Ne perds pas la discrétion ou le
+-- camouflage en étant joué. Donne 2 Discrétion si défaussée sans avoir été
+-- jouée.") : ce cas ne touche ni discretion ni camoufle, l'action elle-même
+-- étant trop discrète pour se trahir -- EXACTEMENT la règle du 2026-08-28,
+-- un détour entre-temps (2026-10-30 même jour : "carte furtif ou pas" --
+-- retiré PUIS remis en place dans la même session, voir l'historique du
+-- fichier) qui avait rendu la remise à zéro inconditionnelle, le temps de
+-- retirer "Furtif" des cartes qui n'en avaient pas vraiment besoin (Plan
+-- d'attaque/Repli stratégique -- voir cards.lua) : avec cette liste
+-- désormais plus courte, l'exemption redevient cohérente. Marque aussi
+-- `played_card_this_turn` inconditionnellement (même une carte Furtif compte
+-- comme "avoir agi" pour Game.tick_discretion_end_of_turn -- seule la perte
+-- de Discrétion/Camouflé est exemptée, pas le fait d'avoir joué).
 function Game.on_card_played(state, hero, def)
   hero.played_card_this_turn = true
   if (hero.gratuite or 0) > 0 then hero.gratuite = hero.gratuite - 1 end

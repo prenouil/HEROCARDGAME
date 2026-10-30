@@ -117,6 +117,23 @@ return function(View, UI)
     }
   end
 
+  --- Rect ÉCRAN de la carte à l'index `index` de la grille courante (2026-10-30,
+  -- demande explicite -- "les cartes ne fournissent pas de tooltip" en
+  -- regardant la pioche/défausse) : même calcul que le rendu dans
+  -- draw_deck_view -- seul point de vérité, lu par Input.mousemoved pour le
+  -- survol (voir son commentaire, même idiome que View.power_well_rect_at/
+  -- View.debug_card_picker_rect_at).
+  function View.deck_view_rect_at(controller, index, scroll)
+    local layout = View.deck_view_layout(controller)
+    local col = (index - 1) % layout.cols
+    local row = math.floor((index - 1) / layout.cols)
+    return {
+      x = layout.ox + col * layout.cell_w,
+      y = layout.area_y - scroll + row * layout.cell_h,
+      w = layout.card_w, h = layout.card_h,
+    }
+  end
+
   --- Fenêtre "voir le deck" (2026-08-30, demande explicite -- accessible depuis
   -- la pioche, la défausse, le deck de l'écran de choix d'équipe, et un bouton
   -- dédié) : panneau fixe (View.deck_view_panel_rect) par-dessus l'écran

@@ -61,7 +61,14 @@ describe("Cartes à logique conditionnelle", function()
   end)
 
   describe("Assassinat (Assassin) : branche dégâts VS branche consolation", function()
-    it("Camouflé : dégâts purs, rien d'autre", function()
+    -- 2026-10-30, retexturée (demande explicite -- "perd camouflage" ajouté
+    -- au texte) : la carte met désormais EXPLICITEMENT fin à Camouflé dans
+    -- son propre effet (ctx.hero.camoufle = 0, voir cards.lua) -- nécessaire
+    -- car "Assassinat" reste "Furtif" (liste définitive du porteur de
+    -- projet), donc EXEMPTÉE par défaut de la remise à zéro générique de
+    -- Game.on_card_played -- sans ce code, Camouflé survivrait à l'attaque,
+    -- contredisant le texte de la carte.
+    it("Camouflé : dégâts purs, et perd Camouflé (explicite sur la carte)", function()
       assassin.camoufle = 1
       assassin.discretion, assassin.puissance = 0, 0
       local enemy = state.enemies[1]
@@ -70,9 +77,16 @@ describe("Cartes à logique conditionnelle", function()
       assert.are.equal(hp_before - 12, enemy.hp)
       assert.are.equal(0, assassin.discretion)
       assert.are.equal(0, assassin.puissance)
+      assert.are.equal(0, assassin.camoufle)
     end)
 
-    it("pas Camouflé : lot de consolation (Discrétion + Puissance), AUCUN dégât, retourne sur le dessus du deck", function()
+    -- 2026-10-30, retexturée (demande explicite) : la Puissance 2 a disparu
+    -- du lot de consolation (simple rééquilibrage, sans rapport avec
+    -- Camouflé/Discrétion). La Discrétion 5 qu'il accorde encore PERSISTE
+    -- normalement -- "Assassinat" reste "Furtif" (règle d'origine rétablie le
+    -- même jour, voir le commentaire de Game.on_card_played), donc exemptée
+    -- de la remise à zéro générique.
+    it("pas Camouflé : lot de consolation (Discrétion, qui PERSISTE -- carte Furtif), AUCUN dégât, retourne sur le dessus du deck", function()
       assassin.camoufle = 0
       assassin.discretion, assassin.puissance = 0, 0
       local enemy = state.enemies[1]
@@ -82,8 +96,8 @@ describe("Cartes à logique conditionnelle", function()
       local deck_before, discard_before = #state.deck, #state.discard
       play("assassinat", "enemy", enemy.id)
       assert.are.equal(hp_before, enemy.hp) -- aucun dégât
-      assert.are.equal(5, assassin.discretion)
-      assert.are.equal(2, assassin.puissance)
+      assert.are.equal(5, assassin.discretion) -- accordée ET conservée (carte Furtif)
+      assert.are.equal(0, assassin.puissance) -- plus accordée du tout (carte retexturée)
       assert.are.equal(deck_before + 1, #state.deck) -- revenue sur le dessus du deck
       assert.are.equal(discard_before, #state.discard) -- jamais en défausse
     end)
